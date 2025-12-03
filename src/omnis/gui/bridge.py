@@ -6,9 +6,10 @@ Exposes engine functionality to QML via Qt properties and signals.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QObject, Property, Signal, Slot
+from PySide6.QtCore import QObject, Property, Signal, Slot, QUrl
 
 if TYPE_CHECKING:
     from omnis.core.engine import Engine
@@ -117,6 +118,32 @@ class BrandingProxy(QObject):
         """Path to logo asset."""
         return self._branding.assets.logo
 
+    # Asset URLs (resolved to absolute file:// URLs)
+    @Property(str, constant=True)
+    def logoUrl(self) -> str:
+        """URL to main logo."""
+        return self._resolve_asset(self._branding.assets.logo)
+
+    @Property(str, constant=True)
+    def logoLightUrl(self) -> str:
+        """URL to light variant logo."""
+        return self._resolve_asset(self._branding.assets.logo_light)
+
+    @Property(str, constant=True)
+    def logoSmallUrl(self) -> str:
+        """URL to small logo (64px)."""
+        return self._resolve_asset(self._branding.assets.logo_small)
+
+    @Property(str, constant=True)
+    def backgroundUrl(self) -> str:
+        """URL to background wallpaper."""
+        return self._resolve_asset(self._branding.assets.background)
+
+    @Property(str, constant=True)
+    def iconUrl(self) -> str:
+        """URL to icon."""
+        return self._resolve_asset(self._branding.assets.icon)
+
 
 class EngineBridge(QObject):
     """
@@ -140,6 +167,7 @@ class EngineBridge(QObject):
     def __init__(
         self,
         engine: Engine,
+        theme_base: Path,
         debug: bool = False,
         dry_run: bool = False,
         parent: QObject | None = None,
