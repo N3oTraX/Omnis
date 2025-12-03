@@ -241,7 +241,7 @@ class Engine:
                 self.name = name
                 self.description = f"Placeholder for {name}"
 
-            def run(self, context: JobContext) -> JobResult:
+            def run(self, _context: JobContext) -> JobResult:
                 return JobResult.ok(f"Job {self.name} completed (placeholder)")
 
             def estimate_duration(self) -> int:

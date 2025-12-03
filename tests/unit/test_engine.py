@@ -4,7 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from omnis.core.engine import Engine, OmnisConfig, ConfigurationError
+try:
+    from omnis.core.engine import ConfigurationError, Engine, OmnisConfig
+
+    HAS_OMNIS = True
+except ImportError:
+    HAS_OMNIS = False
+
+# Skip entire module if omnis is not available
+pytestmark = pytest.mark.skipif(not HAS_OMNIS, reason="omnis package not available")
 
 
 class TestOmnisConfig:

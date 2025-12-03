@@ -19,7 +19,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
 from omnis import __version__
-from omnis.core.engine import Engine, ConfigurationError
+from omnis.core.engine import ConfigurationError, Engine
 from omnis.gui.bridge import EngineBridge
 
 if TYPE_CHECKING:
@@ -59,7 +59,65 @@ def parse_args() -> argparse.Namespace:
         help="Simulate installation without making changes",
     )
 
+    parser.add_argument(
+        "--platform-info",
+        action="store_true",
+        help="Display Qt platform information and exit",
+    )
+
     return parser.parse_args()
+
+
+def print_platform_info() -> None:
+    """Display Qt platform and environment information."""
+    import os
+
+    from PySide6.QtCore import QLibraryInfo, qVersion
+    from PySide6.QtGui import QGuiApplication
+
+    # Initialize minimal app to get platform info
+    app = QGuiApplication([])
+
+    print("=" * 60)
+    print("Omnis Installer - Platform Information")
+    print("=" * 60)
+
+    # Qt version
+    print("\n[Qt]")
+    print(f"  Version: {qVersion()}")
+    print(f"  Plugins path: {QLibraryInfo.path(QLibraryInfo.PluginsPath)}")  # type: ignore[attr-defined]
+
+    # Platform
+    print("\n[Platform]")
+    print(f"  Plugin: {app.platformName()}")
+    print(f"  DISPLAY: {os.environ.get('DISPLAY', 'not set')}")
+    print(f"  WAYLAND_DISPLAY: {os.environ.get('WAYLAND_DISPLAY', 'not set')}")
+    print(f"  XDG_SESSION_TYPE: {os.environ.get('XDG_SESSION_TYPE', 'not set')}")
+    print(f"  XDG_CURRENT_DESKTOP: {os.environ.get('XDG_CURRENT_DESKTOP', 'not set')}")
+
+    # Theme
+    print("\n[Theme]")
+    print(f"  QT_QPA_PLATFORMTHEME: {os.environ.get('QT_QPA_PLATFORMTHEME', 'not set')}")
+    print(f"  QT_STYLE_OVERRIDE: {os.environ.get('QT_STYLE_OVERRIDE', 'not set')}")
+
+    # Screens
+    print("\n[Screens]")
+    for i, screen in enumerate(app.screens()):
+        print(f"  Screen {i}: {screen.name()}")
+        print(f"    Size: {screen.size().width()}x{screen.size().height()}")
+        print(f"    DPI: {screen.logicalDotsPerInch():.0f}")
+        print(f"    Scale: {screen.devicePixelRatio()}")
+
+    # Available platform plugins
+    plugins_path = Path(QLibraryInfo.path(QLibraryInfo.PluginsPath)) / "platforms"  # type: ignore[attr-defined]
+    if plugins_path.exists():
+        print("\n[Available Platform Plugins]")
+        for plugin in sorted(plugins_path.glob("libq*.so")):
+            name = plugin.stem.replace("libq", "")
+            print(f"  - {name}")
+
+    print("\n" + "=" * 60)
+    app.quit()
 
 
 def find_config_file(explicit_path: Path | None = None) -> Path:
@@ -134,6 +192,11 @@ def main() -> int:
     """
     args = parse_args()
 
+    # Handle --platform-info
+    if args.platform_info:
+        print_platform_info()
+        return 0
+
     # Find and load configuration
     try:
         config_path = find_config_file(args.config)
@@ -148,10 +211,7 @@ def main() -> int:
 
     # Resolve theme path (relative to config file directory)
     theme_path = engine.get_theme_path()
-    if theme_path:
-        theme_base = (config_path.parent / theme_path).resolve()
-    else:
-        theme_base = config_path.parent
+    theme_base = (config_path.parent / theme_path).resolve() if theme_path else config_path.parent
 
     if args.debug:
         print(f"Theme base: {theme_base}")

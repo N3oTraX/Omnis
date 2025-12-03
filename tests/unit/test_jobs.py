@@ -2,7 +2,15 @@
 
 import pytest
 
-from omnis.jobs.base import BaseJob, JobContext, JobResult, JobStatus
+try:
+    from omnis.jobs.base import BaseJob, JobContext, JobResult, JobStatus
+
+    HAS_OMNIS = True
+except ImportError:
+    HAS_OMNIS = False
+
+# Skip entire module if omnis is not available
+pytestmark = pytest.mark.skipif(not HAS_OMNIS, reason="omnis package not available")
 
 
 class TestJobResult:
