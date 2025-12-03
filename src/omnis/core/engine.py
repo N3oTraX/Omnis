@@ -33,8 +33,12 @@ class BrandingAssets(BaseModel):
     logo: str = ""
     logo_light: str = ""
     logo_small: str = ""
+    logo_256: str = ""
     background: str = ""
+    background_alt: str = ""
     icon: str = ""
+    bootloader: str = ""
+    efi_icon: str = ""
 
 
 class BrandingFonts(BaseModel):
@@ -88,6 +92,7 @@ class OmnisConfig(BaseModel):
     """Root configuration model."""
 
     version: str = "1.0"
+    theme: str = ""  # Path to theme directory containing assets
     branding: BrandingConfig = Field(default_factory=BrandingConfig)
     jobs: list[JobDefinition | str] = Field(default_factory=list)
     advanced: AdvancedConfig = Field(default_factory=AdvancedConfig)
