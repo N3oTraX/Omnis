@@ -13,23 +13,41 @@ version: "1.0"
 theme: "../themes/glfos"
 
 # -----------------------------------------------------------------------------
-# Branding - Identité visuelle officielle GLF OS
+# Internationalization (i18n)
+# -----------------------------------------------------------------------------
+i18n:
+  # Default locale at startup (must match a file in config/i18n/)
+  default_locale: "en_US"
+  # Available locales for user selection
+  available_locales:
+    - "en_US"
+    - "fr_FR"
+  # Fallback locale if selected locale is unavailable
+  fallback_locale: "en_US"
+
+# -----------------------------------------------------------------------------
+# Branding - Identite visuelle officielle GLF OS
 # -----------------------------------------------------------------------------
 branding:
-  # Identité
+  # Identite
   name: "GLF OS"
   version: "Omnislash"
   edition: "25.04"
+  tagline: "Linux Gaming made easy!"
 
   # Couleurs officielles (source: gaminglinux.fr)
   colors:
     primary: "#5597e6"      # Bleu GLF (titres, accents)
     secondary: "#4a8bd4"    # Bleu secondaire
-    accent: "#5597e6"       # Accent (même que primary)
+    accent: "#5597e6"       # Accent (meme que primary)
     background: "#1a1a1a"   # Fond sombre
-    surface: "#32373c"      # Surface éléments/boutons
+    surface: "#32373c"      # Surface elements/boutons
     text: "#fffded"         # Texte principal (cream)
     text_muted: "#9CA3AF"   # Texte secondaire
+    # Status colors
+    success: "#10B981"
+    warning: "#F59E0B"
+    error: "#EF4444"
 
   # Assets (chemins relatifs au theme directory)
   assets:
@@ -43,14 +61,6 @@ branding:
     bootloader: "boot/glf-bootloader.png"
     efi_icon: "boot/glf-efi.png"
 
-  # Textes personnalisés
-  strings:
-    welcome_title: "Bienvenue sur GLF OS"
-    welcome_subtitle: "Linux Gaming made easy!"
-    install_button: "Installer GLF OS"
-    finished_title: "Installation terminée !"
-    finished_message: "GLF OS est prêt. Redémarrez pour découvrir le gaming sur Linux."
-
   # Typographie
   fonts:
     primary: "Poppins"
@@ -61,16 +71,102 @@ branding:
 # Jobs - Workflow d'installation NixOS
 # -----------------------------------------------------------------------------
 jobs:
-  # Écran d'accueil et vérifications
+  # Ecran d'accueil et verifications
   - name: welcome
     config:
       show_release_notes: true
-      check_requirements:
-        min_ram_gb: 4
-        min_disk_gb: 40
-        require_efi: true  # NixOS recommande EFI
 
-  # Sélection de la langue et région
+      # Wallpapers for welcome screen (relative to theme directory)
+      wallpapers:
+        dark: "wallpapers/welcome-dark.jpg"
+        light: "wallpapers/welcome-light.jpg"
+        fallback: "wallpapers/dark.jpg"
+
+      # Icons for requirement status (relative to theme directory)
+      # These icons should be downloaded and placed in the theme
+      icons:
+        # Memory icons
+        ram_pass: "icons/requirements/mem-pass.svg"
+        ram_warn: "icons/requirements/mem-warn.svg"
+        ram_fail: "icons/requirements/mem-fail.svg"
+        # Disk icons
+        disk_pass: "icons/requirements/hd-pass.svg"
+        disk_warn: "icons/requirements/hd-warn.svg"
+        disk_fail: "icons/requirements/hd-fail.svg"
+        # GPU icons
+        gpu_pass: "icons/requirements/gpu-pass.svg"
+        gpu_warn: "icons/requirements/gpu-warn.svg"
+        gpu_fail: "icons/requirements/gpu-fail.svg"
+
+      # ---------------------------------------------------------------------
+      # System Requirements Configuration
+      # ---------------------------------------------------------------------
+      requirements:
+        # Memory (RAM)
+        # Standard edition: 8 GB minimum, 16 GB recommended
+        # Studio edition: 16 GB minimum, 32 GB recommended
+        min_ram_gb: 8
+        recommended_ram_gb: 16
+        warn_ram_gb: 16  # Below this shows warning, above shows pass
+
+        # Disk space
+        min_disk_gb: 60
+        recommended_disk_gb: 120
+        require_ssd: false  # Recommended but not required
+
+        # Boot requirements
+        require_efi: true
+        require_secure_boot_disabled: false
+
+        # Connectivity
+        require_internet: false
+        recommend_internet: true
+
+        # Power
+        require_ac_power: false
+        recommend_ac_power: true
+        min_battery_percent: 20
+
+        # CPU architecture
+        require_x86_64: true
+
+        # ---------------------------------------------------------------------
+        # GPU Compatibility Configuration
+        # ---------------------------------------------------------------------
+        # Defines which GPU vendors are compatible and minimum models
+        gpu:
+          # Supported GPU vendors (can be any combination)
+          # Values: AMD, INTEL, NVIDIA
+          availability:
+            - AMD
+            - INTEL
+            - NVIDIA
+
+          # Require dedicated GPU (dGPU) for installation
+          # If false, integrated graphics (iGPU) will show warning but allow install
+          require_dedicated: false
+
+          # Minimum GPU overrides by vendor
+          # These define the minimum acceptable GPU model for each vendor
+          # Models below these will fail the GPU check
+          # See docs/gpu-compatibility.md for full model reference
+          overrides:
+            # NVIDIA: GeForce GTX 1650 and above
+            # Architecture: Turing (TU117)
+            # Minimum compute capability: 7.5
+            nvidia: "GTX 1650"
+
+            # AMD: RX 570 and above
+            # Architecture: Polaris (GCN 4)
+            # Leave empty for no minimum requirement
+            amd: ""
+
+            # Intel: UHD 630 and above (for iGPU)
+            # Architecture: Coffee Lake
+            # Leave empty for no minimum requirement
+            intel: ""
+
+  # Selection de la langue et region
   - name: locale
     config:
       default_language: "fr_FR"
@@ -86,7 +182,38 @@ jobs:
       efi_partition_size_mb: 512
       swap_strategy: auto
 
-  # Installation du système (NixOS)
+  # Selection de la saveur (DE/Edition)
+  - name: packages
+    config:
+      # Saveurs disponibles pour GLF OS
+      flavors:
+        - id: gnome
+          name: "GLF OS GNOME"
+          description: "Edition GNOME - Interface moderne et epuree"
+          icon: "flavors/gnome.png"
+          default: true
+        - id: kde
+          name: "GLF OS KDE"
+          description: "Edition KDE Plasma - Personnalisation maximale"
+          icon: "flavors/kde.png"
+        - id: minimal
+          name: "GLF OS Minimal"
+          description: "Base minimale sans environnement de bureau"
+          icon: "flavors/minimal.png"
+      # Groupes de paquets optionnels
+      optional_groups:
+        - id: gaming
+          name: "Gaming"
+          description: "Steam, Lutris, Wine, Proton-GE, MangoHud"
+          default: true
+        - id: streaming
+          name: "Streaming"
+          description: "OBS Studio, plugins streaming"
+        - id: emulation
+          name: "Emulation"
+          description: "RetroArch, Dolphin, PCSX2, RPCS3"
+
+  # Installation du systeme (NixOS)
   - name: install
     config:
       source: "/iso/nixos"
@@ -110,7 +237,7 @@ jobs:
     config:
       type: systemd-boot
       install_path: auto
-      enable_os_prober: false  # NixOS gère son propre boot
+      enable_os_prober: false  # NixOS gere son propre boot
 
   # Finalization
   - name: finished
@@ -119,7 +246,7 @@ jobs:
       auto_reboot_delay: 10
 
 # -----------------------------------------------------------------------------
-# Options avancées
+# Options avancees
 # -----------------------------------------------------------------------------
 advanced:
   log_level: info

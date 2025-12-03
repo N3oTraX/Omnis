@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- Hard drive icon with pass status -->
+  <rect x="6" y="14" width="36" height="20" rx="3" fill="#1a1a1a" stroke="#10B981" stroke-width="2"/>
+  <!-- Drive platter -->
+  <circle cx="20" cy="24" r="8" fill="none" stroke="#10B981" stroke-width="1.5" opacity="0.5"/>
+  <circle cx="20" cy="24" r="4" fill="none" stroke="#10B981" stroke-width="1.5" opacity="0.5"/>
+  <circle cx="20" cy="24" r="1.5" fill="#10B981"/>
+  <!-- Activity LED -->
+  <circle cx="36" cy="24" r="3" fill="#10B981"/>
+  <!-- Check mark badge -->
+  <circle cx="38" cy="10" r="8" fill="#10B981"/>
+  <path d="M34 10 L37 13 L42 7" stroke="white" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

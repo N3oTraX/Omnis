@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- GPU card icon with fail status -->
+  <rect x="4" y="16" width="40" height="20" rx="2" fill="#1a1a1a" stroke="#EF4444" stroke-width="2"/>
+  <!-- Fan vents -->
+  <circle cx="16" cy="26" r="6" fill="none" stroke="#EF4444" stroke-width="1.5" opacity="0.5"/>
+  <circle cx="32" cy="26" r="6" fill="none" stroke="#EF4444" stroke-width="1.5" opacity="0.5"/>
+  <!-- Fan centers -->
+  <circle cx="16" cy="26" r="2" fill="#EF4444" opacity="0.5"/>
+  <circle cx="32" cy="26" r="2" fill="#EF4444" opacity="0.5"/>
+  <!-- PCIe connector -->
+  <rect x="8" y="36" width="32" height="4" rx="1" fill="#EF4444"/>
+  <!-- Power connector -->
+  <rect x="36" y="12" width="6" height="4" fill="#EF4444" opacity="0.5"/>
+  <!-- X mark badge -->
+  <circle cx="38" cy="8" r="7" fill="#EF4444"/>
+  <path d="M34.5 4.5 L41.5 11.5 M41.5 4.5 L34.5 11.5" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/>
+</svg>

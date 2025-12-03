@@ -14,5 +14,6 @@ jobs:
   - welcome
   - locale
   - partition
+  - packages  # Package/flavor selection
   - install
   - finished
