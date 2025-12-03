@@ -85,41 +85,83 @@ class BaseJob(ABC):
 
 ---
 
-## Configuration YAML
+## Configuration et Thèmes
 
-Chaque distribution fournit son propre fichier `omnis.yaml` :
+Chaque distribution fournit son propre fichier de configuration + thème :
 
 ```
-config/examples/
-├── glfos.yaml       # GLF OS
-├── archlinux.yaml   # Arch Linux
-└── minimal.yaml     # Template minimal
+config/
+├── examples/           # Configurations par distribution
+│   ├── glfos.yaml      # GLF OS
+│   ├── archlinux.yaml  # Arch Linux
+│   └── minimal.yaml    # Template minimal
+└── themes/             # Assets visuels
+    └── glfos/
+        ├── theme.yaml
+        ├── logos/
+        ├── wallpapers/
+        └── boot/
 ```
 
-Structure d'une configuration :
+### Structure d'une Configuration
 
 ```yaml
+version: "1.0"
+
+# Lien vers le dossier du thème (relatif au fichier config)
+theme: "config/themes/glfos"
+
 branding:
-  name: "Distribution Name"
+  name: "GLF OS"
+  version: "2025.1"
+
+  # Couleurs de l'interface
   colors:
-    primary: "#7C3AED"
-    background: "#1F2937"
+    primary: "#5597e6"
+    background: "#1a1a1a"
+    text: "#fffded"
+
+  # Assets (chemins relatifs au dossier theme)
   assets:
-    logo: "assets/logo.svg"
+    logo: "logos/logo.png"
+    logo_small: "logos/logo-64.png"
+    background: "wallpapers/dark.jpg"
+
+  # Textes personnalisables
   strings:
-    welcome_title: "Bienvenue"
+    welcome_title: "Bienvenue sur GLF OS"
+    install_button: "Installer"
 
 jobs:
   - name: welcome
   - name: partition
     config:
       default_filesystem: ext4
-      allow_manual_partitioning: true
   - name: bootloader
     config:
       type: grub
   - name: finished
 ```
+
+### Système de Thèmes
+
+Le système de thèmes sépare les assets visuels de la configuration :
+
+```
+omnis.yaml ──► theme: "config/themes/glfos"
+                            │
+                            ▼
+              config/themes/glfos/
+              ├── logos/logo.png    ◄── assets.logo
+              └── wallpapers/dark.jpg ◄── assets.background
+```
+
+Avantages :
+- Réutilisation des assets entre configurations
+- Mise à jour indépendante des visuels
+- Distribution de thèmes tiers
+
+Documentation complète : [`docs/branding/theming.md`](../branding/theming.md)
 
 ### Résolution des Jobs
 
