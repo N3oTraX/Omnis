@@ -22,6 +22,12 @@ from omnis.ipc.protocol import (
     MessageType,
     ResponseStatus,
 )
+from omnis.ipc.security import (
+    ALLOWED_COMMANDS,
+    IPCSecurityValidator,
+    ValidationResult,
+    create_default_validator,
+)
 from omnis.ipc.transport import DEFAULT_SOCKET_PATH, UnixSocketTransport
 
 __all__ = [
@@ -35,6 +41,11 @@ __all__ = [
     # Transport
     "DEFAULT_SOCKET_PATH",
     "UnixSocketTransport",
+    # Security
+    "ALLOWED_COMMANDS",
+    "IPCSecurityValidator",
+    "ValidationResult",
+    "create_default_validator",
     # Exceptions
     "IPCError",
     "IPCErrorCode",

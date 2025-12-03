@@ -343,3 +343,138 @@ class TestEnums:
         """Error codes should be string enums."""
         assert IPCErrorCode.TIMEOUT.value == "TIMEOUT"
         assert IPCErrorCode.CONNECTION_LOST.value == "CONNECTION_LOST"
+
+
+class TestIPCSecurityValidator:
+    """Tests for IPC security validation."""
+
+    def test_validate_valid_request(self) -> None:
+        """Valid requests should pass validation."""
+        from omnis.ipc import IPCSecurityValidator
+
+        validator = IPCSecurityValidator()
+        msg = IPCMessage.create_request(Command.GET_STATUS, {})
+        validator.validate_message(msg)  # Should not raise
+
+    def test_validate_disallowed_command(self) -> None:
+        """Disallowed commands should be rejected."""
+        from omnis.ipc import IPCSecurityValidator, IPCSecurityError
+
+        validator = IPCSecurityValidator(allowed_commands=frozenset(["GET_STATUS"]))
+        msg = IPCMessage.create_request(Command.START_INSTALLATION, {})
+
+        with pytest.raises(IPCSecurityError) as exc_info:
+            validator.validate_message(msg)
+        assert exc_info.value.code == IPCErrorCode.PERMISSION_DENIED
+
+    def test_validate_path_traversal_rejected(self) -> None:
+        """Path traversal attempts should be rejected."""
+        from omnis.ipc import IPCSecurityValidator, IPCSecurityError
+
+        validator = IPCSecurityValidator()
+
+        with pytest.raises(IPCSecurityError):
+            validator.validate_path("../../../etc/passwd")
+
+        with pytest.raises(IPCSecurityError):
+            validator.validate_path("/etc/../../../root/.ssh/id_rsa")
+
+    def test_validate_path_allowed_root(self) -> None:
+        """Paths under allowed roots should be accepted."""
+        from omnis.ipc import IPCSecurityValidator
+
+        validator = IPCSecurityValidator()
+        path = validator.validate_path("/mnt/target/boot")
+        assert str(path).startswith("/mnt")
+
+    def test_validate_path_disallowed_root(self) -> None:
+        """Paths outside allowed roots should be rejected."""
+        from omnis.ipc import IPCSecurityValidator, IPCSecurityError
+
+        validator = IPCSecurityValidator()
+
+        with pytest.raises(IPCSecurityError) as exc_info:
+            validator.validate_path("/etc/passwd")
+        assert exc_info.value.code == IPCErrorCode.PERMISSION_DENIED
+
+    def test_validate_dangerous_patterns(self) -> None:
+        """Dangerous shell patterns should be rejected."""
+        from omnis.ipc import IPCSecurityValidator, IPCSecurityError
+
+        validator = IPCSecurityValidator()
+        dangerous_values = [
+            "/mnt/target; rm -rf /",
+            "/mnt/target | cat /etc/passwd",
+            "/mnt/target`whoami`",
+            "/mnt/target$HOME",
+            "/mnt/target > /dev/null",
+        ]
+
+        for value in dangerous_values:
+            with pytest.raises(IPCSecurityError):
+                validator.validate_path(value)
+
+    def test_validate_string_too_long(self) -> None:
+        """Excessively long strings should be rejected."""
+        from omnis.ipc import IPCSecurityValidator, IPCValidationError
+
+        validator = IPCSecurityValidator()
+        msg = IPCMessage.create_request(Command.GET_STATUS, {"data": "x" * 10000})
+
+        with pytest.raises(IPCValidationError):
+            validator.validate_message(msg)
+
+    def test_validate_nested_too_deep(self) -> None:
+        """Excessively nested structures should be rejected."""
+        from omnis.ipc import IPCSecurityValidator, IPCValidationError
+
+        validator = IPCSecurityValidator()
+
+        # Create deeply nested structure
+        nested: dict = {}
+        current = nested
+        for i in range(15):
+            current["level"] = {}
+            current = current["level"]
+
+        msg = IPCMessage.create_request(Command.GET_STATUS, nested)
+
+        with pytest.raises(IPCValidationError):
+            validator.validate_message(msg)
+
+    def test_sanitize_args(self) -> None:
+        """Sanitize should clean up args."""
+        from omnis.ipc import IPCSecurityValidator
+
+        validator = IPCSecurityValidator()
+        args = {"name": "  test  ", "nested": {"value": "  inner  "}}
+        sanitized = validator.sanitize_args("GET_STATUS", args)
+
+        assert sanitized["name"] == "test"
+        assert sanitized["nested"]["value"] == "inner"
+
+    def test_validation_result(self) -> None:
+        """ValidationResult should work correctly."""
+        from omnis.ipc import ValidationResult
+
+        valid_result = ValidationResult(valid=True)
+        assert bool(valid_result) is True
+        assert valid_result.to_dict()["valid"] is True
+
+        invalid_result = ValidationResult(valid=False, errors=["Error 1"])
+        assert bool(invalid_result) is False
+        assert "Error 1" in invalid_result.errors
+
+    def test_create_default_validator(self) -> None:
+        """create_default_validator should return a validator."""
+        from omnis.ipc import IPCSecurityValidator, create_default_validator
+
+        validator = create_default_validator()
+        assert isinstance(validator, IPCSecurityValidator)
+
+    def test_all_commands_in_whitelist(self) -> None:
+        """All Command enum values should be in ALLOWED_COMMANDS."""
+        from omnis.ipc import ALLOWED_COMMANDS
+
+        for cmd in Command:
+            assert cmd.value in ALLOWED_COMMANDS
