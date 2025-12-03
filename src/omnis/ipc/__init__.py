@@ -5,6 +5,10 @@ Provides secure communication between UI (user context)
 and Engine (root context) processes via Unix sockets.
 """
 
+from omnis.ipc.client import (
+    IPCClient,
+    create_ui_client,
+)
 from omnis.ipc.dispatcher import (
     IPCDispatcher,
     create_default_dispatcher,
@@ -55,6 +59,9 @@ __all__ = [
     # Server
     "IPCServer",
     "create_engine_server",
+    # Client
+    "IPCClient",
+    "create_ui_client",
     # Security
     "ALLOWED_COMMANDS",
     "IPCSecurityValidator",

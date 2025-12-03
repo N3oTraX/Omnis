@@ -684,3 +684,154 @@ class TestIPCServer:
         server = create_engine_server("/tmp/test_engine.sock")
         assert isinstance(server, IPCServer)
         assert server.dispatcher.has_handler(Command.PING)
+
+
+class TestIPCClient:
+    """Tests for IPC client."""
+
+    def test_client_initialization(self) -> None:
+        """Client should initialize with default values."""
+        from omnis.ipc import IPCClient
+
+        client = IPCClient("/tmp/test_client.sock")
+        assert not client.is_connected
+
+    def test_client_connect_no_server(self) -> None:
+        """Client should fail to connect when no server."""
+        from omnis.ipc import IPCClient
+
+        client = IPCClient("/tmp/nonexistent_server.sock")
+        with pytest.raises(IPCConnectionError):
+            client.connect()
+
+    def test_client_context_manager(self) -> None:
+        """Client should work as context manager."""
+        from omnis.ipc import IPCClient, IPCServer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+
+            with IPCServer(socket_path) as server:
+                time.sleep(0.1)
+
+                with IPCClient(socket_path) as client:
+                    assert client.is_connected
+
+                assert not client.is_connected
+
+    def test_client_ping_server(self) -> None:
+        """Client ping method should work."""
+        from omnis.ipc import IPCClient, IPCServer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+
+            with IPCServer(socket_path) as server:
+                time.sleep(0.1)
+
+                with IPCClient(socket_path) as client:
+                    result = client.ping("test_echo")
+
+                assert result["pong"] is True
+                assert result["echo"] == "test_echo"
+
+    def test_client_send_command(self) -> None:
+        """Client should send commands and receive responses."""
+        from omnis.ipc import IPCClient, IPCDispatcher, IPCServer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+
+            dispatcher = IPCDispatcher()
+
+            def status_handler(args: dict) -> dict:
+                return {"status": "idle", "jobs": []}
+
+            dispatcher.register(Command.GET_STATUS, status_handler)
+            dispatcher.register(Command.PING, lambda args: {"pong": True})
+
+            with IPCServer(socket_path, dispatcher=dispatcher) as server:
+                time.sleep(0.1)
+
+                with IPCClient(socket_path) as client:
+                    result = client.get_status()
+
+                assert result["status"] == "idle"
+                assert result["jobs"] == []
+
+    def test_client_event_subscription(self) -> None:
+        """Client should receive events from server."""
+        from omnis.ipc import IPCClient, IPCServer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+
+            received_events: list[tuple[str, dict]] = []
+
+            def event_handler(event_type: str, data: dict) -> None:
+                received_events.append((event_type, data))
+
+            with IPCServer(socket_path) as server:
+                time.sleep(0.1)
+
+                with IPCClient(socket_path) as client:
+                    client.subscribe_event(Event.JOB_PROGRESS, event_handler)
+
+                    # Wait for client to be fully ready
+                    time.sleep(0.1)
+
+                    # Server broadcasts event multiple times to ensure delivery
+                    server.broadcast_event(Event.JOB_PROGRESS, {"percent": 50})
+
+                    # Give time for event to be received
+                    for _ in range(10):
+                        time.sleep(0.1)
+                        if len(received_events) >= 1:
+                            break
+
+            assert len(received_events) >= 1
+            assert received_events[0][0] == "JOB_PROGRESS"
+            assert received_events[0][1]["percent"] == 50
+
+    def test_client_global_event_subscription(self) -> None:
+        """Client should receive all events with global subscription."""
+        from omnis.ipc import IPCClient, IPCServer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+
+            received_events: list[tuple[str, dict]] = []
+
+            def event_handler(event_type: str, data: dict) -> None:
+                received_events.append((event_type, data))
+
+            with IPCServer(socket_path) as server:
+                time.sleep(0.1)
+
+                with IPCClient(socket_path) as client:
+                    # Subscribe to all events
+                    client.subscribe_event(None, event_handler)
+
+                    # Wait for client to be fully ready
+                    time.sleep(0.1)
+
+                    server.broadcast_event(Event.JOB_STARTED, {"job": "partition"})
+                    time.sleep(0.05)  # Small delay between events
+                    server.broadcast_event(Event.JOB_PROGRESS, {"percent": 25})
+
+                    # Wait for events to be received
+                    for _ in range(10):
+                        time.sleep(0.1)
+                        if len(received_events) >= 2:
+                            break
+
+            assert len(received_events) >= 2
+            assert received_events[0][0] == "JOB_STARTED"
+            assert received_events[1][0] == "JOB_PROGRESS"
+
+    def test_create_ui_client(self) -> None:
+        """create_ui_client should return configured client."""
+        from omnis.ipc import IPCClient, create_ui_client
+
+        client = create_ui_client("/tmp/test_ui.sock")
+        assert isinstance(client, IPCClient)
