@@ -211,9 +211,7 @@ class TestIPCMessage:
 
     def test_properties_response(self) -> None:
         """Response properties should return correct values."""
-        msg = IPCMessage.create_response(
-            "id", "CMD", ResponseStatus.SUCCESS, {"data": 1}
-        )
+        msg = IPCMessage.create_response("id", "CMD", ResponseStatus.SUCCESS, {"data": 1})
 
         assert msg.status == "success"
         assert msg.is_success is True
@@ -880,9 +878,11 @@ class TestIPCIntegration:
             received_events: list[list[tuple[str, dict]]] = [[], [], []]
 
             from collections.abc import Callable
+
             def make_handler(idx: int) -> Callable[[str, dict], None]:
                 def handler(event_type: str, data: dict) -> None:
                     received_events[idx].append((event_type, data))
+
                 return handler
 
             with IPCServer(socket_path) as server:

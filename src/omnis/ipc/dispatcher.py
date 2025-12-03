@@ -52,9 +52,7 @@ class IPCDispatcher:
         self._handlers[cmd] = handler
         logger.debug(f"Registered handler for command: {cmd}")
 
-    def register_async(
-        self, command: Command | str, handler: AsyncCommandHandler
-    ) -> None:
+    def register_async(self, command: Command | str, handler: AsyncCommandHandler) -> None:
         """
         Register an asynchronous handler for a command.
 

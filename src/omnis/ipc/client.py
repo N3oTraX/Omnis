@@ -61,7 +61,9 @@ class IPCClient:
         self._transport = (
             UnixSocketTransport(socket_path, connect_timeout, request_timeout)
             if socket_path
-            else UnixSocketTransport(connection_timeout=connect_timeout, receive_timeout=request_timeout)
+            else UnixSocketTransport(
+                connection_timeout=connect_timeout, receive_timeout=request_timeout
+            )
         )
 
         self._connected = False

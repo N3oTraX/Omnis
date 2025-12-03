@@ -167,9 +167,7 @@ class EngineProcess:
                 stderr = ""
                 if self._process.stderr:
                     stderr = self._process.stderr.read().decode()
-                raise LauncherError(
-                    f"Engine process died with code {returncode}: {stderr}"
-                )
+                raise LauncherError(f"Engine process died with code {returncode}: {stderr}")
 
             # Check if socket exists
             if self.socket_path.exists():
