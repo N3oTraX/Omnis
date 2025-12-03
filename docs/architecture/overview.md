@@ -87,31 +87,45 @@ class BaseJob(ABC):
 
 ## Configuration YAML
 
-Le fichier `omnis.yaml` orchestre tout :
+Chaque distribution fournit son propre fichier `omnis.yaml` :
+
+```
+config/examples/
+├── glfos.yaml       # GLF OS
+├── archlinux.yaml   # Arch Linux
+└── minimal.yaml     # Template minimal
+```
+
+Structure d'une configuration :
 
 ```yaml
 branding:
   name: "Distribution Name"
-  accent_color: "#7C3AED"
-  logo: "assets/logo.svg"
+  colors:
+    primary: "#7C3AED"
+    background: "#1F2937"
+  assets:
+    logo: "assets/logo.svg"
+  strings:
+    welcome_title: "Bienvenue"
 
 jobs:
-  - welcome
-  - locale
-  - partition:
-      default_fs: ext4
-      allow_manual: true
-  - install
-  - bootloader:
+  - name: welcome
+  - name: partition
+    config:
+      default_filesystem: ext4
+      allow_manual_partitioning: true
+  - name: bootloader
+    config:
       type: grub
-  - finished
+  - name: finished
 ```
 
 ### Résolution des Jobs
 
 1. L'Engine lit `jobs` dans l'ordre
-2. Chaque nom est résolu vers `omnis.jobs.<name>.Job`
-3. Les paramètres YAML sont injectés dans le constructeur
+2. Chaque `name` est résolu vers `omnis.jobs.<name>.Job`
+3. Le bloc `config` est injecté dans le constructeur du Job
 
 ---
 
@@ -150,17 +164,24 @@ from omnis.jobs.base import BaseJob, JobContext, JobResult
 
 class Job(BaseJob):
     name = "my_custom_job"
+    description = "My custom installation step"
 
     def run(self, context: JobContext) -> JobResult:
+        context.report_progress(50, "Working...")
         # Logique ici
-        return JobResult.success()
+        return JobResult.ok("Custom job completed")
+
+    def estimate_duration(self) -> int:
+        return 30  # secondes
 ```
 
-Puis dans `omnis.yaml` :
+Puis dans votre `omnis.yaml` :
 
 ```yaml
 jobs:
-  - my_custom_job
+  - name: my_custom_job
+    config:
+      option: value
 ```
 
 ---
