@@ -1,0 +1,69 @@
+# =============================================================================
+# Omnis Installer - Configuration Arch Linux
+# =============================================================================
+
+version: "1.0"
+
+branding:
+  name: "Arch Linux"
+  version: "2024.12"
+  edition: ""
+
+  colors:
+    primary: "#1793D1"
+    secondary: "#333333"
+    accent: "#1793D1"
+    background: "#0D1117"
+    surface: "#161B22"
+    text: "#FFFFFF"
+    text_muted: "#8B949E"
+
+  assets:
+    logo: "assets/archlinux-logo.svg"
+    background: "assets/archlinux-bg.jpg"
+
+  strings:
+    welcome_title: "Welcome to Arch Linux"
+    welcome_subtitle: "A simple, lightweight distribution."
+    install_button: "Install Arch Linux"
+    finished_title: "Installation Complete"
+    finished_message: "Welcome to Arch Linux. RTFM."
+
+jobs:
+  - name: welcome
+    config:
+      show_release_notes: false
+      check_requirements:
+        min_ram_gb: 1
+        min_disk_gb: 8
+
+  - name: locale
+    config:
+      default_language: "en_US"
+      default_timezone: "UTC"
+
+  - name: partition
+    config:
+      default_filesystem: ext4
+      allow_encryption: true
+      allow_manual_partitioning: true
+
+  - name: install
+    config:
+      source: "/run/archiso/bootmnt/arch/x86_64/airootfs.sfs"
+      method: rsync
+
+  - name: users
+    config:
+      require_root_password: true
+      default_shell: "/bin/bash"
+      default_groups:
+        - wheel
+        - video
+        - audio
+
+  - name: bootloader
+    config:
+      type: systemd-boot
+
+  - name: finished
