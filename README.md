@@ -4,9 +4,10 @@
 
 | Métrique | Valeur |
 |----------|--------|
-| Version | `0.1.0` (Squelette) |
+| Version | `0.2.0` (IPC) |
 | Python | `>=3.11` |
 | GUI | PySide6 (Qt6) + QML |
+| IPC | Unix Socket + JSON |
 | Licence | GPL-3.0-or-later |
 
 ---
@@ -121,20 +122,71 @@ cd Omnis
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-# Lancer les tests (34 tests)
+# Lancer les tests (122 tests)
 pytest
 
-# Démarrer l'installeur GLF OS (mode debug)
-python -m omnis.main --debug
+# Démarrer l'installeur GLF OS (mode développement)
+python -m omnis.main --debug --no-fork
 ```
 
 Output attendu :
 ```
 Using config: config/examples/glfos.yaml
 Theme base: /path/to/Omnis/config/themes/glfos
-[Branding] Loaded: GLF OS
-[Branding] Resolved: logos/logo.png -> file:///path/to/logos/logo.png
 ```
+
+---
+
+## Modes d'Exécution
+
+Omnis utilise une architecture **UI/Engine séparée** pour la sécurité :
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Mode Production                          │
+├─────────────────────────────────────────────────────────────┤
+│   UI Process (user)          Engine Process (root)          │
+│   ┌──────────────┐           ┌──────────────┐               │
+│   │  QML/Qt GUI  │◄─────────►│  Jobs/Disk   │               │
+│   │  (ton user)  │   IPC     │  (pkexec)    │               │
+│   └──────────────┘  Socket   └──────────────┘               │
+│                   /run/omnis/ipc.sock                       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Commandes Disponibles
+
+| Mode | Commande | Description |
+|------|----------|-------------|
+| **Développement** | `python -m omnis.main --debug --no-fork` | Processus unique, pas de root |
+| **Production** | `python -m omnis.main` | Fork engine avec pkexec |
+| **Engine seul** | `python -m omnis.main --engine --socket /tmp/test.sock` | Serveur IPC isolé |
+
+### Pourquoi `--no-fork` ?
+
+En mode normal, Omnis lance automatiquement un processus Engine avec privilèges root via `pkexec`. Cela pose des problèmes en développement :
+
+| Problème | Cause |
+|----------|-------|
+| Popup d'authentification | pkexec demande le mot de passe |
+| Répertoire `/run/omnis/` | Nécessite root pour création |
+| Debugging complexe | Deux processus à suivre |
+
+Le flag `--no-fork` résout ces problèmes en exécutant tout dans un seul processus utilisateur :
+
+```bash
+# Développement UI/UX (recommandé)
+python -m omnis.main --debug --no-fork
+
+# Test avec config spécifique
+python -m omnis.main --config config/examples/archlinux.yaml --debug --no-fork
+```
+
+### Configuration Production (Polkit)
+
+En mode production, `pkexec` nécessite une policy polkit pour autoriser l'élévation de privilèges.
+
+Documentation complète : [`docs/deployment/polkit.md`](docs/deployment/polkit.md)
 
 ---
 
@@ -167,8 +219,11 @@ python -c "from omnis.core.engine import Engine; print('OK')"
 ### Commandes Développement
 
 ```bash
-# Lancer tous les tests (34 tests)
+# Lancer tous les tests (122 tests)
 pytest -v
+
+# Tests IPC uniquement
+pytest tests/unit/test_ipc.py -v
 
 # Vérification des types
 mypy src/
@@ -177,8 +232,11 @@ mypy src/
 ruff check src/
 ruff format src/
 
-# Démarrer avec une config spécifique
-python -m omnis.main --config config/examples/glfos.yaml --debug
+# Démarrer en mode développement (recommandé)
+python -m omnis.main --config config/examples/glfos.yaml --debug --no-fork
+
+# Démarrer le serveur engine isolé (pour tests IPC)
+python -m omnis.main --engine --socket /tmp/omnis_test.sock --debug
 ```
 
 ---
@@ -252,7 +310,30 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 
 ## État du Projet
 
-### v0.1.0 - Squelette (Actuel)
+### v0.2.0 - IPC (Actuel)
+
+**IPC (Inter-Process Communication)**
+- [x] Protocole JSON avec framing length-prefix (4 bytes big-endian)
+- [x] Transport Unix Socket sécurisé (permissions 0600/0700)
+- [x] Server multi-client avec threads
+- [x] Client avec commandes synchrones/asynchrones
+- [x] Système d'événements (broadcast)
+- [x] Validation de sécurité (whitelist, path traversal, injection)
+- [x] Dispatcher avec handlers enregistrables
+
+**Launcher (Séparation UI/Engine)**
+- [x] EngineProcess avec élévation de privilèges (pkexec/sudo)
+- [x] Mode `--no-fork` pour développement
+- [x] Mode `--engine` pour serveur IPC isolé
+- [x] Handlers pour toutes les commandes (PING, GET_STATUS, GET_BRANDING, etc.)
+
+**Tests**
+- [x] 122 tests unitaires (pytest)
+- [x] Tests IPC complets (protocol, transport, security, server, client)
+- [x] Tests d'intégration (multi-clients, events, reconnection)
+- [x] Tests launcher (dispatcher, handlers)
+
+### v0.1.0 - Squelette
 
 **Core**
 - [x] Structure projet complète
@@ -270,20 +351,16 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 **Thèmes**
 - [x] Système de thèmes modulaire
 - [x] Thème GLF OS complet (10 logos, 5 wallpapers, 2 boot assets)
-- [x] Documentation theming complète (400+ lignes)
-
-**Tests**
-- [x] 34 tests unitaires (pytest)
-- [x] Tests de cohérence config/thème
-- [x] Validation structure thème
+- [x] Documentation theming complète
 
 ### Roadmap
 
 | Version | Objectif | Status |
 |---------|----------|--------|
-| v0.1.0 | Squelette + Thèmes | ✅ Actuel |
-| v0.2.0 | IPC UI/Engine | 🔲 À faire |
+| v0.1.0 | Squelette + Thèmes | ✅ Terminé |
+| v0.2.0 | IPC UI/Engine | ✅ Actuel |
 | v0.3.0 | Jobs de base | 🔲 À faire |
+| v0.4.0 | UI Wizard complet | 🔲 À faire |
 | v1.0.0 | Release stable | 🔲 À faire |
 
 ---
