@@ -19,7 +19,7 @@ branding:
   # Identité
   name: "GLF OS"
   version: "Omnislash"
-  edition: "Gaming"
+  edition: "25.04"
 
   # Couleurs officielles (source: gaminglinux.fr)
   colors:
