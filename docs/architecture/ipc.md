@@ -207,6 +207,7 @@ python -m omnis.main
 - UI fork le Engine avec pkexec
 - Communication via `/run/omnis/ipc.sock`
 - Engine tourne en root
+- Nécessite une configuration polkit (voir [`docs/deployment/polkit.md`](../deployment/polkit.md))
 
 ### Mode Développement (`--no-fork`)
 ```bash

@@ -182,6 +182,12 @@ python -m omnis.main --debug --no-fork
 python -m omnis.main --config config/examples/archlinux.yaml --debug --no-fork
 ```
 
+### Configuration Production (Polkit)
+
+En mode production, `pkexec` nécessite une policy polkit pour autoriser l'élévation de privilèges.
+
+Documentation complète : [`docs/deployment/polkit.md`](docs/deployment/polkit.md)
+
 ---
 
 ## Installation (Développement)
