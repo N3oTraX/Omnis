@@ -85,7 +85,7 @@ def print_platform_info() -> None:
     # Qt version
     print("\n[Qt]")
     print(f"  Version: {qVersion()}")
-    print(f"  Plugins path: {QLibraryInfo.path(QLibraryInfo.PluginsPath)}")
+    print(f"  Plugins path: {QLibraryInfo.path(QLibraryInfo.PluginsPath)}")  # type: ignore[attr-defined]
 
     # Platform
     print("\n[Platform]")
@@ -109,7 +109,7 @@ def print_platform_info() -> None:
         print(f"    Scale: {screen.devicePixelRatio()}")
 
     # Available platform plugins
-    plugins_path = Path(QLibraryInfo.path(QLibraryInfo.PluginsPath)) / "platforms"
+    plugins_path = Path(QLibraryInfo.path(QLibraryInfo.PluginsPath)) / "platforms"  # type: ignore[attr-defined]
     if plugins_path.exists():
         print("\n[Available Platform Plugins]")
         for plugin in sorted(plugins_path.glob("libq*.so")):
