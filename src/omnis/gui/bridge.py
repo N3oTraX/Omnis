@@ -1,0 +1,209 @@
+"""
+Bridge between QML UI and Python Engine.
+
+Exposes engine functionality to QML via Qt properties and signals.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from PySide6.QtCore import QObject, Property, Signal, Slot
+
+if TYPE_CHECKING:
+    from omnis.core.engine import Engine
+
+
+class BrandingProxy(QObject):
+    """Exposes branding configuration to QML."""
+
+    def __init__(self, engine: Engine, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._branding = engine.get_branding()
+
+    @Property(str, constant=True)
+    def name(self) -> str:
+        """Distribution name."""
+        return self._branding.name
+
+    @Property(str, constant=True)
+    def version(self) -> str:
+        """Distribution version."""
+        return self._branding.version
+
+    @Property(str, constant=True)
+    def edition(self) -> str:
+        """Distribution edition."""
+        return self._branding.edition
+
+    @Property(str, constant=True)
+    def primaryColor(self) -> str:
+        """Primary brand color."""
+        return self._branding.colors.primary
+
+    @Property(str, constant=True)
+    def secondaryColor(self) -> str:
+        """Secondary brand color."""
+        return self._branding.colors.secondary
+
+    @Property(str, constant=True)
+    def accentColor(self) -> str:
+        """Accent color."""
+        return self._branding.colors.accent
+
+    @Property(str, constant=True)
+    def backgroundColor(self) -> str:
+        """Background color."""
+        return self._branding.colors.background
+
+    @Property(str, constant=True)
+    def surfaceColor(self) -> str:
+        """Surface color."""
+        return self._branding.colors.surface
+
+    @Property(str, constant=True)
+    def textColor(self) -> str:
+        """Primary text color."""
+        return self._branding.colors.text
+
+    @Property(str, constant=True)
+    def textMutedColor(self) -> str:
+        """Muted text color."""
+        return self._branding.colors.text_muted
+
+    @Property(str, constant=True)
+    def welcomeTitle(self) -> str:
+        """Welcome screen title."""
+        return self._branding.strings.welcome_title
+
+    @Property(str, constant=True)
+    def welcomeSubtitle(self) -> str:
+        """Welcome screen subtitle."""
+        return self._branding.strings.welcome_subtitle
+
+    @Property(str, constant=True)
+    def installButton(self) -> str:
+        """Install button text."""
+        return self._branding.strings.install_button
+
+    @Property(str, constant=True)
+    def logoPath(self) -> str:
+        """Path to logo asset."""
+        return self._branding.assets.logo
+
+
+class EngineBridge(QObject):
+    """
+    Main bridge between QML and installation engine.
+
+    Exposes:
+    - Installation control (start, pause, cancel)
+    - Progress reporting
+    - Job navigation
+    - Branding configuration
+    """
+
+    # Signals for QML
+    installationStarted = Signal()
+    installationFinished = Signal(bool)  # success: bool
+    jobStarted = Signal(str)  # job_name
+    jobProgress = Signal(str, int, str)  # job_name, percent, message
+    jobCompleted = Signal(str, bool)  # job_name, success
+    errorOccurred = Signal(str, str)  # job_name, error_message
+
+    def __init__(
+        self,
+        engine: Engine,
+        debug: bool = False,
+        dry_run: bool = False,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._engine = engine
+        self._debug = debug
+        self._dry_run = dry_run
+        self._branding_proxy = BrandingProxy(engine, self)
+
+        # Connect engine callbacks
+        self._engine.on_job_start = self._on_job_start
+        self._engine.on_job_progress = self._on_job_progress
+        self._engine.on_job_complete = self._on_job_complete
+        self._engine.on_error = self._on_error
+
+    @property
+    def branding_proxy(self) -> BrandingProxy:
+        """Get branding proxy for QML context."""
+        return self._branding_proxy
+
+    def _on_job_start(self, job_name: str) -> None:
+        """Handle job start event."""
+        self.jobStarted.emit(job_name)
+
+    def _on_job_progress(self, job_name: str, percent: int, message: str) -> None:
+        """Handle job progress event."""
+        self.jobProgress.emit(job_name, percent, message)
+
+    def _on_job_complete(self, job_name: str, result: Any) -> None:
+        """Handle job completion event."""
+        self.jobCompleted.emit(job_name, result.success)
+
+    def _on_error(self, job_name: str, error: str) -> None:
+        """Handle error event."""
+        self.errorOccurred.emit(job_name, error)
+
+    @Property(bool, constant=True)
+    def debugMode(self) -> bool:
+        """Check if debug mode is enabled."""
+        return self._debug
+
+    @Property(bool, constant=True)
+    def dryRun(self) -> bool:
+        """Check if dry-run mode is enabled."""
+        return self._dry_run
+
+    @Property(list, constant=True)
+    def jobNames(self) -> list[str]:
+        """Get list of job names in order."""
+        return self._engine.get_job_names()
+
+    @Property(int, constant=True)
+    def totalJobs(self) -> int:
+        """Get total number of jobs."""
+        return len(self._engine.jobs)
+
+    @Slot()
+    def startInstallation(self) -> None:
+        """Start the installation process."""
+        self.installationStarted.emit()
+        # TODO: Run in separate thread
+        success = self._engine.run_all()
+        self.installationFinished.emit(success)
+
+    @Slot(result=int)
+    def getCurrentJobIndex(self) -> int:
+        """Get current job index (0-based)."""
+        current, _ = self._engine.get_progress()
+        return current - 1
+
+    @Slot(result=str)
+    def getCurrentJobName(self) -> str:
+        """Get current job name."""
+        idx = self.getCurrentJobIndex()
+        if 0 <= idx < len(self._engine.jobs):
+            return self._engine.jobs[idx].name
+        return ""
+
+    @Slot(result=bool)
+    def isRunning(self) -> bool:
+        """Check if installation is running."""
+        return self._engine.state.is_running
+
+    @Slot(result=bool)
+    def isFinished(self) -> bool:
+        """Check if installation is finished."""
+        return self._engine.state.is_finished
+
+    @Slot(result=str)
+    def getLastError(self) -> str:
+        """Get last error message."""
+        return self._engine.state.last_error or ""

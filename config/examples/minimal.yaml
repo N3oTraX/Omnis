@@ -1,0 +1,18 @@
+# =============================================================================
+# Omnis Installer - Configuration Minimale
+# =============================================================================
+# Configuration de base pour démarrer rapidement.
+
+version: "1.0"
+
+branding:
+  name: "My Linux"
+  colors:
+    primary: "#3B82F6"
+
+jobs:
+  - welcome
+  - locale
+  - partition
+  - install
+  - finished
