@@ -112,6 +112,32 @@ Documentation complète : [`docs/branding/theming.md`](docs/branding/theming.md)
 
 ---
 
+## Quick Start
+
+```bash
+# Cloner et installer
+git clone https://github.com/N3oTraX/Omnis.git
+cd Omnis
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+
+# Lancer les tests (34 tests)
+pytest
+
+# Démarrer l'installeur GLF OS (mode debug)
+python -m omnis.main --debug
+```
+
+Output attendu :
+```
+Using config: config/examples/glfos.yaml
+Theme base: /path/to/Omnis/config/themes/glfos
+[Branding] Loaded: GLF OS
+[Branding] Resolved: logos/logo.png -> file:///path/to/logos/logo.png
+```
+
+---
+
 ## Installation (Développement)
 
 ### Prérequis
@@ -120,11 +146,11 @@ Documentation complète : [`docs/branding/theming.md`](docs/branding/theming.md)
 - Qt6 libraries (système)
 - Git
 
-### Setup
+### Setup Complet
 
 ```bash
 # Cloner le repository
-git clone https://github.com/glmusic/Omnis.git
+git clone https://github.com/N3oTraX/Omnis.git
 cd Omnis
 
 # Créer l'environnement virtuel
@@ -141,8 +167,8 @@ python -c "from omnis.core.engine import Engine; print('OK')"
 ### Commandes Développement
 
 ```bash
-# Lancer les tests
-pytest
+# Lancer tous les tests (34 tests)
+pytest -v
 
 # Vérification des types
 mypy src/
@@ -150,6 +176,9 @@ mypy src/
 # Linting + Formatage
 ruff check src/
 ruff format src/
+
+# Démarrer avec une config spécifique
+python -m omnis.main --config config/examples/glfos.yaml --debug
 ```
 
 ---
@@ -225,19 +254,37 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 
 ### v0.1.0 - Squelette (Actuel)
 
-- [x] Structure projet
-- [x] Configuration pyproject.toml
-- [x] Interface Engine de base
+**Core**
+- [x] Structure projet complète
+- [x] Configuration pyproject.toml avec dépendances
+- [x] Modèles Pydantic pour validation YAML
+- [x] Interface Engine avec chargement config
 - [x] Classe abstraite BaseJob
-- [x] Template QML avec branding dynamique
+
+**GUI**
+- [x] Interface QML avec branding dynamique
+- [x] Bridge Python ↔ QML (BrandingProxy, EngineBridge)
+- [x] Résolution des assets en URLs `file://`
+- [x] Fallback UI si assets manquants
+
+**Thèmes**
 - [x] Système de thèmes modulaire
-- [x] Thème GLF OS complet (référence)
+- [x] Thème GLF OS complet (10 logos, 5 wallpapers, 2 boot assets)
+- [x] Documentation theming complète (400+ lignes)
+
+**Tests**
+- [x] 34 tests unitaires (pytest)
+- [x] Tests de cohérence config/thème
+- [x] Validation structure thème
 
 ### Roadmap
 
-- [ ] v0.2.0 : IPC UI/Engine fonctionnel
-- [ ] v0.3.0 : Jobs de base (welcome, locale, partition)
-- [ ] v1.0.0 : Release stable
+| Version | Objectif | Status |
+|---------|----------|--------|
+| v0.1.0 | Squelette + Thèmes | ✅ Actuel |
+| v0.2.0 | IPC UI/Engine | 🔲 À faire |
+| v0.3.0 | Jobs de base | 🔲 À faire |
+| v1.0.0 | Release stable | 🔲 À faire |
 
 ---
 
