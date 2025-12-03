@@ -19,19 +19,33 @@ class BrandingProxy(QObject):
     """Exposes branding configuration to QML."""
 
     def __init__(
-        self, engine: Engine, theme_base: Path, parent: QObject | None = None
+        self, engine: Engine, theme_base: Path, parent: QObject | None = None, debug: bool = False
     ) -> None:
         super().__init__(parent)
         self._branding = engine.get_branding()
         self._theme_base = theme_base
+        self._debug = debug
+
+        if self._debug:
+            print(f"[Branding] Loaded: {self._branding.name}")
+            print(f"[Branding] Theme base: {self._theme_base}")
+            print(f"[Branding] Colors - primary: {self._branding.colors.primary}, "
+                  f"bg: {self._branding.colors.background}, text: {self._branding.colors.text}")
 
     def _resolve_asset(self, relative_path: str) -> str:
         """Resolve asset path to absolute file:// URL."""
         if not relative_path:
+            if self._debug:
+                print(f"[Branding] Asset path is empty")
             return ""
         full_path = self._theme_base / relative_path
         if full_path.exists():
-            return QUrl.fromLocalFile(str(full_path.resolve())).toString()
+            url = QUrl.fromLocalFile(str(full_path.resolve())).toString()
+            if self._debug:
+                print(f"[Branding] Resolved: {relative_path} -> {url}")
+            return url
+        if self._debug:
+            print(f"[Branding] Asset not found: {full_path}")
         return ""
 
     @Property(str, constant=True)
@@ -157,7 +171,7 @@ class EngineBridge(QObject):
         self._engine = engine
         self._debug = debug
         self._dry_run = dry_run
-        self._branding_proxy = BrandingProxy(engine, theme_base, self)
+        self._branding_proxy = BrandingProxy(engine, theme_base, self, debug=debug)
 
         # Connect engine callbacks
         self._engine.on_job_start = self._on_job_start
