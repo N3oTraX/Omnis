@@ -2,6 +2,32 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Workflow Obligatoire
+
+**IMPORTANT** : Pour toute tâche de développement sur ce projet, suivre le workflow multi-agents défini dans `.claude/commands/my-dev-workflow.md`.
+
+### Processus
+
+```
+1. Lead Tech Coordinator → Analyse et catégorise la tâche
+2. Routage automatique selon le type :
+   - Architecture/DevOps → agent-architect-devops
+   - UI/UX → agent-ui-ux
+   - QA/Sécurité → agent-qa-security
+   - Autre → agent-full-team
+3. Lead Tech Synthesis → Synthèse des recommandations
+4. Validation utilisateur :
+   - "Implémenter" → Lancer l'implémentation
+   - "Affiner" → Itérer (retour étape 1)
+   - "Terminer" → Fin du workflow
+```
+
+### Invocation
+
+Utiliser la commande `/project:my-dev-workflow` ou appliquer ce processus automatiquement pour toute demande significative (feature, bugfix, refactoring).
+
+---
+
 ## Project Overview
 
 Omnis is a modular Linux installer (Calamares alternative) using Python 3.11+ and PySide6/Qt6 with QML interface.
