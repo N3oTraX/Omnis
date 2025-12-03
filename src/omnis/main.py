@@ -19,7 +19,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
 from omnis import __version__
-from omnis.core.engine import Engine, ConfigurationError
+from omnis.core.engine import ConfigurationError, Engine
 from omnis.gui.bridge import EngineBridge
 
 if TYPE_CHECKING:
@@ -71,6 +71,7 @@ def parse_args() -> argparse.Namespace:
 def print_platform_info() -> None:
     """Display Qt platform and environment information."""
     import os
+
     from PySide6.QtCore import QLibraryInfo, qVersion
     from PySide6.QtGui import QGuiApplication
 
@@ -82,12 +83,12 @@ def print_platform_info() -> None:
     print("=" * 60)
 
     # Qt version
-    print(f"\n[Qt]")
+    print("\n[Qt]")
     print(f"  Version: {qVersion()}")
     print(f"  Plugins path: {QLibraryInfo.path(QLibraryInfo.PluginsPath)}")
 
     # Platform
-    print(f"\n[Platform]")
+    print("\n[Platform]")
     print(f"  Plugin: {app.platformName()}")
     print(f"  DISPLAY: {os.environ.get('DISPLAY', 'not set')}")
     print(f"  WAYLAND_DISPLAY: {os.environ.get('WAYLAND_DISPLAY', 'not set')}")
@@ -95,12 +96,12 @@ def print_platform_info() -> None:
     print(f"  XDG_CURRENT_DESKTOP: {os.environ.get('XDG_CURRENT_DESKTOP', 'not set')}")
 
     # Theme
-    print(f"\n[Theme]")
+    print("\n[Theme]")
     print(f"  QT_QPA_PLATFORMTHEME: {os.environ.get('QT_QPA_PLATFORMTHEME', 'not set')}")
     print(f"  QT_STYLE_OVERRIDE: {os.environ.get('QT_STYLE_OVERRIDE', 'not set')}")
 
     # Screens
-    print(f"\n[Screens]")
+    print("\n[Screens]")
     for i, screen in enumerate(app.screens()):
         print(f"  Screen {i}: {screen.name()}")
         print(f"    Size: {screen.size().width()}x{screen.size().height()}")
@@ -110,7 +111,7 @@ def print_platform_info() -> None:
     # Available platform plugins
     plugins_path = Path(QLibraryInfo.path(QLibraryInfo.PluginsPath)) / "platforms"
     if plugins_path.exists():
-        print(f"\n[Available Platform Plugins]")
+        print("\n[Available Platform Plugins]")
         for plugin in sorted(plugins_path.glob("libq*.so")):
             name = plugin.stem.replace("libq", "")
             print(f"  - {name}")
@@ -210,10 +211,7 @@ def main() -> int:
 
     # Resolve theme path (relative to config file directory)
     theme_path = engine.get_theme_path()
-    if theme_path:
-        theme_base = (config_path.parent / theme_path).resolve()
-    else:
-        theme_base = config_path.parent
+    theme_base = (config_path.parent / theme_path).resolve() if theme_path else config_path.parent
 
     if args.debug:
         print(f"Theme base: {theme_base}")

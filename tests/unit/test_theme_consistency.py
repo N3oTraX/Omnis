@@ -8,10 +8,29 @@ and that all required assets exist.
 from pathlib import Path
 
 import pytest
-import yaml
 
-from omnis.core.engine import Engine, OmnisConfig, ConfigurationError
+try:
+    import yaml
 
+    HAS_YAML = True
+except ImportError:
+    yaml = None  # type: ignore[assignment]
+    HAS_YAML = False
+
+try:
+    from omnis.core.engine import Engine, OmnisConfig
+
+    HAS_OMNIS = True
+except ImportError:
+    Engine = None  # type: ignore[assignment, misc]
+    OmnisConfig = None  # type: ignore[assignment, misc]
+    HAS_OMNIS = False
+
+# Skip entire module if dependencies are missing
+pytestmark = pytest.mark.skipif(
+    not (HAS_YAML and HAS_OMNIS),
+    reason="Required dependencies (yaml, omnis) not available",
+)
 
 # Path to config examples directory
 EXAMPLES_DIR = Path(__file__).parent.parent.parent / "config" / "examples"
@@ -106,7 +125,7 @@ class TestThemeConsistency:
                 if not full_path.exists():
                     missing.append(f"{name}: {full_path}")
 
-        assert not missing, f"Missing assets:\n" + "\n".join(missing)
+        assert not missing, "Missing assets:\n" + "\n".join(missing)
 
 
 class TestConfigThemeIntegration:

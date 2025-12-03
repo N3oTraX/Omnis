@@ -8,7 +8,6 @@ Validates:
 - No hardcoded secrets or credentials
 """
 
-import os
 import re
 from pathlib import Path
 
@@ -16,14 +15,14 @@ import pytest
 
 try:
     import yaml
+
     HAS_YAML = True
 except ImportError:
     HAS_YAML = False
 
 try:
-    from omnis.core.engine import (
-        OmnisConfig, BrandingAssets, BrandingColors, JobDefinition
-    )
+    from omnis.core.engine import BrandingAssets, BrandingColors, JobDefinition, OmnisConfig
+
     HAS_OMNIS = True
 except ImportError:
     HAS_OMNIS = False
@@ -57,10 +56,14 @@ class TestConfigurationSecurity:
             for pattern in password_patterns:
                 matches = re.findall(pattern, content, re.IGNORECASE)
                 # Filter out placeholder values
-                real_matches = [m for m in matches if not any(
-                    placeholder in m.lower()
-                    for placeholder in ["example", "changeme", "xxx", "your_", "<", ">"]
-                )]
+                real_matches = [
+                    m
+                    for m in matches
+                    if not any(
+                        placeholder in m.lower()
+                        for placeholder in ["example", "changeme", "xxx", "your_", "<", ">"]
+                    )
+                ]
                 assert not real_matches, (
                     f"Potential hardcoded credential in {config_file}: {real_matches}"
                 )
@@ -84,9 +87,7 @@ class TestConfigurationSecurity:
 
             for path in abs_paths:
                 is_allowed = any(path.startswith(allowed) for allowed in allowed_absolute)
-                assert is_allowed, (
-                    f"Unexpected absolute path in {config_file}: {path}"
-                )
+                assert is_allowed, f"Unexpected absolute path in {config_file}: {path}"
 
     @pytest.mark.skipif(not HAS_YAML, reason="PyYAML not installed")
     def test_yaml_safe_load(self, config_files: list[Path]) -> None:
@@ -105,7 +106,7 @@ class TestConfigurationSecurity:
         for config_file in config_files:
             content = config_file.read_text()
             # Check for excessive anchor usage (more than 10 is suspicious)
-            anchors = re.findall(r'&\w+', content)
+            anchors = re.findall(r"&\w+", content)
             assert len(anchors) <= 10, (
                 f"Excessive YAML anchors in {config_file} ({len(anchors)} found)"
             )
@@ -163,46 +164,38 @@ class TestCodeSecurity:
             content = py_file.read_text()
 
             # Check for eval() - dangerous for arbitrary code execution
-            eval_matches = re.findall(r'(?<![.\w])eval\s*\(', content)
-            assert not eval_matches, (
-                f"Dangerous eval() in {py_file}"
-            )
+            eval_matches = re.findall(r"(?<![.\w])eval\s*\(", content)
+            assert not eval_matches, f"Dangerous eval() in {py_file}"
 
             # Check for exec() builtin - but NOT app.exec() which is Qt method
             # Find all exec( occurrences and filter out app.exec()
-            exec_matches = re.findall(r'(?<![.\w])exec\s*\(', content)
+            exec_matches = re.findall(r"(?<![.\w])exec\s*\(", content)
             # app.exec() is safe (Qt method), return app.exec() is also safe
             safe_exec_count = content.count("app.exec()")
-            assert len(exec_matches) <= safe_exec_count, (
-                f"Dangerous exec() builtin in {py_file}"
-            )
+            assert len(exec_matches) <= safe_exec_count, f"Dangerous exec() builtin in {py_file}"
 
     def test_no_shell_injection_risk(self, python_files: list[Path]) -> None:
         """Check for potential shell injection vulnerabilities."""
         # Patterns that might indicate shell injection risk
         risky_patterns = [
-            r'subprocess\..*shell\s*=\s*True',
-            r'os\.system\s*\(',
-            r'os\.popen\s*\(',
-            r'commands\.',  # deprecated module
+            r"subprocess\..*shell\s*=\s*True",
+            r"os\.system\s*\(",
+            r"os\.popen\s*\(",
+            r"commands\.",  # deprecated module
         ]
 
         for py_file in python_files:
             content = py_file.read_text()
             for pattern in risky_patterns:
                 matches = re.findall(pattern, content)
-                assert not matches, (
-                    f"Potential shell injection risk in {py_file}: {matches}"
-                )
+                assert not matches, f"Potential shell injection risk in {py_file}: {matches}"
 
     def test_no_pickle_usage(self, python_files: list[Path]) -> None:
         """Pickle should not be used (security risk with untrusted data)."""
         for py_file in python_files:
             content = py_file.read_text()
-            pickle_usage = re.findall(r'\bpickle\b', content)
-            assert not pickle_usage, (
-                f"Pickle usage found in {py_file} - use JSON/YAML instead"
-            )
+            pickle_usage = re.findall(r"\bpickle\b", content)
+            assert not pickle_usage, f"Pickle usage found in {py_file} - use JSON/YAML instead"
 
     def test_no_hardcoded_credentials_in_code(self, python_files: list[Path]) -> None:
         """Source code should not contain hardcoded credentials."""
@@ -219,9 +212,7 @@ class TestCodeSecurity:
                 matches = re.findall(pattern, content, re.IGNORECASE)
                 # Filter test files and obvious non-credentials
                 if "test" not in str(py_file).lower():
-                    assert not matches, (
-                        f"Potential hardcoded credential in {py_file}: {matches}"
-                    )
+                    assert not matches, f"Potential hardcoded credential in {py_file}: {matches}"
 
 
 @pytest.mark.skipif(not HAS_OMNIS, reason="omnis package not available")
@@ -272,9 +263,7 @@ class TestFilePermissions:
         for config_file in config_files:
             mode = config_file.stat().st_mode
             world_writable = mode & 0o002
-            assert not world_writable, (
-                f"Config file is world-writable: {config_file}"
-            )
+            assert not world_writable, f"Config file is world-writable: {config_file}"
 
     def test_no_executable_configs(self) -> None:
         """Config files should not be executable."""
@@ -283,9 +272,7 @@ class TestFilePermissions:
         for config_file in config_files:
             mode = config_file.stat().st_mode
             executable = mode & 0o111
-            assert not executable, (
-                f"Config file is executable: {config_file}"
-            )
+            assert not executable, f"Config file is executable: {config_file}"
 
 
 class TestEnvironmentSafety:
@@ -316,9 +303,7 @@ class TestEnvironmentSafety:
             # Check that the function doesn't explicitly log these
             pattern = rf'os\.environ\.get\s*\(\s*["\'].*{var}'
             matches = re.findall(pattern, func_source, re.IGNORECASE)
-            assert not matches, (
-                f"print_platform_info might expose {var}: {matches}"
-            )
+            assert not matches, f"print_platform_info might expose {var}: {matches}"
 
     def test_no_sensitive_defaults_in_config(self) -> None:
         """Default config values should not contain sensitive data."""
@@ -334,6 +319,4 @@ class TestEnvironmentSafety:
 
         for pattern in sensitive_defaults:
             matches = re.findall(pattern, content, re.IGNORECASE)
-            assert not matches, (
-                f"Sensitive default value found: {matches}"
-            )
+            assert not matches, f"Sensitive default value found: {matches}"

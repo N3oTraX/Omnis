@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QObject, Property, Signal, Slot, QUrl
+from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 
 if TYPE_CHECKING:
     from omnis.core.engine import Engine
@@ -29,14 +29,16 @@ class BrandingProxy(QObject):
         if self._debug:
             print(f"[Branding] Loaded: {self._branding.name}")
             print(f"[Branding] Theme base: {self._theme_base}")
-            print(f"[Branding] Colors - primary: {self._branding.colors.primary}, "
-                  f"bg: {self._branding.colors.background}, text: {self._branding.colors.text}")
+            print(
+                f"[Branding] Colors - primary: {self._branding.colors.primary}, "
+                f"bg: {self._branding.colors.background}, text: {self._branding.colors.text}"
+            )
 
     def _resolve_asset(self, relative_path: str) -> str:
         """Resolve asset path to absolute file:// URL."""
         if not relative_path:
             if self._debug:
-                print(f"[Branding] Asset path is empty")
+                print("[Branding] Asset path is empty")
             return ""
         full_path = self._theme_base / relative_path
         if full_path.exists():
