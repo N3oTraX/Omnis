@@ -108,8 +108,8 @@ config/
 ```yaml
 version: "1.0"
 
-# Lien vers le dossier du thème (relatif au fichier config)
-theme: "config/themes/glfos"
+# Lien vers le dossier du thème (RELATIF à ce fichier config)
+theme: "../themes/glfos"  # Si config dans config/examples/
 
 branding:
   name: "GLF OS"

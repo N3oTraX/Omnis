@@ -82,8 +82,8 @@ config/themes/<nom-theme>/
 Dans votre fichier `omnis.yaml` :
 
 ```yaml
-# Chemin relatif vers le dossier du thème
-theme: "config/themes/glfos"
+# Chemin relatif vers le dossier du thème (relatif à ce fichier config)
+theme: "../themes/glfos"  # Si config dans config/examples/
 
 branding:
   name: "GLF OS"
