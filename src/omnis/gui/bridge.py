@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Property, QObject, QThread, QUrl, Signal, Slot
 
+from omnis.i18n.translator import get_translator
+
 if TYPE_CHECKING:
     from omnis.core.engine import Engine
 
@@ -122,18 +124,38 @@ class BrandingProxy(QObject):
 
     @Property(str, constant=True)
     def welcomeTitle(self) -> str:
-        """Welcome screen title."""
-        return self._branding.strings.welcome_title
+        """Welcome screen title with i18n interpolation."""
+        translator = get_translator()
+        return translator.get(
+            "title",
+            "welcome",
+            default=self._branding.strings.welcome_title,
+            distro_name=self._branding.name,
+        )
 
     @Property(str, constant=True)
     def welcomeSubtitle(self) -> str:
-        """Welcome screen subtitle."""
-        return self._branding.strings.welcome_subtitle
+        """Welcome screen subtitle with i18n interpolation."""
+        translator = get_translator()
+        # Get tagline from branding config
+        tagline = getattr(self._branding, "tagline", "")
+        return translator.get(
+            "subtitle",
+            "welcome",
+            default=self._branding.strings.welcome_subtitle,
+            distro_tagline=tagline,
+        )
 
     @Property(str, constant=True)
     def installButton(self) -> str:
-        """Install button text."""
-        return self._branding.strings.install_button
+        """Install button text with i18n interpolation."""
+        translator = get_translator()
+        return translator.get(
+            "install_button",
+            "welcome",
+            default=self._branding.strings.install_button,
+            distro_name=self._branding.name,
+        )
 
     @Property(str, constant=True)
     def logoPath(self) -> str:

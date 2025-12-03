@@ -201,23 +201,31 @@ Item {
                     }
                 }
 
-                contentItem: Row {
-                    spacing: 8
-                    anchors.centerIn: parent
+                contentItem: Item {
+                    implicitWidth: buttonRow.implicitWidth
+                    implicitHeight: buttonRow.implicitHeight
 
-                    Text {
-                        text: installButton.text
-                        font: installButton.font
-                        color: installButton.enabled ? textColor : textMutedColor
-                        verticalAlignment: Text.AlignVCenter
-                    }
+                    Row {
+                        id: buttonRow
+                        anchors.centerIn: parent
+                        spacing: 8
 
-                    Text {
-                        text: "→"
-                        font.pixelSize: 20
-                        color: installButton.enabled ? textColor : textMutedColor
-                        verticalAlignment: Text.AlignVCenter
-                        visible: installButton.enabled
+                        Text {
+                            text: installButton.text
+                            font: installButton.font
+                            color: installButton.enabled ? textColor : textMutedColor
+                            verticalAlignment: Text.AlignVCenter
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        Text {
+                            text: "\u2192"  // Right arrow
+                            font.pixelSize: 20
+                            color: installButton.enabled ? textColor : textMutedColor
+                            verticalAlignment: Text.AlignVCenter
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: installButton.enabled
+                        }
                     }
                 }
 
