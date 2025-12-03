@@ -242,6 +242,11 @@ class IPCClient:
         # Create request
         request = IPCMessage.create_request(command, args)
 
+        # Register pending request regardless of callback presence
+        response_queue: queue.Queue[IPCMessage] = queue.Queue()
+        with self._request_lock:
+            self._pending_requests[request.id] = response_queue
+
         if callback:
             # Set up callback handler
             def response_handler(response: IPCMessage) -> None:
@@ -257,11 +262,7 @@ class IPCClient:
                         ),
                     )
 
-            response_queue: queue.Queue[IPCMessage] = queue.Queue()
-            with self._request_lock:
-                self._pending_requests[request.id] = response_queue
-
-            # Start handler thread
+            # Start handler thread for callbacks
             def waiter() -> None:
                 try:
                     response = response_queue.get(timeout=300.0)
@@ -273,6 +274,18 @@ class IPCClient:
                         self._pending_requests.pop(request.id, None)
 
             threading.Thread(target=waiter, daemon=True).start()
+        else:
+            # No callback: consume response to clear pending request
+            def _discard() -> None:
+                try:
+                    response_queue.get(timeout=300.0)
+                except queue.Empty:
+                    pass
+                finally:
+                    with self._request_lock:
+                        self._pending_requests.pop(request.id, None)
+
+            threading.Thread(target=_discard, daemon=True).start()
 
         # Send request
         self._transport.send_message(self._socket, request)  # type: ignore[arg-type]
