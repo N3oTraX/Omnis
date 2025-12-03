@@ -9,10 +9,30 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, QThread, QUrl, Signal, Slot
 
 if TYPE_CHECKING:
     from omnis.core.engine import Engine
+
+
+class InstallationWorker(QObject):
+    """Worker that runs installation in a separate thread."""
+
+    finished = Signal(bool)  # success: bool
+    error = Signal(str)  # error_message
+
+    def __init__(self, engine: Engine, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._engine = engine
+
+    def run(self) -> None:
+        """Execute the installation process."""
+        try:
+            success = self._engine.run_all()
+            self.finished.emit(success)
+        except Exception as e:
+            self.error.emit(str(e))
+            self.finished.emit(False)
 
 
 class BrandingProxy(QObject):
@@ -180,6 +200,10 @@ class EngineBridge(QObject):
         self._dry_run = dry_run
         self._branding_proxy = BrandingProxy(engine, theme_base, self, debug=debug)
 
+        # Thread management
+        self._worker: InstallationWorker | None = None
+        self._thread: QThread | None = None
+
         # Connect engine callbacks
         self._engine.on_job_start = self._on_job_start
         self._engine.on_job_progress = self._on_job_progress
@@ -229,11 +253,50 @@ class EngineBridge(QObject):
 
     @Slot()
     def startInstallation(self) -> None:
-        """Start the installation process."""
+        """Start the installation process in a separate thread."""
+        # Prevent multiple concurrent installations
+        if self._thread is not None and self._thread.isRunning():
+            if self._debug:
+                print("[Engine] Installation already in progress")
+            return
+
         self.installationStarted.emit()
-        # TODO: Run in separate thread
-        success = self._engine.run_all()
+
+        # Create worker and thread
+        self._thread = QThread(self)
+        self._worker = InstallationWorker(self._engine)
+        self._worker.moveToThread(self._thread)
+
+        # Connect signals
+        self._thread.started.connect(self._worker.run)
+        self._worker.finished.connect(self._on_installation_finished)
+        self._worker.error.connect(self._on_installation_error)
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.finished.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self._thread.deleteLater)
+        self._thread.finished.connect(self._cleanup_thread)
+
+        # Start installation
+        if self._debug:
+            print("[Engine] Starting installation in background thread")
+        self._thread.start()
+
+    def _on_installation_finished(self, success: bool) -> None:
+        """Handle installation completion."""
+        if self._debug:
+            print(f"[Engine] Installation finished: {'success' if success else 'failed'}")
         self.installationFinished.emit(success)
+
+    def _on_installation_error(self, error_message: str) -> None:
+        """Handle installation error."""
+        if self._debug:
+            print(f"[Engine] Installation error: {error_message}")
+        self.errorOccurred.emit("installation", error_message)
+
+    def _cleanup_thread(self) -> None:
+        """Clean up thread references after completion."""
+        self._thread = None
+        self._worker = None
 
     @Slot(result=int)
     def getCurrentJobIndex(self) -> int:

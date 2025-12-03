@@ -221,6 +221,8 @@ class TestInputValidation:
 
     def test_branding_colors_format(self) -> None:
         """Color values should be valid hex format."""
+        from pydantic import ValidationError as PydanticValidationError
+
         # Valid colors
         valid = BrandingColors(
             primary="#5597e6",
@@ -229,13 +231,11 @@ class TestInputValidation:
         )
         assert valid.primary == "#5597e6"
 
-        # Invalid colors are accepted by model but should be validated elsewhere
-        # This test documents the expected format
-        invalid_formats = ["red", "rgb(255,0,0)", "not-a-color"]
+        # Invalid colors should now raise validation errors
+        invalid_formats = ["red", "rgb(255,0,0)", "not-a-color", "#fff", "#12345"]
         for invalid in invalid_formats:
-            colors = BrandingColors(primary=invalid)
-            # Model accepts it - UI should handle gracefully
-            assert colors.primary == invalid
+            with pytest.raises(PydanticValidationError):
+                BrandingColors(primary=invalid)
 
     def test_job_name_validation(self) -> None:
         """Job names should be valid Python identifiers."""

@@ -5,12 +5,13 @@ Handles configuration loading, job management, and execution pipeline.
 Runs in root context, separated from UI process.
 """
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from omnis.jobs.base import BaseJob, JobContext, JobResult, JobStatus
 
@@ -25,6 +26,16 @@ class BrandingColors(BaseModel):
     surface: str = "#374151"
     text: str = "#F9FAFB"
     text_muted: str = "#9CA3AF"
+
+    @field_validator(
+        "primary", "secondary", "accent", "background", "surface", "text", "text_muted"
+    )
+    @classmethod
+    def validate_hex_color(cls, v: str) -> str:
+        """Validate that color is a valid 6-digit hex color."""
+        if not re.match(r"^#[0-9A-Fa-f]{6}$", v):
+            raise ValueError(f"Invalid hex color format: {v}. Expected #RRGGBB format.")
+        return v
 
 
 class BrandingAssets(BaseModel):
