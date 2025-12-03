@@ -115,11 +115,11 @@ strings:
 ### Configuration Minimale
 
 ```yaml
-# omnis.yaml
+# config/examples/glfos.yaml
 version: "1.0"
 
-# Chemin vers le dossier du thème (relatif à ce fichier)
-theme: "config/themes/glfos"
+# Chemin vers le dossier du thème (RELATIF à ce fichier config)
+theme: "../themes/glfos"  # Résout vers config/themes/glfos
 
 branding:
   name: "GLF OS"
@@ -147,7 +147,7 @@ jobs:
 
 ```yaml
 version: "1.0"
-theme: "config/themes/glfos"
+theme: "../themes/glfos"  # Relatif au fichier config
 
 branding:
   name: "GLF OS"

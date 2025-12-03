@@ -9,7 +9,8 @@
 version: "1.0"
 
 # Theme directory (contains all branding assets)
-theme: "config/themes/glfos"
+# Path relative to this config file
+theme: "../themes/glfos"
 
 # -----------------------------------------------------------------------------
 # Branding - Identité visuelle officielle GLF OS
