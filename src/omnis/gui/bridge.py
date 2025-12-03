@@ -20,6 +20,10 @@ class BrandingProxy(QObject):
     def __init__(self, engine: Engine, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._branding = engine.get_branding()
+        # Debug output
+        print(f"[Branding] Loaded: {self._branding.name}")
+        print(f"[Branding] Colors - primary: {self._branding.colors.primary}, "
+              f"bg: {self._branding.colors.background}, text: {self._branding.colors.text}")
 
     @Property(str, constant=True)
     def name(self) -> str:
