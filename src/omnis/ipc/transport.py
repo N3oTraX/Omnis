@@ -81,7 +81,7 @@ class UnixSocketTransport:
             # Only create and chmod if directory doesn't exist
             # Don't try to chmod system directories like /tmp
             if not socket_dir.exists():
-                socket_dir.mkdir(parents=True, mode=0o700)
+                socket_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
             elif socket_dir == Path("/run/omnis"):
                 # Ensure our dedicated directory has correct permissions
                 with contextlib.suppress(PermissionError):
