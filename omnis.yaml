@@ -1,0 +1,119 @@
+# =============================================================================
+# Omnis Installer - Configuration GLF OS
+# =============================================================================
+# Ce fichier définit le branding et le workflow d'installation.
+# Documentation : docs/architecture/overview.md
+
+version: "1.0"
+
+# -----------------------------------------------------------------------------
+# Branding - Personnalisation visuelle
+# -----------------------------------------------------------------------------
+branding:
+  # Identité
+  name: "GLF OS"
+  version: "2024.1"
+  edition: "Desktop"
+
+  # Couleurs (format hex)
+  colors:
+    primary: "#7C3AED"      # Violet principal
+    secondary: "#A78BFA"    # Violet clair
+    accent: "#F59E0B"       # Orange accent
+    background: "#1F2937"   # Fond sombre
+    surface: "#374151"      # Surface éléments
+    text: "#F9FAFB"         # Texte principal
+    text_muted: "#9CA3AF"   # Texte secondaire
+
+  # Assets (chemins relatifs à la racine config)
+  assets:
+    logo: "assets/glf-logo.svg"
+    logo_text: "assets/glf-logo-text.svg"
+    background: "assets/wallpaper.jpg"
+    icon: "assets/icon.png"
+
+  # Textes personnalisés
+  strings:
+    welcome_title: "Bienvenue sur GLF OS"
+    welcome_subtitle: "L'expérience Linux, réinventée."
+    install_button: "Installer GLF OS"
+    finished_title: "Installation terminée !"
+    finished_message: "GLF OS est prêt. Redémarrez pour commencer."
+
+# -----------------------------------------------------------------------------
+# Jobs - Workflow d'installation
+# -----------------------------------------------------------------------------
+# Ordre d'exécution séquentiel. Chaque job peut avoir des paramètres.
+jobs:
+  # Écran d'accueil et vérifications
+  - name: welcome
+    config:
+      show_release_notes: true
+      check_requirements:
+        min_ram_gb: 2
+        min_disk_gb: 20
+        require_efi: false
+
+  # Sélection de la langue et région
+  - name: locale
+    config:
+      default_language: "fr_FR"
+      default_timezone: "Europe/Paris"
+      show_keyboard_preview: true
+
+  # Partitionnement
+  - name: partition
+    config:
+      default_filesystem: ext4
+      allow_encryption: true
+      allow_manual_partitioning: true
+      efi_partition_size_mb: 512
+      swap_strategy: auto  # auto | fixed | none
+
+  # Installation du système
+  - name: install
+    config:
+      source: "/run/archiso/bootmnt/arch/x86_64/airootfs.sfs"
+      method: rsync  # rsync | unsquashfs
+      preserve_permissions: true
+
+  # Configuration utilisateur
+  - name: users
+    config:
+      require_root_password: false
+      default_shell: "/bin/zsh"
+      default_groups:
+        - wheel
+        - video
+        - audio
+        - storage
+
+  # Bootloader
+  - name: bootloader
+    config:
+      type: grub  # grub | systemd-boot | refind
+      install_path: auto
+      enable_os_prober: true
+
+  # Finalization
+  - name: finished
+    config:
+      show_install_log: true
+      auto_reboot_delay: 10  # secondes, 0 = manuel
+
+# -----------------------------------------------------------------------------
+# Options avancées
+# -----------------------------------------------------------------------------
+advanced:
+  # Logging
+  log_level: info  # debug | info | warning | error
+  log_file: "/var/log/omnis-install.log"
+
+  # IPC
+  ipc_socket: "/run/omnis/ipc.sock"
+
+  # Timeout jobs (secondes)
+  job_timeout: 3600
+
+  # Mode debug (affiche plus d'infos dans l'UI)
+  debug_mode: false

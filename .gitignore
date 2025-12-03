@@ -205,3 +205,29 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# =============================================================================
+# Omnis Installer - Project Specific
+# =============================================================================
+
+# Qt/QML artifacts
+*.qmlc
+*.jsc
+.qmlcache/
+qmldir.cache
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Omnis runtime
+/logs/
+*.log
+omnis-debug.yaml
+
+# Local development overrides
+local.yaml
+*.local.yaml
