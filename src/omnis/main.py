@@ -146,16 +146,6 @@ def main() -> int:
 
     branding = engine.get_branding()
 
-    # Resolve theme path (relative to config file directory)
-    theme_path = engine.get_theme_path()
-    if theme_path:
-        theme_base = (config_path.parent / theme_path).resolve()
-    else:
-        theme_base = config_path.parent
-
-    if args.debug:
-        print(f"Theme base: {theme_base}")
-
     # Create Qt application
     app = create_application(branding)
 
@@ -163,7 +153,7 @@ def main() -> int:
     qml_engine = QQmlApplicationEngine()
 
     # Create bridge between QML and Python engine
-    bridge = EngineBridge(engine, theme_base, debug=args.debug, dry_run=args.dry_run)
+    bridge = EngineBridge(engine, debug=args.debug, dry_run=args.dry_run)
 
     # Expose bridge to QML
     qml_engine.rootContext().setContextProperty("engine", bridge)
