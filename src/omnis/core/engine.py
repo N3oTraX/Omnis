@@ -31,9 +31,18 @@ class BrandingAssets(BaseModel):
     """Asset paths for UI branding."""
 
     logo: str = ""
-    logo_text: str = ""
+    logo_light: str = ""
+    logo_small: str = ""
     background: str = ""
     icon: str = ""
+
+
+class BrandingFonts(BaseModel):
+    """Typography configuration."""
+
+    primary: str = "sans-serif"
+    display: str = "sans-serif"
+    monospace: str = "monospace"
 
 
 class BrandingStrings(BaseModel):
@@ -55,6 +64,7 @@ class BrandingConfig(BaseModel):
     colors: BrandingColors = Field(default_factory=BrandingColors)
     assets: BrandingAssets = Field(default_factory=BrandingAssets)
     strings: BrandingStrings = Field(default_factory=BrandingStrings)
+    fonts: BrandingFonts = Field(default_factory=BrandingFonts)
 
 
 class JobDefinition(BaseModel):

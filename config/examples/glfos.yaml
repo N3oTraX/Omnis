@@ -1,58 +1,67 @@
 # =============================================================================
 # Omnis Installer - Configuration GLF OS
 # =============================================================================
-# Ce fichier définit le branding et le workflow d'installation.
-# Documentation : docs/architecture/overview.md
+# GLF OS - Gaming Linux FR
+# Base: NixOS | Desktop: GNOME/KDE
+# Source: https://www.gaminglinux.fr/glf-os/
+# Repo: https://github.com/Gaming-Linux-FR/GLF-OS
 
 version: "1.0"
 
 # -----------------------------------------------------------------------------
-# Branding - Personnalisation visuelle
+# Branding - Identité visuelle officielle GLF OS
 # -----------------------------------------------------------------------------
 branding:
   # Identité
   name: "GLF OS"
-  version: "2024.1"
-  edition: "Desktop"
+  version: "Omnislash"
+  edition: "Gaming"
 
-  # Couleurs (format hex)
+  # Couleurs officielles (source: gaminglinux.fr)
   colors:
-    primary: "#7C3AED"      # Violet principal
-    secondary: "#A78BFA"    # Violet clair
-    accent: "#F59E0B"       # Orange accent
-    background: "#1F2937"   # Fond sombre
-    surface: "#374151"      # Surface éléments
-    text: "#F9FAFB"         # Texte principal
+    primary: "#5597e6"      # Bleu GLF (titres, accents)
+    secondary: "#4a8bd4"    # Bleu secondaire
+    accent: "#5597e6"       # Accent (même que primary)
+    background: "#1a1a1a"   # Fond sombre
+    surface: "#32373c"      # Surface éléments/boutons
+    text: "#fffded"         # Texte principal (cream)
     text_muted: "#9CA3AF"   # Texte secondaire
 
-  # Assets (chemins relatifs à la racine config)
+  # Assets (chemins relatifs - logos depuis le repo officiel)
+  # https://github.com/Gaming-Linux-FR/GLF-OS/tree/main/assets/logo
   assets:
-    logo: "assets/glf-logo.svg"
-    logo_text: "assets/glf-logo-text.svg"
-    background: "assets/wallpaper.jpg"
-    icon: "assets/icon.png"
+    logo: "assets/logo/logo.png"
+    logo_light: "assets/logo/logo_light.png"
+    logo_small: "assets/logo/logo-64.png"
+    background: "assets/wallpaper/wallpaper.png"
+    icon: "assets/logo/logo-256.png"
 
   # Textes personnalisés
   strings:
     welcome_title: "Bienvenue sur GLF OS"
-    welcome_subtitle: "L'expérience Linux, réinventée."
+    welcome_subtitle: "Linux Gaming made easy!"
     install_button: "Installer GLF OS"
     finished_title: "Installation terminée !"
-    finished_message: "GLF OS est prêt. Redémarrez pour commencer."
+    finished_message: "GLF OS est prêt. Redémarrez pour découvrir le gaming sur Linux."
+
+  # Typographie (référence)
+  fonts:
+    primary: "Poppins"
+    display: "Lemon Milk"
+    monospace: "Roboto Mono"
 
 # -----------------------------------------------------------------------------
-# Jobs - Workflow d'installation
+# Jobs - Workflow d'installation NixOS
 # -----------------------------------------------------------------------------
-# Ordre d'exécution séquentiel. Chaque job peut avoir des paramètres.
 jobs:
   # Écran d'accueil et vérifications
   - name: welcome
     config:
       show_release_notes: true
       check_requirements:
-        min_ram_gb: 2
-        min_disk_gb: 20
-        require_efi: false
+        min_ram_gb: 4
+        min_disk_gb: 40
+        require_efi: true  # NixOS recommande EFI
 
   # Sélection de la langue et région
   - name: locale
@@ -68,52 +77,46 @@ jobs:
       allow_encryption: true
       allow_manual_partitioning: true
       efi_partition_size_mb: 512
-      swap_strategy: auto  # auto | fixed | none
+      swap_strategy: auto
 
-  # Installation du système
+  # Installation du système (NixOS)
   - name: install
     config:
-      source: "/run/archiso/bootmnt/arch/x86_64/airootfs.sfs"
-      method: rsync  # rsync | unsquashfs
+      source: "/iso/nixos"
+      method: nixos-install
       preserve_permissions: true
 
   # Configuration utilisateur
   - name: users
     config:
       require_root_password: false
-      default_shell: "/bin/zsh"
+      default_shell: "/bin/bash"
       default_groups:
         - wheel
         - video
         - audio
         - storage
+        - input  # Pour les manettes gaming
 
   # Bootloader
   - name: bootloader
     config:
-      type: grub  # grub | systemd-boot | refind
+      type: systemd-boot
       install_path: auto
-      enable_os_prober: true
+      enable_os_prober: false  # NixOS gère son propre boot
 
   # Finalization
   - name: finished
     config:
       show_install_log: true
-      auto_reboot_delay: 10  # secondes, 0 = manuel
+      auto_reboot_delay: 10
 
 # -----------------------------------------------------------------------------
 # Options avancées
 # -----------------------------------------------------------------------------
 advanced:
-  # Logging
-  log_level: info  # debug | info | warning | error
+  log_level: info
   log_file: "/var/log/omnis-install.log"
-
-  # IPC
   ipc_socket: "/run/omnis/ipc.sock"
-
-  # Timeout jobs (secondes)
   job_timeout: 3600
-
-  # Mode debug (affiche plus d'infos dans l'UI)
   debug_mode: false
