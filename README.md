@@ -43,8 +43,11 @@ Omnis/
 │   ├── api/                # Référence API
 │   └── branding/           # Guide personnalisation
 ├── config/
-│   └── examples/           # Configurations exemples
-├── omnis.yaml              # Configuration principale (exemple GLF OS)
+│   └── examples/           # Configurations par distribution
+│       ├── glfos.yaml      # GLF OS
+│       ├── archlinux.yaml  # Arch Linux
+│       └── minimal.yaml    # Template minimal
+├── omnis.yaml.example      # Template de configuration
 └── pyproject.toml          # Configuration projet Python
 ```
 
@@ -92,25 +95,40 @@ ruff format src/
 
 ---
 
-## Configuration (omnis.yaml)
+## Configuration
 
-Le fichier `omnis.yaml` définit le branding et le workflow d'installation :
+Chaque distribution fournit son propre fichier `omnis.yaml`. Copiez le template et personnalisez :
+
+```bash
+cp omnis.yaml.example omnis.yaml
+# ou utilisez une config existante
+cp config/examples/archlinux.yaml omnis.yaml
+```
+
+Structure d'une configuration :
 
 ```yaml
 branding:
-  name: "GLF OS"
-  accent_color: "#7C3AED"
+  name: "Ma Distribution"
+  colors:
+    primary: "#3B82F6"
+  strings:
+    welcome_title: "Bienvenue"
 
 jobs:
-  - welcome
-  - locale
-  - partition
-  - install
-  - bootloader
-  - finished
+  - name: welcome
+  - name: locale
+    config:
+      default_language: "fr_FR"
+  - name: partition
+  - name: install
+  - name: finished
 ```
 
-Voir `config/examples/` pour des configurations complètes.
+Configurations disponibles dans `config/examples/` :
+- `glfos.yaml` - GLF OS (complet)
+- `archlinux.yaml` - Arch Linux
+- `minimal.yaml` - Template minimal
 
 ---
 
