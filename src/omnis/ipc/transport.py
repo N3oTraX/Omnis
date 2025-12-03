@@ -78,8 +78,14 @@ class UnixSocketTransport:
         # Ensure socket directory exists with secure permissions
         socket_dir = self.socket_path.parent
         try:
-            socket_dir.mkdir(parents=True, exist_ok=True)
-            os.chmod(socket_dir, 0o700)  # Owner only
+            # Only create and chmod if directory doesn't exist
+            # Don't try to chmod system directories like /tmp
+            if not socket_dir.exists():
+                socket_dir.mkdir(parents=True, mode=0o700)
+            elif socket_dir == Path("/run/omnis"):
+                # Ensure our dedicated directory has correct permissions
+                with contextlib.suppress(PermissionError):
+                    os.chmod(socket_dir, 0o700)
         except OSError as e:
             raise IPCConnectionError(
                 f"Failed to create socket directory: {e}",
