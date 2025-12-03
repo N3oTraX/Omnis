@@ -43,8 +43,8 @@ def parse_args() -> argparse.Namespace:
         "-c",
         "--config",
         type=Path,
-        default=Path("omnis.yaml"),
-        help="Path to configuration file (default: omnis.yaml)",
+        default=None,
+        help="Path to configuration file (default: auto-detect)",
     )
 
     parser.add_argument(
@@ -60,6 +60,41 @@ def parse_args() -> argparse.Namespace:
     )
 
     return parser.parse_args()
+
+
+def find_config_file(explicit_path: Path | None = None) -> Path:
+    """
+    Locate configuration file.
+
+    Search order:
+    1. Explicit path from --config
+    2. omnis.yaml in current directory
+    3. config/examples/glfos.yaml (development fallback)
+    """
+    if explicit_path is not None:
+        if explicit_path.exists():
+            return explicit_path
+        raise ConfigurationError(
+            f"Configuration file not found: {explicit_path}\n"
+            f"Create one with: cp omnis.yaml.example omnis.yaml"
+        )
+
+    # Search locations
+    candidates = [
+        Path("omnis.yaml"),
+        Path("config/examples/glfos.yaml"),
+        Path("/etc/omnis/omnis.yaml"),
+    ]
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    raise ConfigurationError(
+        "No configuration file found.\n"
+        "Create one with: cp omnis.yaml.example omnis.yaml\n"
+        "Or specify: omnis --config config/examples/glfos.yaml"
+    )
 
 
 def find_qml_file() -> Path:
@@ -99,9 +134,12 @@ def main() -> int:
     """
     args = parse_args()
 
-    # Load configuration
+    # Find and load configuration
     try:
-        engine = Engine.from_config_file(args.config)
+        config_path = find_config_file(args.config)
+        if args.debug:
+            print(f"Using config: {config_path}")
+        engine = Engine.from_config_file(config_path)
     except ConfigurationError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
