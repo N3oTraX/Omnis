@@ -854,6 +854,14 @@ class TestIPCIntegration:
                     client = IPCClient(socket_path)
                     client.connect()
                     clients.append(client)
+                    # Small delay to allow server to register the client
+                    time.sleep(0.05)
+
+                # Wait for all clients to be registered (with timeout)
+                timeout = 2.0
+                start = time.time()
+                while server.connected_clients < 3 and time.time() - start < timeout:
+                    time.sleep(0.05)
 
                 # Verify all connected
                 assert server.connected_clients == 3
