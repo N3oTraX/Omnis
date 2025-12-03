@@ -253,6 +253,10 @@ class Engine:
         """Get branding configuration for UI."""
         return self.config.branding
 
+    def get_theme_path(self) -> str:
+        """Get theme directory path from configuration."""
+        return self.config.theme
+
     def get_job_names(self) -> list[str]:
         """Get ordered list of job names."""
         return [job.name for job in self.jobs]
