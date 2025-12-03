@@ -236,7 +236,7 @@ strings:
 ```yaml
 # config/examples/ma-distro.yaml
 version: "1.0"
-theme: "config/themes/ma-distro"
+theme: "../themes/ma-distro"  # Relatif au fichier config
 
 branding:
   name: "Ma Distribution"
