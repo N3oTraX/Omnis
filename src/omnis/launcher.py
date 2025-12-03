@@ -136,8 +136,8 @@ class EngineProcess:
             # Start engine process
             self._process = subprocess.Popen(
                 full_cmd,
-                stdout=subprocess.PIPE if not self.debug else None,
-                stderr=subprocess.PIPE if not self.debug else None,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 start_new_session=True,  # Detach from terminal
             )
             self._started = True
