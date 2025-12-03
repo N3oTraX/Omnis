@@ -478,3 +478,209 @@ class TestIPCSecurityValidator:
 
         for cmd in Command:
             assert cmd.value in ALLOWED_COMMANDS
+
+
+class TestIPCDispatcher:
+    """Tests for IPC message dispatcher."""
+
+    def test_dispatcher_initialization(self) -> None:
+        """Dispatcher should initialize with empty handlers."""
+        from omnis.ipc import IPCDispatcher
+
+        dispatcher = IPCDispatcher()
+        assert len(dispatcher.registered_commands) == 0
+
+    def test_register_handler(self) -> None:
+        """Should register a command handler."""
+        from omnis.ipc import IPCDispatcher
+
+        dispatcher = IPCDispatcher()
+
+        def handler(args: dict) -> dict:
+            return {"result": "ok"}
+
+        dispatcher.register(Command.GET_STATUS, handler)
+        assert dispatcher.has_handler(Command.GET_STATUS)
+        assert "GET_STATUS" in dispatcher.registered_commands
+
+    def test_unregister_handler(self) -> None:
+        """Should unregister a command handler."""
+        from omnis.ipc import IPCDispatcher
+
+        dispatcher = IPCDispatcher()
+
+        def handler(args: dict) -> dict:
+            return {}
+
+        dispatcher.register(Command.PING, handler)
+        assert dispatcher.has_handler(Command.PING)
+
+        result = dispatcher.unregister(Command.PING)
+        assert result is True
+        assert not dispatcher.has_handler(Command.PING)
+
+    def test_dispatch_success(self) -> None:
+        """Should dispatch message to handler and return response."""
+        from omnis.ipc import IPCDispatcher
+
+        dispatcher = IPCDispatcher()
+
+        def handler(args: dict) -> dict:
+            return {"echo": args.get("data", "")}
+
+        dispatcher.register(Command.GET_STATUS, handler)
+
+        request = IPCMessage.create_request(Command.GET_STATUS, {"data": "test"})
+        response = dispatcher.dispatch(request)
+
+        assert response.is_success
+        assert response.result["echo"] == "test"
+
+    def test_dispatch_unknown_command(self) -> None:
+        """Should return error for unknown command."""
+        from omnis.ipc import IPCDispatcher
+
+        dispatcher = IPCDispatcher()
+        request = IPCMessage.create_request(Command.SHUTDOWN, {})
+        response = dispatcher.dispatch(request)
+
+        assert not response.is_success
+        assert response.error["code"] == "UNKNOWN_COMMAND"
+
+    def test_dispatch_handler_error(self) -> None:
+        """Should return error when handler raises exception."""
+        from omnis.ipc import IPCDispatcher
+
+        dispatcher = IPCDispatcher()
+
+        def bad_handler(args: dict) -> dict:
+            raise ValueError("Handler failed")
+
+        dispatcher.register(Command.GET_STATUS, bad_handler)
+        request = IPCMessage.create_request(Command.GET_STATUS, {})
+        response = dispatcher.dispatch(request)
+
+        assert not response.is_success
+        assert response.error["code"] == "HANDLER_ERROR"
+
+    def test_create_default_dispatcher(self) -> None:
+        """Default dispatcher should have PING handler."""
+        from omnis.ipc import create_default_dispatcher
+
+        dispatcher = create_default_dispatcher()
+        assert dispatcher.has_handler(Command.PING)
+
+        request = IPCMessage.create_request(Command.PING, {"echo": "hello"})
+        response = dispatcher.dispatch(request)
+
+        assert response.is_success
+        assert response.result["pong"] is True
+        assert response.result["echo"] == "hello"
+
+
+class TestIPCServer:
+    """Tests for IPC server."""
+
+    def test_server_initialization(self) -> None:
+        """Server should initialize with default values."""
+        from omnis.ipc import IPCServer
+
+        server = IPCServer("/tmp/test_ipc_init.sock")
+        assert not server.is_running
+        assert server.connected_clients == 0
+
+    def test_server_start_stop(self) -> None:
+        """Server should start and stop correctly."""
+        from omnis.ipc import IPCServer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+            server = IPCServer(socket_path)
+
+            server.start()
+            assert server.is_running
+
+            server.stop(timeout=2.0)
+            assert not server.is_running
+
+    def test_server_context_manager(self) -> None:
+        """Server should work as context manager."""
+        from omnis.ipc import IPCServer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+
+            with IPCServer(socket_path) as server:
+                assert server.is_running
+
+            assert not server.is_running
+
+    def test_server_client_ping(self) -> None:
+        """Client should be able to ping server."""
+        from omnis.ipc import IPCServer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+
+            with IPCServer(socket_path) as server:
+                # Give server time to start
+                time.sleep(0.1)
+
+                # Connect client
+                client = UnixSocketTransport(socket_path)
+                client_sock = client.connect_client_socket()
+
+                # Send ping
+                request = IPCMessage.create_request(Command.PING, {"echo": "test"})
+                client.send_message(client_sock, request)
+
+                # Receive response
+                response = client.recv_message(client_sock)
+
+                client_sock.close()
+
+            assert response is not None
+            assert response.is_success
+            assert response.result["pong"] is True
+            assert response.result["echo"] == "test"
+
+    def test_server_custom_handler(self) -> None:
+        """Server should use custom dispatcher handlers."""
+        from omnis.ipc import IPCDispatcher, IPCServer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+
+            # Create custom dispatcher
+            dispatcher = IPCDispatcher()
+
+            def status_handler(args: dict) -> dict:
+                return {"status": "running", "progress": 50}
+
+            dispatcher.register(Command.GET_STATUS, status_handler)
+            dispatcher.register(Command.PING, lambda args: {"pong": True})
+
+            with IPCServer(socket_path, dispatcher=dispatcher) as server:
+                time.sleep(0.1)
+
+                client = UnixSocketTransport(socket_path)
+                client_sock = client.connect_client_socket()
+
+                request = IPCMessage.create_request(Command.GET_STATUS, {})
+                client.send_message(client_sock, request)
+
+                response = client.recv_message(client_sock)
+                client_sock.close()
+
+            assert response is not None
+            assert response.is_success
+            assert response.result["status"] == "running"
+            assert response.result["progress"] == 50
+
+    def test_create_engine_server(self) -> None:
+        """create_engine_server should return configured server."""
+        from omnis.ipc import IPCServer, create_engine_server
+
+        server = create_engine_server("/tmp/test_engine.sock")
+        assert isinstance(server, IPCServer)
+        assert server.dispatcher.has_handler(Command.PING)
