@@ -6,10 +6,9 @@ Exposes engine functionality to QML via Qt properties and signals.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QObject, Property, Signal, Slot, QUrl
+from PySide6.QtCore import QObject, Property, Signal, Slot
 
 if TYPE_CHECKING:
     from omnis.core.engine import Engine
@@ -18,21 +17,13 @@ if TYPE_CHECKING:
 class BrandingProxy(QObject):
     """Exposes branding configuration to QML."""
 
-    def __init__(
-        self, engine: Engine, theme_base: Path, parent: QObject | None = None
-    ) -> None:
+    def __init__(self, engine: Engine, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._branding = engine.get_branding()
-        self._theme_base = theme_base
-
-    def _resolve_asset(self, relative_path: str) -> str:
-        """Resolve asset path to absolute file:// URL."""
-        if not relative_path:
-            return ""
-        full_path = self._theme_base / relative_path
-        if full_path.exists():
-            return QUrl.fromLocalFile(str(full_path.resolve())).toString()
-        return ""
+        # Debug output
+        print(f"[Branding] Loaded: {self._branding.name}")
+        print(f"[Branding] Colors - primary: {self._branding.colors.primary}, "
+              f"bg: {self._branding.colors.background}, text: {self._branding.colors.text}")
 
     @Property(str, constant=True)
     def name(self) -> str:
@@ -99,31 +90,10 @@ class BrandingProxy(QObject):
         """Install button text."""
         return self._branding.strings.install_button
 
-    # Asset paths (resolved to absolute file:// URLs)
     @Property(str, constant=True)
-    def logoUrl(self) -> str:
-        """URL to main logo."""
-        return self._resolve_asset(self._branding.assets.logo)
-
-    @Property(str, constant=True)
-    def logoLightUrl(self) -> str:
-        """URL to light variant logo."""
-        return self._resolve_asset(self._branding.assets.logo_light)
-
-    @Property(str, constant=True)
-    def logoSmallUrl(self) -> str:
-        """URL to small logo (64px)."""
-        return self._resolve_asset(self._branding.assets.logo_small)
-
-    @Property(str, constant=True)
-    def backgroundUrl(self) -> str:
-        """URL to background wallpaper."""
-        return self._resolve_asset(self._branding.assets.background)
-
-    @Property(str, constant=True)
-    def iconUrl(self) -> str:
-        """URL to icon."""
-        return self._resolve_asset(self._branding.assets.icon)
+    def logoPath(self) -> str:
+        """Path to logo asset."""
+        return self._branding.assets.logo
 
 
 class EngineBridge(QObject):
@@ -148,7 +118,6 @@ class EngineBridge(QObject):
     def __init__(
         self,
         engine: Engine,
-        theme_base: Path,
         debug: bool = False,
         dry_run: bool = False,
         parent: QObject | None = None,
@@ -157,7 +126,7 @@ class EngineBridge(QObject):
         self._engine = engine
         self._debug = debug
         self._dry_run = dry_run
-        self._branding_proxy = BrandingProxy(engine, theme_base, self)
+        self._branding_proxy = BrandingProxy(engine, self)
 
         # Connect engine callbacks
         self._engine.on_job_start = self._on_job_start
