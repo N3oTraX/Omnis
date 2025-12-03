@@ -358,7 +358,7 @@ class TestIPCSecurityValidator:
 
     def test_validate_disallowed_command(self) -> None:
         """Disallowed commands should be rejected."""
-        from omnis.ipc import IPCSecurityValidator, IPCSecurityError
+        from omnis.ipc import IPCSecurityError, IPCSecurityValidator
 
         validator = IPCSecurityValidator(allowed_commands=frozenset(["GET_STATUS"]))
         msg = IPCMessage.create_request(Command.START_INSTALLATION, {})
@@ -369,7 +369,7 @@ class TestIPCSecurityValidator:
 
     def test_validate_path_traversal_rejected(self) -> None:
         """Path traversal attempts should be rejected."""
-        from omnis.ipc import IPCSecurityValidator, IPCSecurityError
+        from omnis.ipc import IPCSecurityError, IPCSecurityValidator
 
         validator = IPCSecurityValidator()
 
@@ -389,7 +389,7 @@ class TestIPCSecurityValidator:
 
     def test_validate_path_disallowed_root(self) -> None:
         """Paths outside allowed roots should be rejected."""
-        from omnis.ipc import IPCSecurityValidator, IPCSecurityError
+        from omnis.ipc import IPCSecurityError, IPCSecurityValidator
 
         validator = IPCSecurityValidator()
 
@@ -399,7 +399,7 @@ class TestIPCSecurityValidator:
 
     def test_validate_dangerous_patterns(self) -> None:
         """Dangerous shell patterns should be rejected."""
-        from omnis.ipc import IPCSecurityValidator, IPCSecurityError
+        from omnis.ipc import IPCSecurityError, IPCSecurityValidator
 
         validator = IPCSecurityValidator()
         dangerous_values = [
@@ -433,7 +433,7 @@ class TestIPCSecurityValidator:
         # Create deeply nested structure
         nested: dict = {}
         current = nested
-        for i in range(15):
+        for _ in range(15):
             current["level"] = {}
             current = current["level"]
 
@@ -496,7 +496,7 @@ class TestIPCDispatcher:
 
         dispatcher = IPCDispatcher()
 
-        def handler(args: dict) -> dict:
+        def handler(_args: dict) -> dict:
             return {"result": "ok"}
 
         dispatcher.register(Command.GET_STATUS, handler)
@@ -509,7 +509,7 @@ class TestIPCDispatcher:
 
         dispatcher = IPCDispatcher()
 
-        def handler(args: dict) -> dict:
+        def handler(_args: dict) -> dict:
             return {}
 
         dispatcher.register(Command.PING, handler)
@@ -553,7 +553,7 @@ class TestIPCDispatcher:
 
         dispatcher = IPCDispatcher()
 
-        def bad_handler(args: dict) -> dict:
+        def bad_handler(_args: dict) -> dict:
             raise ValueError("Handler failed")
 
         dispatcher.register(Command.GET_STATUS, bad_handler)
@@ -622,7 +622,7 @@ class TestIPCServer:
         with tempfile.TemporaryDirectory() as tmpdir:
             socket_path = Path(tmpdir) / "test.sock"
 
-            with IPCServer(socket_path) as server:
+            with IPCServer(socket_path):
                 # Give server time to start
                 time.sleep(0.1)
 
@@ -654,13 +654,13 @@ class TestIPCServer:
             # Create custom dispatcher
             dispatcher = IPCDispatcher()
 
-            def status_handler(args: dict) -> dict:
+            def status_handler(_args: dict) -> dict:
                 return {"status": "running", "progress": 50}
 
             dispatcher.register(Command.GET_STATUS, status_handler)
-            dispatcher.register(Command.PING, lambda args: {"pong": True})
+            dispatcher.register(Command.PING, lambda _: {"pong": True})
 
-            with IPCServer(socket_path, dispatcher=dispatcher) as server:
+            with IPCServer(socket_path, dispatcher=dispatcher):
                 time.sleep(0.1)
 
                 client = UnixSocketTransport(socket_path)
@@ -711,7 +711,7 @@ class TestIPCClient:
         with tempfile.TemporaryDirectory() as tmpdir:
             socket_path = Path(tmpdir) / "test.sock"
 
-            with IPCServer(socket_path) as server:
+            with IPCServer(socket_path):
                 time.sleep(0.1)
 
                 with IPCClient(socket_path) as client:
@@ -726,7 +726,7 @@ class TestIPCClient:
         with tempfile.TemporaryDirectory() as tmpdir:
             socket_path = Path(tmpdir) / "test.sock"
 
-            with IPCServer(socket_path) as server:
+            with IPCServer(socket_path):
                 time.sleep(0.1)
 
                 with IPCClient(socket_path) as client:
@@ -744,13 +744,13 @@ class TestIPCClient:
 
             dispatcher = IPCDispatcher()
 
-            def status_handler(args: dict) -> dict:
+            def status_handler(_args: dict) -> dict:
                 return {"status": "idle", "jobs": []}
 
             dispatcher.register(Command.GET_STATUS, status_handler)
-            dispatcher.register(Command.PING, lambda args: {"pong": True})
+            dispatcher.register(Command.PING, lambda _: {"pong": True})
 
-            with IPCServer(socket_path, dispatcher=dispatcher) as server:
+            with IPCServer(socket_path, dispatcher=dispatcher):
                 time.sleep(0.1)
 
                 with IPCClient(socket_path) as client:
@@ -835,3 +835,305 @@ class TestIPCClient:
 
         client = create_ui_client("/tmp/test_ui.sock")
         assert isinstance(client, IPCClient)
+
+
+class TestIPCIntegration:
+    """Integration tests for complete IPC workflows."""
+
+    def test_multiple_clients(self) -> None:
+        """Server should handle multiple concurrent clients."""
+        from omnis.ipc import IPCClient, IPCServer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+
+            with IPCServer(socket_path) as server:
+                time.sleep(0.1)
+
+                # Connect multiple clients
+                clients = []
+                for _ in range(3):
+                    client = IPCClient(socket_path)
+                    client.connect()
+                    clients.append(client)
+
+                # Verify all connected
+                assert server.connected_clients == 3
+
+                # Each client pings
+                for i, client in enumerate(clients):
+                    result = client.ping(f"client_{i}")
+                    assert result["pong"] is True
+                    assert result["echo"] == f"client_{i}"
+
+                # Disconnect clients
+                for client in clients:
+                    client.disconnect()
+
+    def test_event_broadcast_to_multiple_clients(self) -> None:
+        """Events should be broadcast to all connected clients."""
+        from omnis.ipc import IPCClient, IPCServer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+
+            received_events: list[list[tuple[str, dict]]] = [[], [], []]
+
+            from collections.abc import Callable
+            def make_handler(idx: int) -> Callable[[str, dict], None]:
+                def handler(event_type: str, data: dict) -> None:
+                    received_events[idx].append((event_type, data))
+                return handler
+
+            with IPCServer(socket_path) as server:
+                time.sleep(0.1)
+
+                clients = []
+                for i in range(3):
+                    client = IPCClient(socket_path)
+                    client.connect()
+                    client.subscribe_event(None, make_handler(i))
+                    clients.append(client)
+
+                time.sleep(0.1)
+
+                # Broadcast event
+                server.broadcast_event(Event.JOB_COMPLETED, {"job": "test"})
+
+                # Wait for all clients to receive
+                for _ in range(10):
+                    time.sleep(0.1)
+                    if all(len(events) >= 1 for events in received_events):
+                        break
+
+                # Disconnect
+                for client in clients:
+                    client.disconnect()
+
+            # Each client should have received the event
+            for events in received_events:
+                assert len(events) >= 1
+                assert events[0][0] == "JOB_COMPLETED"
+
+    def test_command_error_handling(self) -> None:
+        """Client should properly handle command errors."""
+        from omnis.ipc import IPCClient, IPCDispatcher, IPCServer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+
+            dispatcher = IPCDispatcher()
+            dispatcher.register(Command.PING, lambda _: {"pong": True})
+
+            # Register handler that raises
+            def failing_handler(_args: dict) -> dict:
+                raise RuntimeError("Intentional failure")
+
+            dispatcher.register(Command.GET_STATUS, failing_handler)
+
+            with IPCServer(socket_path, dispatcher=dispatcher):
+                time.sleep(0.1)
+
+                with IPCClient(socket_path) as client:
+                    # Successful command
+                    result = client.ping()
+                    assert result["pong"] is True
+
+                    # Failing command should raise
+                    with pytest.raises(IPCProtocolError) as exc_info:
+                        client.get_status()
+
+                    assert "Intentional failure" in str(exc_info.value)
+
+    def test_client_disconnect_reconnect(self) -> None:
+        """Client should be able to disconnect and reconnect."""
+        from omnis.ipc import IPCClient, IPCServer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+
+            with IPCServer(socket_path):
+                time.sleep(0.1)
+
+                client = IPCClient(socket_path)
+
+                # First connection
+                client.connect()
+                assert client.is_connected
+                result1 = client.ping("first")
+                assert result1["echo"] == "first"
+
+                # Disconnect
+                client.disconnect()
+                assert not client.is_connected
+
+                # Reconnect
+                client.connect()
+                assert client.is_connected
+                result2 = client.ping("second")
+                assert result2["echo"] == "second"
+
+                client.disconnect()
+
+    def test_async_command_callback(self) -> None:
+        """Async commands should call callback with result."""
+        from omnis.ipc import IPCClient, IPCDispatcher, IPCServer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+
+            dispatcher = IPCDispatcher()
+
+            def slow_handler(args: dict) -> dict:
+                time.sleep(0.1)
+                return {"computed": args.get("value", 0) * 2}
+
+            dispatcher.register(Command.VALIDATE_CONFIG, slow_handler)
+            dispatcher.register(Command.PING, lambda _: {"pong": True})
+
+            callback_results: list[tuple] = []
+            callback_event = threading.Event()
+
+            def callback(result: dict | None, error: Exception | None) -> None:
+                callback_results.append((result, error))
+                callback_event.set()
+
+            with IPCServer(socket_path, dispatcher=dispatcher):
+                time.sleep(0.1)
+
+                with IPCClient(socket_path) as client:
+                    # Send async command
+                    request_id = client.send_command_async(
+                        Command.VALIDATE_CONFIG,
+                        {"value": 21},
+                        callback=callback,
+                    )
+
+                    assert request_id is not None
+
+                    # Wait for callback
+                    callback_event.wait(timeout=2.0)
+
+            # Verify callback was called with result
+            assert len(callback_results) == 1
+            result, error = callback_results[0]
+            assert error is None
+            assert result["computed"] == 42
+
+
+class TestLauncher:
+    """Tests for launcher module."""
+
+    def test_engine_process_not_started(self) -> None:
+        """EngineProcess should report not running before start."""
+        from omnis.launcher import EngineProcess
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "test.yaml"
+            config_path.write_text("branding:\n  name: Test\n")
+            socket_path = Path(tmpdir) / "test.sock"
+
+            process = EngineProcess(
+                config_path=config_path,
+                socket_path=socket_path,
+            )
+
+            assert not process.is_running
+
+    def test_create_engine_dispatcher(self) -> None:
+        """create_engine_dispatcher should return dispatcher with all handlers."""
+        from unittest.mock import MagicMock
+
+        from omnis.launcher import create_engine_dispatcher
+
+        # Create mock engine
+        mock_engine = MagicMock()
+        mock_engine.get_job_names.return_value = ["job1", "job2"]
+
+        mock_branding = MagicMock()
+        mock_branding.name = "Test"
+        mock_branding.version = "1.0"
+        mock_branding.edition = "Standard"
+        mock_branding.strings.welcome_title = "Welcome"
+        mock_branding.strings.welcome_subtitle = "Subtitle"
+        mock_branding.colors.primary = "#FF0000"
+        mock_branding.colors.secondary = "#00FF00"
+        mock_branding.colors.background = "#FFFFFF"
+        mock_branding.colors.text = "#000000"
+        mock_engine.get_branding.return_value = mock_branding
+
+        dispatcher = create_engine_dispatcher(mock_engine)
+
+        # Check all commands are registered
+        assert dispatcher.has_handler(Command.PING)
+        assert dispatcher.has_handler(Command.GET_STATUS)
+        assert dispatcher.has_handler(Command.GET_BRANDING)
+        assert dispatcher.has_handler(Command.GET_JOB_NAMES)
+        assert dispatcher.has_handler(Command.START_INSTALLATION)
+        assert dispatcher.has_handler(Command.CANCEL_INSTALLATION)
+        assert dispatcher.has_handler(Command.VALIDATE_CONFIG)
+        assert dispatcher.has_handler(Command.SHUTDOWN)
+
+    def test_create_engine_dispatcher_ping(self) -> None:
+        """Engine dispatcher PING handler should work."""
+        from unittest.mock import MagicMock
+
+        from omnis.launcher import create_engine_dispatcher
+
+        mock_engine = MagicMock()
+        dispatcher = create_engine_dispatcher(mock_engine)
+
+        request = IPCMessage.create_request(Command.PING, {"echo": "test"})
+        response = dispatcher.dispatch(request)
+
+        assert response.is_success
+        assert response.result["pong"] is True
+        assert response.result["echo"] == "test"
+
+    def test_create_engine_dispatcher_get_job_names(self) -> None:
+        """Engine dispatcher GET_JOB_NAMES handler should work."""
+        from unittest.mock import MagicMock
+
+        from omnis.launcher import create_engine_dispatcher
+
+        mock_engine = MagicMock()
+        mock_engine.get_job_names.return_value = ["partition", "format", "install"]
+
+        dispatcher = create_engine_dispatcher(mock_engine)
+
+        request = IPCMessage.create_request(Command.GET_JOB_NAMES, {})
+        response = dispatcher.dispatch(request)
+
+        assert response.is_success
+        assert response.result["jobs"] == ["partition", "format", "install"]
+
+    def test_create_engine_dispatcher_get_branding(self) -> None:
+        """Engine dispatcher GET_BRANDING handler should work."""
+        from unittest.mock import MagicMock
+
+        from omnis.launcher import create_engine_dispatcher
+
+        mock_engine = MagicMock()
+        mock_branding = MagicMock()
+        mock_branding.name = "TestOS"
+        mock_branding.version = "2.0"
+        mock_branding.edition = "Pro"
+        mock_branding.strings.welcome_title = "Welcome to TestOS"
+        mock_branding.strings.welcome_subtitle = "Install now"
+        mock_branding.colors.primary = "#123456"
+        mock_branding.colors.secondary = "#654321"
+        mock_branding.colors.background = "#FFFFFF"
+        mock_branding.colors.text = "#000000"
+        mock_engine.get_branding.return_value = mock_branding
+
+        dispatcher = create_engine_dispatcher(mock_engine)
+
+        request = IPCMessage.create_request(Command.GET_BRANDING, {})
+        response = dispatcher.dispatch(request)
+
+        assert response.is_success
+        assert response.result["name"] == "TestOS"
+        assert response.result["version"] == "2.0"
+        assert response.result["edition"] == "Pro"
+        assert response.result["welcome_title"] == "Welcome to TestOS"
+        assert response.result["colors"]["primary"] == "#123456"
