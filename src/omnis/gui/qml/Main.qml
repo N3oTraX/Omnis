@@ -35,9 +35,26 @@ ApplicationWindow {
 
     color: backgroundColor
 
-    // Background gradient
+    // Background wallpaper (with gradient fallback)
+    Image {
+        id: backgroundImage
+        anchors.fill: parent
+        source: branding.backgroundUrl
+        fillMode: Image.PreserveAspectCrop
+        visible: status === Image.Ready
+
+        // Dark overlay for readability
+        Rectangle {
+            anchors.fill: parent
+            color: backgroundColor
+            opacity: 0.3
+        }
+    }
+
+    // Fallback gradient when no wallpaper
     Rectangle {
         anchors.fill: parent
+        visible: backgroundImage.status !== Image.Ready
         gradient: Gradient {
             GradientStop { position: 0.0; color: backgroundColor }
             GradientStop { position: 1.0; color: Qt.darker(backgroundColor, 1.3) }
@@ -55,19 +72,33 @@ ApplicationWindow {
             Layout.fillWidth: true
             spacing: 16
 
-            // Logo placeholder
-            Rectangle {
+            // Logo
+            Item {
                 width: 48
                 height: 48
-                radius: 12
-                color: primaryColor
 
-                Text {
-                    anchors.centerIn: parent
-                    text: branding.name.charAt(0)
-                    font.pixelSize: 24
-                    font.bold: true
-                    color: textColor
+                Image {
+                    id: headerLogo
+                    anchors.fill: parent
+                    source: branding.logoSmallUrl
+                    fillMode: Image.PreserveAspectFit
+                    visible: status === Image.Ready
+                }
+
+                // Fallback when logo not available
+                Rectangle {
+                    anchors.fill: parent
+                    radius: 12
+                    color: primaryColor
+                    visible: headerLogo.status !== Image.Ready
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: branding.name.charAt(0)
+                        font.pixelSize: 24
+                        font.bold: true
+                        color: textColor
+                    }
                 }
             }
 
@@ -135,28 +166,42 @@ ApplicationWindow {
                     spacing: 24
                     width: Math.min(parent.width, 500)
 
-                    // Welcome icon
-                    Rectangle {
+                    // Welcome logo
+                    Item {
                         Layout.alignment: Qt.AlignHCenter
-                        width: 96
-                        height: 96
-                        radius: 48
-                        color: primaryColor
-                        opacity: 0.2
+                        width: 128
+                        height: 128
 
+                        Image {
+                            id: welcomeLogo
+                            anchors.fill: parent
+                            source: branding.logoUrl
+                            fillMode: Image.PreserveAspectFit
+                            visible: status === Image.Ready
+                        }
+
+                        // Fallback circle with initial
                         Rectangle {
-                            anchors.centerIn: parent
-                            width: 80
-                            height: 80
-                            radius: 40
+                            anchors.fill: parent
+                            radius: 64
                             color: primaryColor
+                            opacity: 0.2
+                            visible: welcomeLogo.status !== Image.Ready
 
-                            Text {
+                            Rectangle {
                                 anchors.centerIn: parent
-                                text: branding.name.charAt(0)
-                                font.pixelSize: 40
-                                font.bold: true
-                                color: textColor
+                                width: 100
+                                height: 100
+                                radius: 50
+                                color: primaryColor
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: branding.name.charAt(0)
+                                    font.pixelSize: 48
+                                    font.bold: true
+                                    color: textColor
+                                }
                             }
                         }
                     }

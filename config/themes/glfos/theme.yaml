@@ -1,0 +1,114 @@
+# =============================================================================
+# GLF OS Theme - Omnislash Edition
+# =============================================================================
+# Official branding assets for GLF OS installer
+# Source: https://github.com/Gaming-Linux-FR/GLF-OS
+# License: MIT
+
+metadata:
+  name: "GLF OS"
+  codename: "Omnislash"
+  version: "2025.1"
+  author: "Gaming Linux FR"
+  website: "https://www.gaminglinux.fr/glf-os/"
+  license: "MIT"
+
+# -----------------------------------------------------------------------------
+# Color Palette
+# -----------------------------------------------------------------------------
+colors:
+  # Primary colors (from gaminglinux.fr)
+  primary: "#5597e6"
+  secondary: "#4a8bd4"
+  accent: "#5597e6"
+
+  # Background colors
+  background: "#1a1a1a"
+  background_light: "#2d2d2d"
+  surface: "#32373c"
+
+  # Text colors
+  text: "#fffded"
+  text_muted: "#9CA3AF"
+  text_on_primary: "#ffffff"
+
+  # Status colors
+  success: "#10B981"
+  warning: "#F59E0B"
+  error: "#EF4444"
+
+# -----------------------------------------------------------------------------
+# Typography
+# -----------------------------------------------------------------------------
+fonts:
+  primary: "Poppins"
+  display: "Lemon Milk"
+  monospace: "Roboto Mono"
+  weights:
+    regular: 400
+    medium: 600
+    bold: 700
+
+# -----------------------------------------------------------------------------
+# Logo Assets
+# -----------------------------------------------------------------------------
+logos:
+  # Main logo (dark background)
+  main: "logos/logo.png"
+  main_256: "logos/logo-256.png"
+  main_128: "logos/logo-128.png"
+  main_64: "logos/logo-64.png"
+  main_32: "logos/logo-32.png"
+
+  # Light variant (light background)
+  light: "logos/logo_light.png"
+  light_256: "logos/logo_light-256.png"
+  light_128: "logos/logo_light-128.png"
+
+  # Special logos
+  mango: "logos/mango.svg"
+  selector: "logos/selector.svg"
+
+# -----------------------------------------------------------------------------
+# Wallpapers
+# -----------------------------------------------------------------------------
+wallpapers:
+  # Installer default
+  default: "wallpapers/dark.jpg"
+
+  # Alternatives
+  frost_dark: "wallpapers/frost-2-dark.png"
+  frost_light: "wallpapers/frost-2.png"
+  dalle_dark: "wallpapers/dalle-dark-glf.png"
+  dalle_light: "wallpapers/dalle-glf.png"
+
+# -----------------------------------------------------------------------------
+# Boot Assets
+# -----------------------------------------------------------------------------
+boot:
+  bootloader: "boot/glf-bootloader.png"
+  efi_icon: "boot/glf-efi.png"
+
+# -----------------------------------------------------------------------------
+# Installer Strings (French)
+# -----------------------------------------------------------------------------
+strings:
+  welcome_title: "Bienvenue sur GLF OS"
+  welcome_subtitle: "Linux Gaming made easy!"
+  install_button: "Installer GLF OS"
+
+  # Progress messages
+  progress_partitioning: "Partitionnement du disque..."
+  progress_installing: "Installation du système..."
+  progress_configuring: "Configuration..."
+  progress_bootloader: "Installation du bootloader..."
+
+  # Finish screen
+  finished_title: "Installation terminée !"
+  finished_message: "GLF OS est prêt. Redémarrez pour découvrir le gaming sur Linux."
+  reboot_button: "Redémarrer maintenant"
+
+  # Errors
+  error_generic: "Une erreur est survenue"
+  error_disk_space: "Espace disque insuffisant"
+  error_network: "Connexion réseau requise"

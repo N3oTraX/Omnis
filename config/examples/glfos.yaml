@@ -8,6 +8,10 @@
 
 version: "1.0"
 
+# Theme directory (contains all branding assets)
+# Path relative to this config file
+theme: "../themes/glfos"
+
 # -----------------------------------------------------------------------------
 # Branding - Identité visuelle officielle GLF OS
 # -----------------------------------------------------------------------------
@@ -27,14 +31,17 @@ branding:
     text: "#fffded"         # Texte principal (cream)
     text_muted: "#9CA3AF"   # Texte secondaire
 
-  # Assets (chemins relatifs - logos depuis le repo officiel)
-  # https://github.com/Gaming-Linux-FR/GLF-OS/tree/main/assets/logo
+  # Assets (chemins relatifs au theme directory)
   assets:
-    logo: "assets/logo/logo.png"
-    logo_light: "assets/logo/logo_light.png"
-    logo_small: "assets/logo/logo-64.png"
-    background: "assets/wallpaper/wallpaper.png"
-    icon: "assets/logo/logo-256.png"
+    logo: "logos/logo.png"
+    logo_light: "logos/logo_light.png"
+    logo_small: "logos/logo-64.png"
+    logo_256: "logos/logo-256.png"
+    background: "wallpapers/dark.jpg"
+    background_alt: "wallpapers/frost-2-dark.png"
+    icon: "logos/logo-256.png"
+    bootloader: "boot/glf-bootloader.png"
+    efi_icon: "boot/glf-efi.png"
 
   # Textes personnalisés
   strings:
@@ -44,7 +51,7 @@ branding:
     finished_title: "Installation terminée !"
     finished_message: "GLF OS est prêt. Redémarrez pour découvrir le gaming sur Linux."
 
-  # Typographie (référence)
+  # Typographie
   fonts:
     primary: "Poppins"
     display: "Lemon Milk"
