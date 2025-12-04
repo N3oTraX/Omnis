@@ -2,8 +2,7 @@
 
 import json
 import subprocess
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -899,7 +898,7 @@ class TestMountPartitions:
         )
 
         # Make only swapon fail
-        def run_cmd_side_effect(cmd: list[str], description: str, dry_run: bool) -> JobResult:
+        def run_cmd_side_effect(cmd: list[str], _description: str, _dry_run: bool) -> JobResult:
             if "swapon" in cmd:
                 return JobResult.fail("Swap activation failed")
             return JobResult.ok()
@@ -1026,7 +1025,7 @@ class TestRunMethod:
     @patch("omnis.jobs.partition.PartitionJob._partition_auto")
     @patch("omnis.jobs.partition.PartitionJob.validate")
     def test_run_manual_mode_not_implemented(
-        self, mock_validate: MagicMock, mock_partition: MagicMock
+        self, mock_validate: MagicMock, _mock_partition: MagicMock
     ) -> None:
         """run should fail for manual mode (not yet implemented)."""
         job = PartitionJob()

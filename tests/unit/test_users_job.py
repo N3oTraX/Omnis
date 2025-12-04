@@ -1,7 +1,7 @@
 """Unit tests for UsersJob."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, call, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
