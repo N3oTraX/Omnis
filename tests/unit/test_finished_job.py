@@ -385,9 +385,7 @@ class TestCleanupMounts:
             assert result.success is True
 
             # Verify swapoff was called
-            swapoff_calls = [
-                call for call in mock_run.call_args_list if "swapoff" in call[0][0]
-            ]
+            swapoff_calls = [call for call in mock_run.call_args_list if "swapoff" in call[0][0]]
             assert len(swapoff_calls) >= 1
 
     @patch("omnis.jobs.finished.FinishedJob._safe_unmount")
@@ -632,9 +630,7 @@ class TestFinishedJobRun:
 
     @patch("omnis.jobs.finished.FinishedJob._cleanup_mounts")
     @patch("omnis.jobs.finished.FinishedJob._save_logs")
-    def test_run_log_save_failure_non_critical(
-        self, mock_save: Mock, mock_cleanup: Mock
-    ) -> None:
+    def test_run_log_save_failure_non_critical(self, mock_save: Mock, mock_cleanup: Mock) -> None:
         """Should continue if log saving fails (non-critical)."""
         mock_save.return_value = JobResult.fail("Log save failed")
         mock_cleanup.return_value = JobResult.ok("Cleanup complete")
@@ -700,9 +696,7 @@ class TestFinishedJobIntegration:
     @patch("omnis.jobs.finished.FinishedJob._safe_unmount")
     @patch("omnis.jobs.finished.os.path.ismount")
     @patch("omnis.jobs.finished.subprocess.run")
-    def test_full_workflow(
-        self, mock_run: Mock, mock_ismount: Mock, mock_unmount: Mock
-    ) -> None:
+    def test_full_workflow(self, mock_run: Mock, mock_ismount: Mock, mock_unmount: Mock) -> None:
         """Test complete finished job workflow."""
         mock_unmount.return_value = True
         mock_ismount.return_value = True  # Simulate mounted filesystems
@@ -751,9 +745,7 @@ class TestFinishedJobIntegration:
 
     @patch("omnis.jobs.finished.FinishedJob._safe_unmount")
     @patch("omnis.jobs.finished.os.path.ismount")
-    def test_workflow_with_cleanup_failure(
-        self, mock_ismount: Mock, mock_unmount: Mock
-    ) -> None:
+    def test_workflow_with_cleanup_failure(self, mock_ismount: Mock, mock_unmount: Mock) -> None:
         """Test workflow when cleanup fails."""
         mock_ismount.return_value = True  # Simulate mounted filesystems
         mock_unmount.return_value = False  # Simulate unmount failure
