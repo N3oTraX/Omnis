@@ -135,10 +135,10 @@ class FinishedJob(BaseJob):
 
             # Copy Python logs if available (from /tmp or /var/log)
             for log_source in [Path("/tmp/omnis.log"), Path("/var/log/omnis.log")]:
-                    log_dest = log_dir / f"{log_source.name}-{datetime.now():%Y%m%d-%H%M%S}.log"
-                    log_dest = log_dir / f"omnis-{datetime.now():%Y%m%d-%H%M%S}.log"
-                    shutil.copy2(log_source, log_dest)
-                    logger.info(f"Copied log file: {log_source} -> {log_dest}")
+                log_dest = log_dir / f"{log_source.name}-{datetime.now():%Y%m%d-%H%M%S}.log"
+                log_dest = log_dir / f"omnis-{datetime.now():%Y%m%d-%H%M%S}.log"
+                shutil.copy2(log_source, log_dest)
+                logger.info(f"Copied log file: {log_source} -> {log_dest}")
 
             return JobResult.ok(f"Logs saved to {log_dir}")
 

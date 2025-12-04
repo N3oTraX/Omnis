@@ -789,9 +789,7 @@ class EngineBridge(QObject):
                             )
 
                         # Determine disk type
-                        is_removable = device.get("hotplug") == "1" or device.get(
-                            "hotplug"
-                        )
+                        is_removable = device.get("hotplug") == "1" or device.get("hotplug")
                         is_ssd = not device.get("rota", True)
 
                         if is_removable:
