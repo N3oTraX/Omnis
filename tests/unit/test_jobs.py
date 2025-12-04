@@ -335,14 +335,21 @@ class TestSystemRequirementsChecker:
             assert result.status == RequirementStatus.FAIL
 
     def test_check_all_returns_result(self) -> None:
-        """check_all should return RequirementsResult with all checks."""
-        checker = SystemRequirementsChecker()
+        """check_all should return RequirementsResult with enabled checks."""
+        # New config format requires explicit enabled: true for each check
+        config = {
+            "ram": {"enabled": True, "min_gb": 4, "warn_gb": 8, "recommended_gb": 8},
+            "disk": {"enabled": True, "min_gb": 20, "recommended_gb": 60},
+            "cpu_arch": {"enabled": True, "require_x86_64": True},
+            "efi": {"enabled": True, "required": False},
+        }
+        checker = SystemRequirementsChecker(config)
         result = checker.check_all()
 
         assert isinstance(result, RequirementsResult)
         assert len(result.checks) > 0
 
-        # Should have standard checks
+        # Should have the enabled checks
         check_names = [c.name for c in result.checks]
         assert "ram" in check_names
         assert "disk" in check_names
@@ -549,9 +556,9 @@ class TestWelcomeJobIntegration:
                         "light": "wallpapers/welcome-light.jpg",
                     },
                     "requirements": {
-                        "min_ram_gb": 1,
-                        "min_disk_gb": 1,
-                        "require_efi": False,
+                        "ram": {"enabled": True, "min_gb": 1, "warn_gb": 4, "recommended_gb": 8},
+                        "disk": {"enabled": True, "min_gb": 1, "recommended_gb": 20},
+                        "efi": {"enabled": True, "required": False},
                     },
                 }
             )

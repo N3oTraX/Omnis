@@ -173,8 +173,9 @@ Rectangle {
             }
         }
 
-        // Status badge
+        // Status badge with tooltip on hover for warn/fail
         Rectangle {
+            id: statusBadge
             width: 28
             height: 28
             radius: 14
@@ -186,6 +187,43 @@ Rectangle {
                 font.pixelSize: 14
                 font.bold: true
                 color: statusColor
+            }
+
+            // Mouse area for tooltip
+            MouseArea {
+                id: badgeMouseArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: (root.status === "warn" || root.status === "fail") && root.details !== ""
+                    ? Qt.PointingHandCursor
+                    : Qt.ArrowCursor
+            }
+
+            // Tooltip showing details on hover for warn/fail
+            ToolTip {
+                id: statusTooltip
+                visible: badgeMouseArea.containsMouse && (root.status === "warn" || root.status === "fail") && root.details !== ""
+                delay: 300
+                timeout: 10000
+                text: root.details
+
+                contentItem: Text {
+                    text: statusTooltip.text
+                    font.pixelSize: 12
+                    color: root.textColor
+                    wrapMode: Text.WordWrap
+                }
+
+                background: Rectangle {
+                    color: Qt.rgba(root.surfaceColor.r, root.surfaceColor.g, root.surfaceColor.b, 0.95)
+                    radius: 8
+                    border.color: Qt.rgba(root.statusColor.r, root.statusColor.g, root.statusColor.b, 0.5)
+                    border.width: 1
+
+                    // Shadow effect
+                    layer.enabled: true
+                    layer.effect: null
+                }
             }
         }
     }

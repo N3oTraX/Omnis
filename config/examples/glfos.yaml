@@ -67,6 +67,19 @@ branding:
     display: "Lemon Milk"
     monospace: "Roboto Mono"
 
+  # Liens externes (affichés sur l'écran d'accueil)
+  links:
+    # Site web principal (affiché en bas à droite de l'écran Welcome)
+    website: "https://www.gaminglinux.fr/glf-os/"
+    # Texte affiché pour le lien (si vide, utilise l'URL)
+    website_label: "gaminglinux.fr"
+    # Dépôt Git du projet
+    git: "https://github.com/Gaming-Linux-FR/GLF-OS"
+    # Documentation
+    documentation: "https://docs.gaminglinux.fr/"
+    # Support / Forum
+    support: "https://discord.gg/gaminglinux"
+
 # -----------------------------------------------------------------------------
 # Jobs - Workflow d'installation NixOS
 # -----------------------------------------------------------------------------
@@ -101,69 +114,132 @@ jobs:
       # ---------------------------------------------------------------------
       # System Requirements Configuration
       # ---------------------------------------------------------------------
+      # Each check can be enabled/disabled and has configurable overrides.
+      # Set 'enabled: false' or remove the 'enabled' key to disable a check.
+      # An empty/null override value uses the default.
+      #
+      # If ALL checks are disabled, the requirements panel will be hidden.
+      # ---------------------------------------------------------------------
+
       requirements:
-        # Memory (RAM)
-        # Standard edition: 8 GB minimum, 16 GB recommended
-        # Studio edition: 16 GB minimum, 32 GB recommended
-        min_ram_gb: 8
-        recommended_ram_gb: 16
-        warn_ram_gb: 16  # Below this shows warning, above shows pass
+        # -----------------------------------------------------------------
+        # RAM Check
+        # -----------------------------------------------------------------
+        # Checks available system memory against minimum and recommended.
+        # PASS: >= warn_gb | WARN: >= min_gb | FAIL: < min_gb
+        ram:
+          enabled: true
+          # Minimum RAM in GB (FAIL if below)
+          min_gb: 8
+          # Warning threshold in GB (WARN if between min and this value)
+          warn_gb: 16
+          # Recommended RAM in GB (displayed to user)
+          recommended_gb: 16
 
-        # Disk space
-        min_disk_gb: 60
-        recommended_disk_gb: 120
-        require_ssd: false  # Recommended but not required
+        # -----------------------------------------------------------------
+        # Disk Space Check
+        # -----------------------------------------------------------------
+        # Checks largest available storage device.
+        # PASS: >= recommended_gb | WARN: >= min_gb | FAIL: < min_gb
+        disk:
+          enabled: true
+          # Minimum disk space in GB (FAIL if below)
+          min_gb: 60
+          # Recommended disk space in GB (WARN if between min and this)
+          recommended_gb: 120
+          # Whether to recommend SSD (informational only)
+          recommend_ssd: true
 
-        # Boot requirements
-        require_efi: true
-        require_secure_boot_disabled: false
+        # -----------------------------------------------------------------
+        # CPU Architecture Check
+        # -----------------------------------------------------------------
+        # Checks processor architecture (x86_64 required for modern Linux gaming).
+        # PASS: x86_64 | WARN: other (if not required) | FAIL: other (if required)
+        cpu_arch:
+          enabled: false  # Usually always x86_64, disabled by default
+          # Whether x86_64 is strictly required (FAIL if not met)
+          require_x86_64: true
 
-        # Connectivity
-        require_internet: false
-        recommend_internet: true
+        # -----------------------------------------------------------------
+        # Boot Mode Check (EFI/UEFI)
+        # -----------------------------------------------------------------
+        # Checks if system is booted in UEFI mode.
+        # PASS: UEFI | WARN: Legacy (if not required) | FAIL: Legacy (if required)
+        efi:
+          enabled: false  # Disabled by default
+          # Whether UEFI is strictly required (FAIL if Legacy BIOS)
+          required: true
 
-        # Power
-        require_ac_power: false
-        recommend_ac_power: true
-        min_battery_percent: 20
+        # -----------------------------------------------------------------
+        # Secure Boot Check
+        # -----------------------------------------------------------------
+        # Checks Secure Boot status (may interfere with some drivers).
+        # PASS: Disabled | WARN: Enabled (if not required) | FAIL: Enabled (if required)
+        secure_boot:
+          enabled: false  # Disabled by default
+          # Whether Secure Boot must be disabled (FAIL if enabled)
+          require_disabled: false
 
-        # CPU architecture
-        require_x86_64: true
+        # -----------------------------------------------------------------
+        # Internet Connectivity Check
+        # -----------------------------------------------------------------
+        # Checks for active internet connection (for package updates).
+        # PASS: Connected | WARN: Not connected (if recommended) | FAIL: Not connected (if required)
+        internet:
+          enabled: false  # Disabled by default
+          # Whether internet is strictly required (FAIL if no connection)
+          required: false
+          # Whether to show warning if not connected
+          recommended: true
 
-        # ---------------------------------------------------------------------
-        # GPU Compatibility Configuration
-        # ---------------------------------------------------------------------
-        # Defines which GPU vendors are compatible and minimum models
+        # -----------------------------------------------------------------
+        # Power Source Check (LAPTOP ONLY)
+        # -----------------------------------------------------------------
+        # This check is SKIPPED on desktop systems (no battery detected).
+        # Only checks on laptops/portables with batteries.
+        #
+        # Logic:
+        # - SKIP: Desktop system (no battery)
+        # - PASS: On AC power
+        # - WARN: On battery AND battery >= min_battery_percent
+        # - FAIL: On battery AND battery < min_battery_percent
+        power:
+          enabled: true
+          # Minimum battery percentage when not plugged in (FAIL if below)
+          # Default: 80% - Ensure sufficient battery for installation
+          min_battery_percent: 80
+
+        # -----------------------------------------------------------------
+        # GPU Compatibility Check
+        # -----------------------------------------------------------------
+        # Checks GPU vendor compatibility and minimum model requirements.
+        # Displays GPUs in order: dGPU first, then iGPU.
+        #
+        # Logic:
+        # - PASS: Compatible dGPU detected meeting minimum requirements
+        # - WARN: Only iGPU (if dedicated not required) or below recommended
+        # - FAIL: No compatible GPU or below minimum model requirement
         gpu:
-          # Supported GPU vendors (can be any combination)
+          enabled: true
+          # Supported GPU vendors (empty = all vendors)
           # Values: AMD, INTEL, NVIDIA
           availability:
             - AMD
             - INTEL
             - NVIDIA
 
-          # Require dedicated GPU (dGPU) for installation
-          # If false, integrated graphics (iGPU) will show warning but allow install
+          # Whether dedicated GPU is required (WARN if only iGPU)
           require_dedicated: false
 
-          # Minimum GPU overrides by vendor
-          # These define the minimum acceptable GPU model for each vendor
-          # Models below these will fail the GPU check
-          # See docs/gpu-compatibility.md for full model reference
+          # Minimum GPU model overrides by vendor
+          # Empty string = no minimum requirement for that vendor
+          # See docs/gpu-compatibility.md for model reference
           overrides:
-            # NVIDIA: GeForce GTX 1650 and above
-            # Architecture: Turing (TU117)
-            # Minimum compute capability: 7.5
+            # NVIDIA: GeForce GTX 1650+ (Turing architecture)
             nvidia: "GTX 1650"
-
-            # AMD: RX 570 and above
-            # Architecture: Polaris (GCN 4)
-            # Leave empty for no minimum requirement
+            # AMD: No minimum (empty = any AMD GPU)
             amd: ""
-
-            # Intel: UHD 630 and above (for iGPU)
-            # Architecture: Coffee Lake
-            # Leave empty for no minimum requirement
+            # Intel: No minimum (empty = any Intel GPU)
             intel: ""
 
   # Selection de la langue et region

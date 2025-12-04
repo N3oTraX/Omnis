@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import Property, QObject, QThread, QUrl, Signal, Slot
 
 from omnis.i18n.translator import get_translator
+from omnis.jobs.requirements import SystemRequirementsChecker
 
 if TYPE_CHECKING:
     from omnis.core.engine import Engine
@@ -188,6 +189,42 @@ class BrandingProxy(QObject):
         """URL to icon."""
         return self._resolve_asset(self._branding.assets.icon)
 
+    # Links
+    @Property(str, constant=True)
+    def websiteUrl(self) -> str:
+        """Main website URL."""
+        return self._branding.links.website
+
+    @Property(str, constant=True)
+    def websiteLabel(self) -> str:
+        """Display label for website link (falls back to URL if empty)."""
+        label = self._branding.links.website_label
+        if not label and self._branding.links.website:
+            # Extract domain from URL as fallback
+            url = self._branding.links.website
+            # Remove protocol and www prefix for cleaner display
+            for prefix in ("https://", "http://", "www."):
+                if url.startswith(prefix):
+                    url = url[len(prefix) :]
+            # Remove trailing slash
+            label = url.rstrip("/")
+        return label
+
+    @Property(str, constant=True)
+    def gitUrl(self) -> str:
+        """Git repository URL."""
+        return self._branding.links.git
+
+    @Property(str, constant=True)
+    def documentationUrl(self) -> str:
+        """Documentation URL."""
+        return self._branding.links.documentation
+
+    @Property(str, constant=True)
+    def supportUrl(self) -> str:
+        """Support/forum URL."""
+        return self._branding.links.support
+
 
 class EngineBridge(QObject):
     """
@@ -207,6 +244,7 @@ class EngineBridge(QObject):
     jobProgress = Signal(str, int, str)  # job_name, percent, message
     jobCompleted = Signal(str, bool)  # job_name, success
     errorOccurred = Signal(str, str)  # job_name, error_message
+    requirementsChanged = Signal()  # emitted when requirements check completes
 
     def __init__(
         self,
@@ -221,10 +259,18 @@ class EngineBridge(QObject):
         self._debug = debug
         self._dry_run = dry_run
         self._branding_proxy = BrandingProxy(engine, theme_base, self, debug=debug)
+        self._theme_base = theme_base
 
         # Thread management
         self._worker: InstallationWorker | None = None
         self._thread: QThread | None = None
+
+        # Requirements state
+        self._requirements_checker: SystemRequirementsChecker | None = None
+        self._requirements_model: list[dict[str, Any]] = []
+        self._can_proceed: bool = True
+        self._is_checking_requirements: bool = False
+        self._show_requirements: bool = True
 
         # Connect engine callbacks
         self._engine.on_job_start = self._on_job_start
@@ -232,10 +278,27 @@ class EngineBridge(QObject):
         self._engine.on_job_complete = self._on_job_complete
         self._engine.on_error = self._on_error
 
+        # Initialize requirements checker with config
+        self._init_requirements_checker()
+
     @property
     def branding_proxy(self) -> BrandingProxy:
         """Get branding proxy for QML context."""
         return self._branding_proxy
+
+    def _init_requirements_checker(self) -> None:
+        """Initialize the requirements checker with config from engine."""
+        # Get requirements config from welcome job config if available
+        welcome_config = {}
+        for job_def in self._engine.config.normalize_jobs():
+            if job_def.name == "welcome":
+                welcome_config = job_def.config.get("requirements", {})
+                break
+
+        self._requirements_checker = SystemRequirementsChecker(welcome_config)
+
+        if self._debug:
+            print(f"[Engine] Requirements checker initialized with config: {welcome_config}")
 
     def _on_job_start(self, job_name: str) -> None:
         """Handle job start event."""
@@ -262,6 +325,73 @@ class EngineBridge(QObject):
     def dryRun(self) -> bool:
         """Check if dry-run mode is enabled."""
         return self._dry_run
+
+    # Requirements properties
+    @Property(bool, notify=requirementsChanged)
+    def showRequirements(self) -> bool:
+        """Whether to show requirements panel."""
+        return self._show_requirements
+
+    @Property(list, notify=requirementsChanged)
+    def requirementsModel(self) -> list[dict[str, Any]]:
+        """Get requirements list for QML ListView."""
+        return self._requirements_model
+
+    @Property(bool, notify=requirementsChanged)
+    def canProceed(self) -> bool:
+        """Whether installation can proceed based on requirements."""
+        return self._can_proceed
+
+    @Property(bool, notify=requirementsChanged)
+    def isCheckingRequirements(self) -> bool:
+        """Whether requirements are currently being checked."""
+        return self._is_checking_requirements
+
+    @Slot()
+    def checkRequirements(self) -> None:
+        """Perform requirements check and update model."""
+        if self._requirements_checker is None:
+            self._init_requirements_checker()
+
+        self._is_checking_requirements = True
+        self.requirementsChanged.emit()
+
+        if self._debug:
+            print("[Engine] Starting requirements check...")
+
+        # Perform the check
+        result = self._requirements_checker.check_all()
+
+        # Convert to QML-compatible list
+        self._requirements_model = []
+        for check in result.checks:
+            self._requirements_model.append(
+                {
+                    "name": check.name,
+                    "description": check.description,
+                    "status": check.status.name.lower(),
+                    "currentValue": check.current_value,
+                    "requiredValue": check.required_value,
+                    "recommendedValue": check.recommended_value,
+                    "details": check.details,
+                }
+            )
+
+        # Update state
+        self._can_proceed = result.can_continue
+        self._is_checking_requirements = False
+
+        # Hide panel if no checks are configured/enabled
+        self._show_requirements = len(result.checks) > 0
+
+        if self._debug:
+            print(f"[Engine] Requirements check complete: {len(result.checks)} checks")
+            print(f"[Engine] Can proceed: {self._can_proceed}")
+            print(f"[Engine] Show requirements panel: {self._show_requirements}")
+            for item in self._requirements_model:
+                print(f"[Engine]   - {item['name']}: {item['status']}")
+
+        self.requirementsChanged.emit()
 
     @Property(list, constant=True)
     def jobNames(self) -> list[str]:

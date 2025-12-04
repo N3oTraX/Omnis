@@ -2,6 +2,7 @@
 System Requirements Checker for Omnis Installer.
 
 Provides hardware and system requirement validation before installation.
+Each check can be enabled/disabled via configuration.
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ class RequirementCheck:
     current_value: str = ""
     required_value: str = ""
     recommended_value: str = ""
-    details: str = ""
+    details: str = ""  # Used for tooltip on warn/fail icons
 
     @property
     def passed(self) -> bool:
@@ -93,6 +94,7 @@ class SystemRequirementsChecker:
     Checks system requirements for installation.
 
     Validates hardware, boot mode, connectivity, and other prerequisites.
+    Only runs checks that are enabled in configuration.
     """
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
@@ -104,9 +106,25 @@ class SystemRequirementsChecker:
         """
         self.config = config or {}
 
+    def _is_enabled(self, check_name: str) -> bool:
+        """Check if a requirement check is enabled in config."""
+        check_config = self.config.get(check_name, {})
+        # If it's a dict with 'enabled' key, check that
+        if isinstance(check_config, dict):
+            return check_config.get("enabled", False)
+        # Legacy flat config - not enabled in new structure
+        return False
+
+    def _get_check_config(self, check_name: str) -> dict[str, Any]:
+        """Get configuration for a specific check."""
+        check_config = self.config.get(check_name, {})
+        if isinstance(check_config, dict):
+            return check_config
+        return {}
+
     def check_all(self) -> RequirementsResult:
         """
-        Run all requirement checks.
+        Run all enabled requirement checks.
 
         Returns:
             RequirementsResult with all check results
@@ -114,23 +132,36 @@ class SystemRequirementsChecker:
         result = RequirementsResult()
 
         # Hardware checks
-        result.checks.append(self._check_ram())
-        result.checks.append(self._check_disk_space())
-        result.checks.append(self._check_cpu_architecture())
+        if self._is_enabled("ram"):
+            result.checks.append(self._check_ram())
+
+        if self._is_enabled("disk"):
+            result.checks.append(self._check_disk_space())
+
+        if self._is_enabled("cpu_arch"):
+            result.checks.append(self._check_cpu_architecture())
 
         # Boot checks
-        result.checks.append(self._check_efi_mode())
-        result.checks.append(self._check_secure_boot())
+        if self._is_enabled("efi"):
+            result.checks.append(self._check_efi_mode())
+
+        if self._is_enabled("secure_boot"):
+            result.checks.append(self._check_secure_boot())
 
         # Connectivity checks
-        result.checks.append(self._check_internet())
+        if self._is_enabled("internet"):
+            result.checks.append(self._check_internet())
 
-        # Power checks
-        result.checks.append(self._check_power_source())
-        result.checks.append(self._check_battery_level())
+        # Power check (combined power source + battery for laptops only)
+        if self._is_enabled("power"):
+            power_check = self._check_power()
+            # Only add if not skipped (i.e., it's a laptop)
+            if power_check.status != RequirementStatus.SKIP:
+                result.checks.append(power_check)
 
-        # GPU check (optional for gaming)
-        result.checks.append(self._check_gpu())
+        # GPU check
+        if self._is_enabled("gpu"):
+            result.checks.append(self._check_gpu())
 
         return result
 
@@ -138,14 +169,15 @@ class SystemRequirementsChecker:
         """
         Check available RAM.
 
-        Thresholds:
-        - Below min_ram_gb: FAIL
-        - Between min_ram_gb and warn_ram_gb: WARN
-        - Above warn_ram_gb: PASS
+        Thresholds from config:
+        - Below min_gb: FAIL
+        - Between min_gb and warn_gb: WARN
+        - Above warn_gb: PASS
         """
-        min_gb = self.config.get("min_ram_gb", 8)
-        warn_gb = self.config.get("warn_ram_gb", 16)
-        recommended_gb = self.config.get("recommended_ram_gb", 16)
+        cfg = self._get_check_config("ram")
+        min_gb = cfg.get("min_gb", 8)
+        warn_gb = cfg.get("warn_gb", 16)
+        recommended_gb = cfg.get("recommended_gb", 16)
 
         try:
             with open("/proc/meminfo") as f:
@@ -161,10 +193,14 @@ class SystemRequirementsChecker:
             # Determine status based on thresholds
             if current_gb < min_gb:
                 status = RequirementStatus.FAIL
-                details = f"Insufficient RAM ({current_gb:.1f} GB < {min_gb} GB minimum)"
+                details = (
+                    f"Insufficient RAM: {current_gb:.1f} GB detected, minimum {min_gb} GB required"
+                )
             elif current_gb < warn_gb:
                 status = RequirementStatus.WARN
-                details = f"RAM below recommended ({current_gb:.1f} GB < {warn_gb} GB)"
+                details = (
+                    f"RAM below recommended: {current_gb:.1f} GB detected, {warn_gb} GB recommended"
+                )
             else:
                 status = RequirementStatus.PASS
                 details = "Sufficient RAM for optimal performance"
@@ -194,8 +230,10 @@ class SystemRequirementsChecker:
 
         Finds the largest block device and checks against requirements.
         """
-        min_gb = self.config.get("min_disk_gb", 60)
-        recommended_gb = self.config.get("recommended_disk_gb", 120)
+        cfg = self._get_check_config("disk")
+        min_gb = cfg.get("min_gb", 60)
+        recommended_gb = cfg.get("recommended_gb", 120)
+        recommend_ssd = cfg.get("recommend_ssd", True)
 
         try:
             # Check available space on largest block device
@@ -220,13 +258,17 @@ class SystemRequirementsChecker:
             # Determine status
             if max_space_gb < min_gb:
                 status = RequirementStatus.FAIL
-                details = f"Insufficient disk space ({max_space_gb:.0f} GB < {min_gb} GB)"
+                details = f"Insufficient disk space: {max_space_gb:.0f} GB available, minimum {min_gb} GB required"
             elif max_space_gb < recommended_gb:
                 status = RequirementStatus.WARN
-                details = f"Disk space below recommended ({max_space_gb:.0f} GB)"
+                details = f"Disk space below recommended: {max_space_gb:.0f} GB available, {recommended_gb} GB recommended"
             else:
                 status = RequirementStatus.PASS
                 details = "Sufficient storage space available"
+
+            rec_value = f"{recommended_gb} GB"
+            if recommend_ssd:
+                rec_value += " (SSD recommended)"
 
             return RequirementCheck(
                 name="disk",
@@ -234,7 +276,7 @@ class SystemRequirementsChecker:
                 status=status,
                 current_value=f"{max_space_gb:.0f} GB",
                 required_value=f"{min_gb} GB",
-                recommended_value=f"{recommended_gb} GB (SSD recommended)",
+                recommended_value=rec_value,
                 details=details,
             )
 
@@ -249,17 +291,21 @@ class SystemRequirementsChecker:
 
     def _check_cpu_architecture(self) -> RequirementCheck:
         """Check CPU architecture."""
-        require_x86_64 = self.config.get("require_x86_64", True)
+        cfg = self._get_check_config("cpu_arch")
+        require_x86_64 = cfg.get("require_x86_64", True)
 
         try:
             arch = os.uname().machine
 
             if arch == "x86_64":
                 status = RequirementStatus.PASS
+                details = "64-bit processor detected"
             elif require_x86_64:
                 status = RequirementStatus.FAIL
+                details = f"x86_64 architecture required, detected: {arch}"
             else:
                 status = RequirementStatus.WARN
+                details = f"Detected {arch}, x86_64 recommended"
 
             return RequirementCheck(
                 name="cpu_arch",
@@ -267,7 +313,7 @@ class SystemRequirementsChecker:
                 status=status,
                 current_value=arch,
                 required_value="x86_64" if require_x86_64 else "Any",
-                details="64-bit processor required for modern Linux gaming",
+                details=details,
             )
 
         except Exception as e:
@@ -280,7 +326,8 @@ class SystemRequirementsChecker:
 
     def _check_efi_mode(self) -> RequirementCheck:
         """Check if booted in EFI mode."""
-        require_efi = self.config.get("require_efi", False)
+        cfg = self._get_check_config("efi")
+        require_efi = cfg.get("required", False)
 
         efi_path = Path("/sys/firmware/efi")
         is_efi = efi_path.exists()
@@ -288,12 +335,15 @@ class SystemRequirementsChecker:
         if is_efi:
             status = RequirementStatus.PASS
             current = "UEFI"
+            details = "System booted in UEFI mode"
         elif require_efi:
             status = RequirementStatus.FAIL
             current = "Legacy BIOS"
+            details = "UEFI boot mode required, currently in Legacy BIOS mode"
         else:
             status = RequirementStatus.WARN
             current = "Legacy BIOS"
+            details = "Legacy BIOS detected, UEFI recommended for modern installations"
 
         return RequirementCheck(
             name="efi",
@@ -301,12 +351,13 @@ class SystemRequirementsChecker:
             status=status,
             current_value=current,
             required_value="UEFI" if require_efi else "UEFI (recommended)",
-            details="UEFI boot mode recommended for modern installations",
+            details=details,
         )
 
     def _check_secure_boot(self) -> RequirementCheck:
         """Check Secure Boot status."""
-        require_disabled = self.config.get("require_secure_boot_disabled", False)
+        cfg = self._get_check_config("secure_boot")
+        require_disabled = cfg.get("require_disabled", False)
 
         try:
             # Check mokutil if available
@@ -332,11 +383,17 @@ class SystemRequirementsChecker:
                     is_enabled = False
 
             if is_enabled:
-                status = RequirementStatus.FAIL if require_disabled else RequirementStatus.WARN
+                if require_disabled:
+                    status = RequirementStatus.FAIL
+                    details = "Secure Boot is enabled but must be disabled for driver compatibility"
+                else:
+                    status = RequirementStatus.WARN
+                    details = "Secure Boot is enabled, may interfere with some drivers"
                 current = "Enabled"
             else:
                 status = RequirementStatus.PASS
                 current = "Disabled"
+                details = "Secure Boot is disabled"
 
             return RequirementCheck(
                 name="secure_boot",
@@ -344,7 +401,7 @@ class SystemRequirementsChecker:
                 status=status,
                 current_value=current,
                 required_value="Disabled" if require_disabled else "Any",
-                details="Secure Boot may need to be disabled for some drivers",
+                details=details,
             )
 
         except Exception as e:
@@ -357,8 +414,9 @@ class SystemRequirementsChecker:
 
     def _check_internet(self) -> RequirementCheck:
         """Check internet connectivity."""
-        require_internet = self.config.get("require_internet", False)
-        recommend_internet = self.config.get("recommend_internet", True)
+        cfg = self._get_check_config("internet")
+        require_internet = cfg.get("required", False)
+        recommend_internet = cfg.get("recommended", True)
 
         try:
             # Try to reach a known host
@@ -382,15 +440,19 @@ class SystemRequirementsChecker:
             if has_internet:
                 status = RequirementStatus.PASS
                 current = "Connected"
+                details = "Internet connection available"
             elif require_internet:
                 status = RequirementStatus.FAIL
                 current = "Not connected"
+                details = "Internet connection required for installation"
             elif recommend_internet:
                 status = RequirementStatus.WARN
                 current = "Not connected"
+                details = "No internet connection, recommended for package updates"
             else:
                 status = RequirementStatus.PASS
                 current = "Not connected"
+                details = "Offline installation mode"
 
             return RequirementCheck(
                 name="internet",
@@ -402,7 +464,7 @@ class SystemRequirementsChecker:
                 else "Recommended"
                 if recommend_internet
                 else "Optional",
-                details="Internet may be needed for package updates",
+                details=details,
             )
 
         except Exception as e:
@@ -413,28 +475,36 @@ class SystemRequirementsChecker:
                 details=f"Could not check internet: {e}",
             )
 
-    def _check_power_source(self) -> RequirementCheck:
-        """Check if running on AC power."""
-        require_ac = self.config.get("require_ac_power", False)
-        recommend_ac = self.config.get("recommend_ac_power", True)
+    def _check_power(self) -> RequirementCheck:
+        """
+        Check power source and battery level (LAPTOP ONLY).
+
+        This check is SKIPPED on desktop systems (no battery detected).
+        On laptops:
+        - PASS: On AC power
+        - WARN: On battery AND battery >= min_battery_percent
+        - FAIL: On battery AND battery < min_battery_percent
+        """
+        cfg = self._get_check_config("power")
+        min_battery_percent = cfg.get("min_battery_percent", 80)
 
         try:
-            # Check power supply status
             power_supply = Path("/sys/class/power_supply")
 
             if not power_supply.exists():
-                # Desktop without battery - assume AC
+                # Desktop without battery subsystem - skip
                 return RequirementCheck(
                     name="power",
                     description="Power Source",
-                    status=RequirementStatus.PASS,
-                    current_value="AC Power",
-                    details="Desktop system detected",
+                    status=RequirementStatus.SKIP,
+                    details="Desktop system - no battery check needed",
                 )
 
-            # Look for AC adapter
+            # Look for AC adapter and laptop battery
+            # Filter out wireless device batteries (hidpp_battery_*, hid-*, etc.)
             on_ac = False
-            has_battery = False
+            has_laptop_battery = False
+            battery_level = 0
 
             for supply in power_supply.iterdir():
                 type_file = supply / "type"
@@ -442,38 +512,55 @@ class SystemRequirementsChecker:
                     continue
 
                 supply_type = type_file.read_text().strip()
+                supply_name = supply.name.lower()
 
                 if supply_type == "Mains":
                     online_file = supply / "online"
                     if online_file.exists():
                         on_ac = online_file.read_text().strip() == "1"
                 elif supply_type == "Battery":
-                    has_battery = True
+                    # Filter out wireless device batteries (not laptop batteries)
+                    # Laptop batteries typically named: BAT0, BAT1, CMB0, etc.
+                    # Wireless devices: hidpp_battery_*, hid-*, wacom_*, sony_controller_*
+                    wireless_prefixes = ("hidpp_", "hid-", "wacom_", "sony_", "ps_controller")
+                    if any(supply_name.startswith(prefix) for prefix in wireless_prefixes):
+                        continue  # Skip wireless device batteries
 
-            if not has_battery:
-                # Desktop
+                    has_laptop_battery = True
+                    capacity_file = supply / "capacity"
+                    if capacity_file.exists():
+                        battery_level = int(capacity_file.read_text().strip())
+
+            # Desktop system (no laptop battery detected)
+            if not has_laptop_battery:
+                return RequirementCheck(
+                    name="power",
+                    description="Power Source",
+                    status=RequirementStatus.SKIP,
+                    details="Desktop system - no battery check needed",
+                )
+
+            # Laptop with battery
+            if on_ac:
                 status = RequirementStatus.PASS
-                current = "AC Power (Desktop)"
-            elif on_ac:
-                status = RequirementStatus.PASS
-                current = "AC Power"
-            elif require_ac:
-                status = RequirementStatus.FAIL
-                current = "Battery"
-            elif recommend_ac:
+                current = f"AC Power ({battery_level}%)"
+                details = "System plugged into AC power"
+            elif battery_level >= min_battery_percent:
                 status = RequirementStatus.WARN
-                current = "Battery"
+                current = f"Battery ({battery_level}%)"
+                details = f"Running on battery at {battery_level}%, AC power recommended"
             else:
-                status = RequirementStatus.PASS
-                current = "Battery"
+                status = RequirementStatus.FAIL
+                current = f"Battery ({battery_level}%)"
+                details = f"Battery too low: {battery_level}% < {min_battery_percent}% minimum. Please plug in AC power."
 
             return RequirementCheck(
                 name="power",
                 description="Power Source",
                 status=status,
                 current_value=current,
-                required_value="AC Power" if require_ac else "AC Power (recommended)",
-                details="AC power recommended to prevent interruption",
+                required_value=f"AC Power or ≥{min_battery_percent}% battery",
+                details=details,
             )
 
         except Exception as e:
@@ -482,61 +569,6 @@ class SystemRequirementsChecker:
                 description="Power Source",
                 status=RequirementStatus.SKIP,
                 details=f"Could not check power: {e}",
-            )
-
-    def _check_battery_level(self) -> RequirementCheck:
-        """Check battery level if on battery power."""
-        min_percent = self.config.get("min_battery_percent", 20)
-
-        try:
-            power_supply = Path("/sys/class/power_supply")
-
-            if not power_supply.exists():
-                return RequirementCheck(
-                    name="battery",
-                    description="Battery Level",
-                    status=RequirementStatus.SKIP,
-                    details="No battery detected",
-                )
-
-            # Find battery
-            for supply in power_supply.iterdir():
-                type_file = supply / "type"
-                if not type_file.exists():
-                    continue
-
-                if type_file.read_text().strip() == "Battery":
-                    capacity_file = supply / "capacity"
-                    if capacity_file.exists():
-                        capacity = int(capacity_file.read_text().strip())
-
-                        if capacity >= min_percent:
-                            status = RequirementStatus.PASS
-                        else:
-                            status = RequirementStatus.WARN
-
-                        return RequirementCheck(
-                            name="battery",
-                            description="Battery Level",
-                            status=status,
-                            current_value=f"{capacity}%",
-                            required_value=f">{min_percent}%",
-                            details="Minimum battery level for safe installation",
-                        )
-
-            return RequirementCheck(
-                name="battery",
-                description="Battery Level",
-                status=RequirementStatus.SKIP,
-                details="No battery detected",
-            )
-
-        except Exception as e:
-            return RequirementCheck(
-                name="battery",
-                description="Battery Level",
-                status=RequirementStatus.SKIP,
-                details=f"Could not check battery: {e}",
             )
 
     def _check_gpu(self) -> RequirementCheck:
@@ -548,47 +580,47 @@ class SystemRequirementsChecker:
         - Check against configured availability list (AMD, INTEL, NVIDIA)
         - Validate against minimum model overrides if configured
         - Distinguish between dedicated and integrated GPUs
+        - Display dGPU first, then iGPU
         """
-        gpu_config = self.config.get("gpu", {})
+        cfg = self._get_check_config("gpu")
 
         # Get configuration values
-        availability = gpu_config.get("availability", ["AMD", "INTEL", "NVIDIA"])
-        require_dedicated = gpu_config.get("require_dedicated", False)
-        overrides = gpu_config.get("overrides", {})
+        availability = cfg.get("availability", ["AMD", "INTEL", "NVIDIA"])
+        require_dedicated = cfg.get("require_dedicated", False)
+        overrides = cfg.get("overrides", {})
 
         try:
             detector = GPUDetector()
-            result = detector.check_compatibility(
-                allowed_vendors=availability,
+            # check_compatibility returns tuple: (status, message, gpu_list)
+            status_str, message, _ = detector.check_compatibility(
+                availability=availability,
                 require_dedicated=require_dedicated,
-                nvidia_min=overrides.get("nvidia", ""),
-                amd_min=overrides.get("amd", ""),
-                intel_min=overrides.get("intel", ""),
+                overrides=overrides,
             )
 
-            # Build GPU list string for display
-            detected_gpus = detector.detected_gpus
-            if detected_gpus:
-                gpu_names = []
-                for gpu in detected_gpus:
-                    if gpu.model:
-                        gpu_names.append(f"{gpu.vendor.value} {gpu.model}")
-                    else:
-                        gpu_names.append(gpu.vendor.value)
-                gpu_list = ", ".join(gpu_names)
+            # Sort GPUs: dGPU first, then iGPU
+            sorted_gpu_names = self._sort_gpus_dgpu_first(detector)
+
+            # Show only primary GPU in current_value (dGPU if available)
+            primary_gpu = sorted_gpu_names[0] if sorted_gpu_names else "None detected"
+
+            # Build details with full GPU list for tooltip
+            if len(sorted_gpu_names) > 1:
+                full_list = ", ".join(sorted_gpu_names)
+                extra_info = f"All GPUs: {full_list}"
             else:
-                gpu_list = "None detected"
+                extra_info = ""
 
             # Determine status based on result
-            if result["status"] == "pass":
+            if status_str == "pass":
                 status = RequirementStatus.PASS
-                details = result.get("message", "Compatible GPU detected")
-            elif result["status"] == "warn":
+                details = extra_info or "Compatible GPU detected"
+            elif status_str == "warn":
                 status = RequirementStatus.WARN
-                details = result.get("message", "GPU compatibility warning")
+                details = message or extra_info or "GPU compatibility warning"
             else:  # fail
                 status = RequirementStatus.FAIL
-                details = result.get("message", "GPU not compatible")
+                details = message or "No compatible GPU detected"
 
             # Build recommended value string
             if require_dedicated:
@@ -610,7 +642,7 @@ class SystemRequirementsChecker:
                 name="gpu",
                 description="Graphics (GPU)",
                 status=status,
-                current_value=gpu_list,
+                current_value=primary_gpu,
                 recommended_value=rec_value,
                 details=details,
             )
@@ -623,3 +655,76 @@ class SystemRequirementsChecker:
                 status=RequirementStatus.SKIP,
                 details=f"Could not check GPU: {e}",
             )
+
+    def _get_short_gpu_name(self, gpu: Any) -> str:
+        """
+        Extract a short, readable GPU name from verbose lspci output.
+
+        Examples:
+        - "AMD Advanced Micro Devices, Inc. [AMD/ATI] Navi 31 [Radeon RX 7900 XT/...]"
+          → "AMD Radeon RX 7900 XT"
+        - "INTEL Intel Corporation Raptor Lake-S GT1 [UHD Graphics 770] (rev 04)"
+          → "Intel UHD Graphics 770"
+        """
+        import re
+
+        full_name = str(gpu)
+        vendor = gpu.vendor.value  # AMD, INTEL, NVIDIA
+
+        # Extract marketing name from brackets [Name]
+        # Look for the bracket containing the actual product name
+        brackets = re.findall(r"\[([^\]]+)\]", full_name)
+
+        if brackets:
+            # Filter out vendor tags like "AMD/ATI"
+            product_names = [
+                b for b in brackets if "/" not in b or "RX" in b or "GTX" in b or "RTX" in b
+            ]
+
+            if product_names:
+                # Get the most relevant name (usually the last one with product info)
+                for name in reversed(product_names):
+                    # Skip generic tags
+                    if name in ("VGA controller", "3D controller", "Display controller"):
+                        continue
+                    # For multi-model strings like "Radeon RX 7900 XT/7900 XTX/...", take first
+                    if "/" in name:
+                        name = name.split("/")[0].strip()
+                    # Format vendor prefix properly
+                    vendor_prefix = "Intel" if vendor == "INTEL" else vendor
+                    # Avoid duplicate vendor name
+                    if name.upper().startswith(vendor.upper()):
+                        return name
+                    return f"{vendor_prefix} {name}"
+
+        # Fallback: return vendor + model field
+        if hasattr(gpu, "model") and gpu.model:
+            vendor_prefix = "Intel" if vendor == "INTEL" else vendor
+            return f"{vendor_prefix} {gpu.model}"
+
+        return full_name[:40]  # Truncate if nothing else works
+
+    def _sort_gpus_dgpu_first(self, detector: GPUDetector) -> list[str]:
+        """
+        Sort GPUs with dedicated (dGPU) first, then integrated (iGPU).
+
+        Args:
+            detector: GPUDetector instance with detected GPUs
+
+        Returns:
+            List of short GPU names sorted by type (dGPU first)
+        """
+        dgpus = []
+        igpus = []
+        others = []
+
+        for gpu in detector.gpus:
+            short_name = self._get_short_gpu_name(gpu)
+            if gpu.is_dedicated:
+                dgpus.append(short_name)
+            elif gpu.is_integrated:
+                igpus.append(short_name)
+            else:
+                others.append(short_name)
+
+        return dgpus + igpus + others

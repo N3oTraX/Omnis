@@ -267,6 +267,27 @@ ApplicationWindow {
 
             Item { Layout.fillWidth: true }
 
+            // Website link (visible on welcome screen only)
+            Text {
+                visible: currentStep === 0 && branding.websiteUrl !== ""
+                text: branding.websiteUrl
+                font.pixelSize: 12
+                font.underline: websiteLinkArea.containsMouse
+                color: websiteLinkArea.containsMouse ? Qt.lighter(primaryColor, 1.2) : textMutedColor
+
+                Behavior on color {
+                    ColorAnimation { duration: 150 }
+                }
+
+                MouseArea {
+                    id: websiteLinkArea
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    hoverEnabled: true
+                    onClicked: Qt.openUrlExternally(branding.websiteUrl)
+                }
+            }
+
             // Navigation buttons (visible after welcome)
             Button {
                 visible: currentStep > 0 && !isInstalling
