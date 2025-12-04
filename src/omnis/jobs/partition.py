@@ -288,7 +288,9 @@ class PartitionJob(BaseJob):
                 continue
 
             # Skip removable devices (USB drives) to prevent accidents
-            is_removable = device.get("rm", False) == "1"
+            is_removable = device.get("rm", False) in (1, "1", True)
+            if is_removable:
+                continue
 
             name = device.get("name", "")
             size = int(device.get("size", 0))
