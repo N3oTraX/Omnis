@@ -5,12 +5,13 @@ Handles configuration loading, job management, and execution pipeline.
 Runs in root context, separated from UI process.
 """
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from omnis.jobs.base import BaseJob, JobContext, JobResult, JobStatus
 
@@ -25,6 +26,16 @@ class BrandingColors(BaseModel):
     surface: str = "#374151"
     text: str = "#F9FAFB"
     text_muted: str = "#9CA3AF"
+
+    @field_validator(
+        "primary", "secondary", "accent", "background", "surface", "text", "text_muted"
+    )
+    @classmethod
+    def validate_hex_color(cls, v: str) -> str:
+        """Validate that color is a valid 6-digit hex color."""
+        if not re.match(r"^#[0-9A-Fa-f]{6}$", v):
+            raise ValueError(f"Invalid hex color format: {v}. Expected #RRGGBB format.")
+        return v
 
 
 class BrandingAssets(BaseModel):
@@ -59,6 +70,16 @@ class BrandingStrings(BaseModel):
     finished_message: str = ""
 
 
+class BrandingLinks(BaseModel):
+    """External links configuration."""
+
+    website: str = ""  # Main distribution website
+    website_label: str = ""  # Display text for website link
+    git: str = ""  # Git repository URL
+    documentation: str = ""  # Documentation URL
+    support: str = ""  # Support/forum URL
+
+
 class BrandingConfig(BaseModel):
     """Complete branding configuration."""
 
@@ -69,6 +90,7 @@ class BrandingConfig(BaseModel):
     assets: BrandingAssets = Field(default_factory=BrandingAssets)
     strings: BrandingStrings = Field(default_factory=BrandingStrings)
     fonts: BrandingFonts = Field(default_factory=BrandingFonts)
+    links: BrandingLinks = Field(default_factory=BrandingLinks)
 
 
 class JobDefinition(BaseModel):
@@ -241,7 +263,7 @@ class Engine:
                 self.name = name
                 self.description = f"Placeholder for {name}"
 
-            def run(self, context: JobContext) -> JobResult:
+            def run(self, _context: JobContext) -> JobResult:
                 return JobResult.ok(f"Job {self.name} completed (placeholder)")
 
             def estimate_duration(self) -> int:

@@ -5,9 +5,10 @@ All installation jobs must inherit from BaseJob and implement the required metho
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Callable
+from typing import Any
 
 
 class JobStatus(Enum):
@@ -39,9 +40,7 @@ class JobResult:
         cls, message: str, error_code: int = 1, data: dict[str, Any] | None = None
     ) -> "JobResult":
         """Create a failed result."""
-        return cls(
-            success=False, message=message, error_code=error_code, data=data or {}
-        )
+        return cls(success=False, message=message, error_code=error_code, data=data or {})
 
 
 @dataclass
@@ -143,7 +142,7 @@ class BaseJob(ABC):
         """
         ...
 
-    def validate(self, context: JobContext) -> JobResult:
+    def validate(self, _context: JobContext) -> JobResult:
         """
         Validate that the job can be executed.
 
@@ -151,23 +150,23 @@ class BaseJob(ABC):
         Override in subclasses for custom validation.
 
         Args:
-            context: Execution context
+            _context: Execution context
 
         Returns:
             JobResult.ok() if valid, JobResult.fail() otherwise
         """
         return JobResult.ok()
 
-    def cleanup(self, context: JobContext) -> None:
+    def cleanup(self, _context: JobContext) -> None:
         """
         Clean up after job execution (success or failure).
 
         Override in subclasses for custom cleanup logic.
 
         Args:
-            context: Execution context
+            _context: Execution context
         """
-        pass
+        return None
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}(name={self.name}, status={self.status.name})>"

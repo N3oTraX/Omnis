@@ -1,0 +1,5 @@
+module OmnisComponents
+
+RequirementsOverlay 1.0 RequirementsOverlay.qml
+RequirementItem 1.0 RequirementItem.qml
+WelcomeView 1.0 WelcomeView.qml

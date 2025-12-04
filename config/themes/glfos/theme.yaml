@@ -76,6 +76,10 @@ wallpapers:
   # Installer default
   default: "wallpapers/dark.jpg"
 
+  # Welcome screen wallpapers (dark/light themes)
+  welcome_dark: "wallpapers/welcome-dark.jpg"
+  welcome_light: "wallpapers/welcome-light.jpg"
+
   # Alternatives
   frost_dark: "wallpapers/frost-2-dark.png"
   frost_light: "wallpapers/frost-2.png"

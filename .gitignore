@@ -231,3 +231,7 @@ omnis-debug.yaml
 # Local development overrides
 local.yaml
 *.local.yaml
+
+# Claude Code local memory (not synced)
+.claude/
+.serena/
