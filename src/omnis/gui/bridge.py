@@ -714,6 +714,7 @@ class EngineBridge(QObject):
             if self._debug:
                 print("[Engine] Applied auto-detected locale settings")
             # Emit signal to update QML UI with detected values
+            self._update_keyboard_variants(self._selections["keymap"])
             self.selectionsChanged.emit()
 
     @Slot()
