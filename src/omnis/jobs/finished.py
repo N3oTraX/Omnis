@@ -11,6 +11,7 @@ Handles the final phase of installation, including:
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 from datetime import datetime
@@ -134,7 +135,7 @@ class FinishedJob(BaseJob):
 
             # Copy Python logs if available (from /tmp or /var/log)
             for log_source in [Path("/tmp/omnis.log"), Path("/var/log/omnis.log")]:
-                if log_source.exists():
+                    log_dest = log_dir / f"{log_source.name}-{datetime.now():%Y%m%d-%H%M%S}.log"
                     log_dest = log_dir / f"omnis-{datetime.now():%Y%m%d-%H%M%S}.log"
                     shutil.copy2(log_source, log_dest)
                     logger.info(f"Copied log file: {log_source} -> {log_dest}")
@@ -157,7 +158,7 @@ class FinishedJob(BaseJob):
         Returns:
             True if unmounted successfully, False otherwise
         """
-        if not mount_point.exists() and not mount_point.is_mount():
+        if not os.path.ismount(mount_point):
             logger.debug(f"Mount point {mount_point} not mounted, skipping")
             return True
 
@@ -225,11 +226,11 @@ class FinishedJob(BaseJob):
 
         # Unmount EFI partition first (child)
         efi_mount = target_root / "boot" / "efi"
-        if (efi_mount.exists() or efi_mount.is_mount()) and not self._safe_unmount(efi_mount):
+        if os.path.ismount(efi_mount) and not self._safe_unmount(efi_mount):
             errors.append(f"Failed to unmount EFI partition: {efi_mount}")
 
         # Unmount root partition
-        if (target_root.exists() or target_root.is_mount()) and not self._safe_unmount(target_root):
+        if os.path.ismount(target_root) and not self._safe_unmount(target_root):
             errors.append(f"Failed to unmount root partition: {target_root}")
 
         # Deactivate swap if it was used
