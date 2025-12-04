@@ -414,7 +414,7 @@ class PackagesJob(BaseJob):
             last_result = result
 
             # Check if error is network-related and retry possible
-            if result.error_code in (33, 34, 36, 38) and attempt < self.MAX_RETRIES:
+            if result.error_code in (33, 34) and attempt < self.MAX_RETRIES:
                 logger.warning(
                     f"Installation failed (attempt {attempt}), retrying in {self.RETRY_DELAY}s..."
                 )
@@ -426,7 +426,7 @@ class PackagesJob(BaseJob):
                 continue
 
             # Non-network error - don't retry
-            if result.error_code not in (33, 34, 36, 38):
+            if result.error_code not in (33, 34):
                 return result
 
         # Max retries reached
@@ -529,8 +529,9 @@ class PackagesJob(BaseJob):
         if not update_result.success:
             logger.warning("Repository update failed, continuing with installation...")
             # Non-critical: continue with installation
-
-        context.report_progress(10, "Repositories updated")
+            context.report_progress(10, "Repository update failed")
+        else:
+            context.report_progress(10, "Repositories updated")
 
         # Install packages with retry
         install_result = self._install_packages_with_retry(packages, context)
