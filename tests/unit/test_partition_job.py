@@ -179,7 +179,7 @@ class TestListDisks:
 
     @patch("omnis.jobs.partition.subprocess.run")
     def test_list_disks_filters_removable(self, mock_subprocess: MagicMock) -> None:
-        """_list_disks should include removable flag."""
+        """_list_disks should filter out removable disks for safety."""
         job = PartitionJob()
 
         lsblk_output = {
@@ -189,7 +189,7 @@ class TestListDisks:
                     "size": str(64 * 1024**3),
                     "type": "disk",
                     "model": "USB Drive",
-                    "rm": "1",  # Removable
+                    "rm": "1",  # Removable - should be filtered out for safety
                 }
             ]
         }
@@ -201,8 +201,8 @@ class TestListDisks:
 
         disks = job._list_disks()
 
-        assert len(disks) == 1
-        assert disks[0].is_removable is True
+        # Removable disks are filtered out for safety (prevent accidental USB wipe)
+        assert len(disks) == 0
 
     @patch("omnis.jobs.partition.subprocess.run")
     def test_list_disks_handles_no_partitions(self, mock_subprocess: MagicMock) -> None:
