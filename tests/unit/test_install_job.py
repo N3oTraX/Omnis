@@ -224,9 +224,12 @@ class TestValidate:
         assert result.error_code == 57
         assert "Target directory not found" in result.message
 
+    @patch("omnis.jobs.install.os.access")
     @patch("omnis.jobs.install.shutil.which")
     @patch("omnis.jobs.install.Path")
-    def test_validate_rsync_not_found(self, mock_path: MagicMock, mock_which: MagicMock) -> None:
+    def test_validate_rsync_not_found(
+        self, mock_path: MagicMock, mock_which: MagicMock, mock_access: MagicMock
+    ) -> None:
         """validate should fail if rsync tool not available for live install."""
         job = InstallJob()
 
@@ -246,6 +249,7 @@ class TestValidate:
             return mock_target
 
         mock_path.side_effect = path_side_effect
+        mock_access.return_value = True
 
         # rsync not found, du found
         def which_side_effect(tool: str) -> str | None:
@@ -269,11 +273,16 @@ class TestValidate:
         assert result.error_code == 60
         assert "rsync tool not found" in result.message
 
+    @patch("omnis.jobs.install.os.access")
     @patch("omnis.jobs.install.shutil.disk_usage")
     @patch("omnis.jobs.install.shutil.which")
     @patch("omnis.jobs.install.Path")
     def test_validate_insufficient_space(
-        self, mock_path: MagicMock, mock_which: MagicMock, mock_disk_usage: MagicMock
+        self,
+        mock_path: MagicMock,
+        mock_which: MagicMock,
+        mock_disk_usage: MagicMock,
+        mock_access: MagicMock,
     ) -> None:
         """validate should fail if insufficient disk space."""
         job = InstallJob()
@@ -294,6 +303,7 @@ class TestValidate:
             return mock_target
 
         mock_path.side_effect = path_side_effect
+        mock_access.return_value = True
 
         # Tools available
         mock_which.return_value = "/usr/bin/rsync"
@@ -315,6 +325,7 @@ class TestValidate:
         assert result.error_code == 62
         assert "Insufficient disk space" in result.message
 
+    @patch("omnis.jobs.install.os.access")
     @patch("omnis.jobs.install.InstallJob._get_source_size")
     @patch("omnis.jobs.install.shutil.disk_usage")
     @patch("omnis.jobs.install.shutil.which")
@@ -325,6 +336,7 @@ class TestValidate:
         mock_which: MagicMock,
         mock_disk_usage: MagicMock,
         mock_get_source_size: MagicMock,
+        mock_access: MagicMock,
     ) -> None:
         """validate should succeed with valid configuration."""
         job = InstallJob()
@@ -345,6 +357,7 @@ class TestValidate:
             return mock_target
 
         mock_path.side_effect = path_side_effect
+        mock_access.return_value = True
 
         # Tools available
         mock_which.return_value = "/usr/bin/rsync"

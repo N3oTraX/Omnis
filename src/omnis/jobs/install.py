@@ -6,6 +6,7 @@ using rsync with progress tracking.
 """
 
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -217,8 +218,8 @@ class InstallJob(BaseJob):
                 error_code=58,
             )
 
-        # Check if target is writable
-        if not target_path.stat().st_mode & 0o200:
+        # Check if target directory is writable for the current user
+        if not os.access(target_path, os.W_OK):
             return JobResult.fail(
                 f"Target directory is not writable: {target}",
                 error_code=59,
@@ -376,9 +377,11 @@ class InstallJob(BaseJob):
         for exclude_dir in self.EXCLUDE_DIRS:
             cmd.extend(["--exclude", exclude_dir])
 
-        # Exclude target directory itself (in case target is inside source)
-        if target.startswith(source):
-            relative_target = target[len(source) :].lstrip("/")
+        # Exclude target directory itself (when target is a subdirectory of source)
+        source_path = Path(source).resolve()
+        target_path = Path(target).resolve()
+        if target_path.is_relative_to(source_path):
+            relative_target = str(target_path.relative_to(source_path))
             if relative_target:
                 cmd.extend(["--exclude", f"/{relative_target}"])
 
