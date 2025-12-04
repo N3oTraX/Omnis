@@ -3,3 +3,9 @@ module OmnisComponents
 RequirementsOverlay 1.0 RequirementsOverlay.qml
 RequirementItem 1.0 RequirementItem.qml
 WelcomeView 1.0 WelcomeView.qml
+LocaleView 1.0 LocaleView.qml
+UsersView 1.0 UsersView.qml
+PartitionView 1.0 PartitionView.qml
+SummaryView 1.0 SummaryView.qml
+ProgressView 1.0 ProgressView.qml
+FinishedView 1.0 FinishedView.qml

@@ -6,12 +6,14 @@ Exposes engine functionality to QML via Qt properties and signals.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Property, QObject, QThread, QUrl, Signal, Slot
 
 from omnis.i18n.translator import get_translator
+from omnis.jobs.locale import LocaleJob
 from omnis.jobs.requirements import SystemRequirementsChecker
 
 if TYPE_CHECKING:
@@ -246,6 +248,12 @@ class EngineBridge(QObject):
     errorOccurred = Signal(str, str)  # job_name, error_message
     requirementsChanged = Signal()  # emitted when requirements check completes
 
+    # Signals for user selections
+    selectionsChanged = Signal()  # emitted when any selection changes
+    localeDataChanged = Signal()  # emitted when locale data is loaded
+    disksChanged = Signal()  # emitted when disks are scanned
+    progressChanged = Signal()  # emitted when progress updates
+
     def __init__(
         self,
         engine: Engine,
@@ -271,6 +279,38 @@ class EngineBridge(QObject):
         self._can_proceed: bool = True
         self._is_checking_requirements: bool = False
         self._show_requirements: bool = True
+
+        # Locale data
+        self._locales_model: list[str] = []
+        self._timezones_model: list[str] = []
+        self._keymaps_model: list[str] = []
+
+        # User selections
+        self._selections: dict[str, Any] = {
+            "locale": "en_US.UTF-8",
+            "timezone": "UTC",
+            "keymap": "us",
+            "username": "",
+            "fullName": "",
+            "hostname": "",
+            "password": "",
+            "autoLogin": False,
+            "isAdmin": True,
+            "disk": "",
+            "partitionMode": "auto",
+        }
+
+        # Disk data
+        self._disks_model: list[dict[str, Any]] = []
+
+        # Progress tracking
+        self._overall_progress: int = 0
+        self._current_job_progress: int = 0
+        self._current_job_name: str = ""
+        self._current_job_message: str = ""
+        self._jobs_list: list[dict[str, Any]] = []
+        self._installation_status: str = "idle"  # idle, running, success, failed
+        self._error_message: str = ""
 
         # Connect engine callbacks
         self._engine.on_job_start = self._on_job_start
@@ -302,18 +342,41 @@ class EngineBridge(QObject):
 
     def _on_job_start(self, job_name: str) -> None:
         """Handle job start event."""
+        self._current_job_name = job_name
+        self._current_job_progress = 0
+        self._current_job_message = f"Starting {job_name}..."
+        self._update_jobs_list()
+        self.progressChanged.emit()
         self.jobStarted.emit(job_name)
 
     def _on_job_progress(self, job_name: str, percent: int, message: str) -> None:
         """Handle job progress event."""
+        self._current_job_name = job_name
+        self._current_job_progress = percent
+        self._current_job_message = message
+
+        # Calculate overall progress
+        total_jobs = len(self._engine.jobs)
+        current_idx = self.getCurrentJobIndex()
+        if total_jobs > 0 and current_idx >= 0:
+            base_progress = (current_idx * 100) // total_jobs
+            job_contribution = percent // total_jobs
+            self._overall_progress = base_progress + job_contribution
+
+        self.progressChanged.emit()
         self.jobProgress.emit(job_name, percent, message)
 
     def _on_job_complete(self, job_name: str, result: Any) -> None:
         """Handle job completion event."""
+        self._update_jobs_list()
+        self.progressChanged.emit()
         self.jobCompleted.emit(job_name, result.success)
 
     def _on_error(self, job_name: str, error: str) -> None:
         """Handle error event."""
+        self._error_message = error
+        self._installation_status = "failed"
+        self.progressChanged.emit()
         self.errorOccurred.emit(job_name, error)
 
     @Property(bool, constant=True)
@@ -482,3 +545,429 @@ class EngineBridge(QObject):
     def getLastError(self) -> str:
         """Get last error message."""
         return self._engine.state.last_error or ""
+
+    # =========================================================================
+    # Locale Data Properties
+    # =========================================================================
+
+    @Property(list, notify=localeDataChanged)
+    def localesModel(self) -> list[str]:
+        """Get available locales for QML."""
+        return self._locales_model
+
+    @Property(list, notify=localeDataChanged)
+    def timezonesModel(self) -> list[str]:
+        """Get available timezones for QML."""
+        return self._timezones_model
+
+    @Property(list, notify=localeDataChanged)
+    def keymapsModel(self) -> list[str]:
+        """Get available keyboard layouts for QML."""
+        return self._keymaps_model
+
+    @Slot()
+    def loadLocaleData(self) -> None:
+        """Load locale, timezone, and keymap data."""
+        if self._debug:
+            print("[Engine] Loading locale data...")
+
+        # Load locales from LocaleJob
+        self._locales_model = list(LocaleJob.COMMON_LOCALES)
+
+        # Load timezones from system
+        locale_job = LocaleJob()
+        self._timezones_model = locale_job._get_available_timezones()
+
+        # Load keymaps from LocaleJob
+        self._keymaps_model = list(LocaleJob.COMMON_KEYMAPS)
+
+        if self._debug:
+            print(f"[Engine] Loaded {len(self._locales_model)} locales")
+            print(f"[Engine] Loaded {len(self._timezones_model)} timezones")
+            print(f"[Engine] Loaded {len(self._keymaps_model)} keymaps")
+
+        self.localeDataChanged.emit()
+
+    # =========================================================================
+    # User Selections Properties
+    # =========================================================================
+
+    @Property(str, notify=selectionsChanged)
+    def selectedLocale(self) -> str:
+        """Get selected locale."""
+        return str(self._selections.get("locale", "en_US.UTF-8"))
+
+    @Slot(str)
+    def setSelectedLocale(self, locale: str) -> None:
+        """Set selected locale."""
+        if self._selections.get("locale") != locale:
+            self._selections["locale"] = locale
+            if self._debug:
+                print(f"[Engine] Locale set to: {locale}")
+            self.selectionsChanged.emit()
+
+    @Property(str, notify=selectionsChanged)
+    def selectedTimezone(self) -> str:
+        """Get selected timezone."""
+        return str(self._selections.get("timezone", "UTC"))
+
+    @Slot(str)
+    def setSelectedTimezone(self, timezone: str) -> None:
+        """Set selected timezone."""
+        if self._selections.get("timezone") != timezone:
+            self._selections["timezone"] = timezone
+            if self._debug:
+                print(f"[Engine] Timezone set to: {timezone}")
+            self.selectionsChanged.emit()
+
+    @Property(str, notify=selectionsChanged)
+    def selectedKeymap(self) -> str:
+        """Get selected keyboard layout."""
+        return str(self._selections.get("keymap", "us"))
+
+    @Slot(str)
+    def setSelectedKeymap(self, keymap: str) -> None:
+        """Set selected keyboard layout."""
+        if self._selections.get("keymap") != keymap:
+            self._selections["keymap"] = keymap
+            if self._debug:
+                print(f"[Engine] Keymap set to: {keymap}")
+            self.selectionsChanged.emit()
+
+    @Property(str, notify=selectionsChanged)
+    def username(self) -> str:
+        """Get username."""
+        return str(self._selections.get("username", ""))
+
+    @Slot(str)
+    def setUsername(self, username: str) -> None:
+        """Set username."""
+        if self._selections.get("username") != username:
+            self._selections["username"] = username
+            self.selectionsChanged.emit()
+
+    @Property(str, notify=selectionsChanged)
+    def fullName(self) -> str:
+        """Get full name."""
+        return str(self._selections.get("fullName", ""))
+
+    @Slot(str)
+    def setFullName(self, fullName: str) -> None:
+        """Set full name."""
+        if self._selections.get("fullName") != fullName:
+            self._selections["fullName"] = fullName
+            self.selectionsChanged.emit()
+
+    @Property(str, notify=selectionsChanged)
+    def hostname(self) -> str:
+        """Get hostname."""
+        return str(self._selections.get("hostname", ""))
+
+    @Slot(str)
+    def setHostname(self, hostname: str) -> None:
+        """Set hostname."""
+        if self._selections.get("hostname") != hostname:
+            self._selections["hostname"] = hostname
+            self.selectionsChanged.emit()
+
+    @Property(str, notify=selectionsChanged)
+    def password(self) -> str:
+        """Get password (for internal use, not displayed)."""
+        return str(self._selections.get("password", ""))
+
+    @Slot(str)
+    def setPassword(self, password: str) -> None:
+        """Set password."""
+        if self._selections.get("password") != password:
+            self._selections["password"] = password
+            self.selectionsChanged.emit()
+
+    @Property(bool, notify=selectionsChanged)
+    def autoLogin(self) -> bool:
+        """Get auto-login setting."""
+        return bool(self._selections.get("autoLogin", False))
+
+    @Slot(bool)
+    def setAutoLogin(self, autoLogin: bool) -> None:
+        """Set auto-login setting."""
+        if self._selections.get("autoLogin") != autoLogin:
+            self._selections["autoLogin"] = autoLogin
+            self.selectionsChanged.emit()
+
+    @Property(bool, notify=selectionsChanged)
+    def isAdmin(self) -> bool:
+        """Get admin privileges setting."""
+        return bool(self._selections.get("isAdmin", True))
+
+    @Slot(bool)
+    def setIsAdmin(self, isAdmin: bool) -> None:
+        """Set admin privileges setting."""
+        if self._selections.get("isAdmin") != isAdmin:
+            self._selections["isAdmin"] = isAdmin
+            self.selectionsChanged.emit()
+
+    # =========================================================================
+    # Disk/Partition Properties
+    # =========================================================================
+
+    @Property(list, notify=disksChanged)
+    def disksModel(self) -> list[dict[str, Any]]:
+        """Get available disks for QML."""
+        return self._disks_model
+
+    @Property(str, notify=selectionsChanged)
+    def selectedDisk(self) -> str:
+        """Get selected disk."""
+        return str(self._selections.get("disk", ""))
+
+    @Slot(str)
+    def setSelectedDisk(self, disk: str) -> None:
+        """Set selected disk."""
+        if self._selections.get("disk") != disk:
+            self._selections["disk"] = disk
+            if self._debug:
+                print(f"[Engine] Disk set to: {disk}")
+            self.selectionsChanged.emit()
+
+    @Property(str, notify=selectionsChanged)
+    def partitionMode(self) -> str:
+        """Get partition mode (auto/manual)."""
+        return str(self._selections.get("partitionMode", "auto"))
+
+    @Slot(str)
+    def setPartitionMode(self, mode: str) -> None:
+        """Set partition mode."""
+        if self._selections.get("partitionMode") != mode:
+            self._selections["partitionMode"] = mode
+            if self._debug:
+                print(f"[Engine] Partition mode set to: {mode}")
+            self.selectionsChanged.emit()
+
+    @Slot()
+    def refreshDisks(self) -> None:
+        """Scan and refresh available disks."""
+        if self._debug:
+            print("[Engine] Scanning disks...")
+
+        self._disks_model = []
+
+        try:
+            # Use lsblk to get disk information
+            result = subprocess.run(
+                [
+                    "lsblk",
+                    "-J",
+                    "-o",
+                    "NAME,SIZE,TYPE,MOUNTPOINT,MODEL,HOTPLUG,TRAN,ROTA",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+
+            if result.returncode == 0:
+                import json
+
+                data = json.loads(result.stdout)
+
+                for device in data.get("blockdevices", []):
+                    if device.get("type") == "disk":
+                        # Skip mounted system disks
+                        has_mounted_partition = False
+                        partitions = []
+
+                        for child in device.get("children", []):
+                            if child.get("mountpoint"):
+                                has_mounted_partition = True
+                            partitions.append(
+                                {
+                                    "name": child.get("name", ""),
+                                    "size": child.get("size", ""),
+                                    "fstype": child.get("fstype", ""),
+                                    "mountpoint": child.get("mountpoint", ""),
+                                }
+                            )
+
+                        # Determine disk type
+                        is_removable = device.get("hotplug") == "1" or device.get(
+                            "hotplug"
+                        )
+                        is_ssd = not device.get("rota", True)
+
+                        if is_removable:
+                            disk_type = "removable"
+                        elif is_ssd:
+                            disk_type = "ssd"
+                        else:
+                            disk_type = "hdd"
+
+                        disk_info = {
+                            "name": device.get("name", ""),
+                            "size": device.get("size", ""),
+                            "model": device.get("model", "").strip() if device.get("model") else "",
+                            "type": disk_type,
+                            "removable": is_removable,
+                            "partitions": partitions,
+                            "hasMounted": has_mounted_partition,
+                        }
+                        self._disks_model.append(disk_info)
+
+        except subprocess.TimeoutExpired:
+            if self._debug:
+                print("[Engine] Disk scan timeout")
+        except FileNotFoundError:
+            if self._debug:
+                print("[Engine] lsblk not found, using mock data")
+            # Mock data for testing
+            self._disks_model = [
+                {
+                    "name": "sda",
+                    "size": "500G",
+                    "model": "Samsung SSD 860",
+                    "type": "ssd",
+                    "removable": False,
+                    "partitions": [
+                        {"name": "sda1", "size": "512M", "fstype": "vfat", "mountpoint": ""},
+                        {"name": "sda2", "size": "499.5G", "fstype": "ext4", "mountpoint": ""},
+                    ],
+                    "hasMounted": False,
+                },
+                {
+                    "name": "nvme0n1",
+                    "size": "1T",
+                    "model": "WD Black SN850",
+                    "type": "ssd",
+                    "removable": False,
+                    "partitions": [],
+                    "hasMounted": False,
+                },
+            ]
+        except Exception as e:
+            if self._debug:
+                print(f"[Engine] Disk scan error: {e}")
+
+        if self._debug:
+            print(f"[Engine] Found {len(self._disks_model)} disks")
+
+        self.disksChanged.emit()
+
+    # =========================================================================
+    # Progress Properties
+    # =========================================================================
+
+    @Property(int, notify=progressChanged)
+    def overallProgress(self) -> int:
+        """Get overall installation progress (0-100)."""
+        return self._overall_progress
+
+    @Property(int, notify=progressChanged)
+    def currentJobProgress(self) -> int:
+        """Get current job progress (0-100)."""
+        return self._current_job_progress
+
+    @Property(str, notify=progressChanged)
+    def currentJobName(self) -> str:
+        """Get current job name."""
+        return self._current_job_name
+
+    @Property(str, notify=progressChanged)
+    def currentJobMessage(self) -> str:
+        """Get current job status message."""
+        return self._current_job_message
+
+    @Property(list, notify=progressChanged)
+    def jobsList(self) -> list[dict[str, Any]]:
+        """Get jobs list with status for progress view."""
+        return self._jobs_list
+
+    @Property(str, notify=progressChanged)
+    def installationStatus(self) -> str:
+        """Get installation status: idle, running, success, failed."""
+        return self._installation_status
+
+    @Property(str, notify=progressChanged)
+    def errorMessage(self) -> str:
+        """Get error message if installation failed."""
+        return self._error_message
+
+    def _update_jobs_list(self) -> None:
+        """Update jobs list with current status."""
+        self._jobs_list = []
+        job_names = self._engine.get_job_names()
+        current_idx = self.getCurrentJobIndex()
+
+        for i, name in enumerate(job_names):
+            if i < current_idx:
+                status = "completed"
+            elif i == current_idx:
+                status = "running"
+            else:
+                status = "pending"
+
+            self._jobs_list.append({"name": name, "status": status})
+
+    # =========================================================================
+    # Summary Properties
+    # =========================================================================
+
+    @Property(object, notify=selectionsChanged)  # type: ignore[arg-type]
+    def selections(self) -> dict[str, Any]:
+        """Get all selections for summary view."""
+        return self._selections.copy()
+
+    @Property(object, notify=progressChanged)  # type: ignore[arg-type]
+    def installationSummary(self) -> dict[str, Any]:
+        """Get installation summary for finished view."""
+        branding = self._engine.get_branding()
+        return {
+            "distroName": branding.name,
+            "distroVersion": branding.version,
+            "disk": self._selections.get("disk", ""),
+            "diskSize": self._get_disk_size(self._selections.get("disk", "")),
+            "installTime": "N/A",  # Could track actual time
+            "packagesInstalled": 0,  # Could track from packages job
+        }
+
+    def _get_disk_size(self, disk_name: str) -> str:
+        """Get disk size by name."""
+        for disk in self._disks_model:
+            if disk.get("name") == disk_name:
+                return str(disk.get("size", ""))
+        return ""
+
+    # =========================================================================
+    # Actions
+    # =========================================================================
+
+    @Slot(str)
+    def executeFinishAction(self, action: str) -> None:
+        """Execute finish action: reboot, shutdown, or continue."""
+        if self._debug:
+            print(f"[Engine] Executing finish action: {action}")
+
+        if self._dry_run:
+            print(f"[Engine] Dry run: would execute {action}")
+            return
+
+        try:
+            if action == "reboot":
+                subprocess.run(["systemctl", "reboot"], check=False)
+            elif action == "shutdown":
+                subprocess.run(["systemctl", "poweroff"], check=False)
+            # "continue" does nothing - user can manually close
+        except Exception as e:
+            if self._debug:
+                print(f"[Engine] Action failed: {e}")
+
+    @Slot()
+    def applySelectionsToContext(self) -> None:
+        """Apply user selections to the engine context before installation."""
+        if self._debug:
+            print("[Engine] Applying selections to context...")
+            for key, value in self._selections.items():
+                if key != "password":  # Don't log password
+                    print(f"[Engine]   {key}: {value}")
+
+        # The engine context will receive these during job execution
+        # Jobs read from context.selections which we'll populate
+        self._engine.set_selections(self._selections)

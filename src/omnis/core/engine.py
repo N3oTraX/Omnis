@@ -174,11 +174,23 @@ class Engine:
     jobs: list[BaseJob] = field(default_factory=list)
     state: EngineState = field(default_factory=EngineState)
 
+    # User selections from UI
+    _selections: dict[str, Any] = field(default_factory=dict)
+
     # Callbacks
     on_job_start: Any | None = None  # (job_name: str) -> None
     on_job_progress: Any | None = None  # (job_name: str, percent: int, msg: str) -> None
     on_job_complete: Any | None = None  # (job_name: str, result: JobResult) -> None
     on_error: Any | None = None  # (job_name: str, error: str) -> None
+
+    def set_selections(self, selections: dict[str, Any]) -> None:
+        """
+        Set user selections from UI to be passed to jobs.
+
+        Args:
+            selections: Dictionary with user selections (locale, timezone, user, disk, etc.)
+        """
+        self._selections = selections.copy()
 
     @classmethod
     def from_config_file(cls, path: str | Path) -> "Engine":
@@ -307,6 +319,9 @@ class Engine:
         """
         if context is None:
             context = JobContext()
+
+        # Populate context with user selections from UI
+        context.selections = self._selections.copy()
 
         self.state.is_running = True
         self.state.is_finished = False
