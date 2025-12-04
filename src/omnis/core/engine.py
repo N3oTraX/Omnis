@@ -174,11 +174,23 @@ class Engine:
     jobs: list[BaseJob] = field(default_factory=list)
     state: EngineState = field(default_factory=EngineState)
 
+    # User selections from UI
+    _selections: dict[str, Any] = field(default_factory=dict)
+
     # Callbacks
     on_job_start: Any | None = None  # (job_name: str) -> None
     on_job_progress: Any | None = None  # (job_name: str, percent: int, msg: str) -> None
     on_job_complete: Any | None = None  # (job_name: str, result: JobResult) -> None
     on_error: Any | None = None  # (job_name: str, error: str) -> None
+
+    def set_selections(self, selections: dict[str, Any]) -> None:
+        """
+        Set user selections from UI to be passed to jobs.
+
+        Args:
+            selections: Dictionary with user selections (locale, timezone, user, disk, etc.)
+        """
+        self._selections = selections.copy()
 
     @classmethod
     def from_config_file(cls, path: str | Path) -> "Engine":
@@ -237,6 +249,10 @@ class Engine:
         """
         Load a single job by name.
 
+        Dynamically imports the job module from omnis.jobs.<name> and
+        instantiates the job class. The job class must have a name ending
+        with 'Job' (e.g., WelcomeJob for the 'welcome' job).
+
         Args:
             job_def: Job definition with name and config
 
@@ -244,32 +260,40 @@ class Engine:
             Instantiated job
 
         Raises:
-            JobLoadError: If job cannot be loaded
+            JobLoadError: If job cannot be loaded or is invalid
         """
-        # TODO: Implement dynamic job loading from omnis.jobs.<name>
-        # For now, return a placeholder
-        # In production:
-        # module = importlib.import_module(f"omnis.jobs.{job_def.name}")
-        # job_class = getattr(module, "Job")
-        # return job_class(config=job_def.config)
+        import importlib
+        import inspect
 
-        from omnis.jobs.base import BaseJob, JobContext, JobResult
+        job_name = job_def.name
+        module_name = f"omnis.jobs.{job_name}"
 
-        class PlaceholderJob(BaseJob):
-            """Placeholder job for skeleton implementation."""
+        # Import the job module
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError as e:
+            raise JobLoadError(f"Failed to import job module '{module_name}': {e}") from e
 
-            def __init__(self, name: str, config: dict[str, Any]) -> None:
-                super().__init__(config)
-                self.name = name
-                self.description = f"Placeholder for {name}"
+        # Find the job class (must end with 'Job' and inherit from BaseJob)
+        job_class = None
+        for name, obj in inspect.getmembers(module, inspect.isclass):
+            if name.endswith("Job") and issubclass(obj, BaseJob) and obj is not BaseJob:
+                job_class = obj
+                break
 
-            def run(self, _context: JobContext) -> JobResult:
-                return JobResult.ok(f"Job {self.name} completed (placeholder)")
+        if job_class is None:
+            raise JobLoadError(
+                f"No valid job class found in module '{module_name}'. "
+                "Job class must inherit from BaseJob and have a name ending with 'Job'."
+            )
 
-            def estimate_duration(self) -> int:
-                return 10
-
-        return PlaceholderJob(name=job_def.name, config=job_def.config)
+        # Instantiate the job
+        try:
+            return job_class(config=job_def.config)
+        except Exception as e:
+            raise JobLoadError(
+                f"Failed to instantiate job class '{job_class.__name__}': {e}"
+            ) from e
 
     def get_branding(self) -> BrandingConfig:
         """Get branding configuration for UI."""
@@ -295,6 +319,9 @@ class Engine:
         """
         if context is None:
             context = JobContext()
+
+        # Populate context with user selections from UI
+        context.selections = self._selections.copy()
 
         self.state.is_running = True
         self.state.is_finished = False
