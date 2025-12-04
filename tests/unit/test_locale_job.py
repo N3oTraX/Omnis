@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 try:
-    from omnis.jobs.base import JobContext, JobResult, JobStatus
+    from omnis.jobs.base import JobContext, JobStatus
     from omnis.jobs.locale import LocaleJob
 
     HAS_LOCALE_JOB = True
@@ -84,9 +84,8 @@ class TestLocaleValidation:
 
         # Test with actual system timezones if available
         zoneinfo_path = Path("/usr/share/zoneinfo")
-        if zoneinfo_path.exists():
-            if (zoneinfo_path / "Europe" / "Paris").exists():
-                assert job._validate_timezone("Europe/Paris") is True
+        if zoneinfo_path.exists() and (zoneinfo_path / "Europe" / "Paris").exists():
+            assert job._validate_timezone("Europe/Paris") is True
 
     def test_validate_timezone_invalid(self) -> None:
         """Invalid timezones should fail validation."""

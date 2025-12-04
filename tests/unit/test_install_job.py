@@ -1,8 +1,7 @@
 """Unit tests for InstallJob."""
 
 import subprocess
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -70,7 +69,7 @@ class TestConstants:
         """MIN_FREE_SPACE should be 5 GB."""
         job = InstallJob()
         expected_bytes = 5 * 1024 * 1024 * 1024
-        assert job.MIN_FREE_SPACE == expected_bytes
+        assert expected_bytes == job.MIN_FREE_SPACE
 
 
 class TestValidate:
@@ -651,12 +650,12 @@ class TestVerifyInstallation:
         # Mock all critical files exist
         mock_target = MagicMock()
 
-        def mock_file_exists(file_path: str) -> MagicMock:
+        def mock_file_exists(_file_path: str) -> MagicMock:
             mock_file = MagicMock()
             mock_file.exists.return_value = True
             return mock_file
 
-        mock_target.__truediv__ = lambda self, other: mock_file_exists(other)
+        mock_target.__truediv__ = lambda _self, other: mock_file_exists(other)
         mock_path.return_value = mock_target
 
         result = job._verify_installation("/mnt")
@@ -679,7 +678,7 @@ class TestVerifyInstallation:
             mock_file.exists.return_value = "fstab" not in str(file_path)
             return mock_file
 
-        mock_target.__truediv__ = lambda self, other: mock_file_exists(other)
+        mock_target.__truediv__ = lambda _self, other: mock_file_exists(other)
         mock_path.return_value = mock_target
 
         result = job._verify_installation("/mnt")

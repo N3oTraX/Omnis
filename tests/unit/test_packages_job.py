@@ -1,7 +1,6 @@
 """Unit tests for PackagesJob."""
 
 import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -393,7 +392,7 @@ class TestInstallWithRetry:
 
     @patch.object(PackagesJob, "_install_packages_pacman")
     @patch("time.sleep")
-    def test_install_retry_max_attempts(self, mock_sleep: Mock, mock_install: Mock) -> None:
+    def test_install_retry_max_attempts(self, _mock_sleep: Mock, mock_install: Mock) -> None:
         """Should fail after max retries."""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_install.return_value = JobResult.fail("Network error", error_code=33)
