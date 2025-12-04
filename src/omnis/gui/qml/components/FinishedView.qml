@@ -328,7 +328,7 @@ Item {
                             Row {
                                 width: parent.width
                                 spacing: 12
-                                visible: installationSummary.installedPackages > 0
+                                visible: (installationSummary.installedPackages || 0) > 0
 
                                 Text {
                                     text: qsTr("Packages Installed:")
@@ -338,7 +338,7 @@ Item {
                                 }
 
                                 Text {
-                                    text: installationSummary.installedPackages.toString()
+                                    text: (installationSummary.installedPackages || 0).toString()
                                     font.pixelSize: 14
                                     font.bold: true
                                     color: textColor

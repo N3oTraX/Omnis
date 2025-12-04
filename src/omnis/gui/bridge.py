@@ -920,10 +920,10 @@ class EngineBridge(QObject):
         return {
             "distroName": branding.name,
             "distroVersion": branding.version,
-            "disk": self._selections.get("disk", ""),
+            "targetDisk": self._selections.get("disk", ""),
             "diskSize": self._get_disk_size(self._selections.get("disk", "")),
-            "installTime": "N/A",  # Could track actual time
-            "packagesInstalled": 0,  # Could track from packages job
+            "installationTime": "N/A",  # Could track actual time
+            "installedPackages": 0,  # Could track from packages job
         }
 
     def _get_disk_size(self, disk_name: str) -> str:

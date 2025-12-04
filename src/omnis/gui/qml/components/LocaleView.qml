@@ -46,22 +46,22 @@ Item {
 
         ScrollView {
             anchors.fill: parent
-            anchors.margins: 32
+            anchors.margins: 20
             contentWidth: availableWidth
             clip: true
 
             ColumnLayout {
                 width: parent.width
-                spacing: 24
+                spacing: 16
 
                 // Title section
                 ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: 8
+                    spacing: 4
 
                     Text {
                         text: qsTr("Locale Settings")
-                        font.pixelSize: 28
+                        font.pixelSize: 24
                         font.bold: true
                         color: textColor
                         Layout.alignment: Qt.AlignHCenter
@@ -69,7 +69,7 @@ Item {
 
                     Text {
                         text: qsTr("Configure your system language, timezone, and keyboard layout")
-                        font.pixelSize: 14
+                        font.pixelSize: 13
                         color: textMutedColor
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
@@ -77,7 +77,7 @@ Item {
                     }
                 }
 
-                Item { Layout.preferredHeight: 16 }
+                Item { Layout.preferredHeight: 8 }
 
                 // Configuration cards container - centered
                 ColumnLayout {
@@ -85,14 +85,14 @@ Item {
                     Layout.alignment: Qt.AlignHCenter
                     Layout.maximumWidth: 600
                     Layout.minimumWidth: 400
-                    spacing: 20
+                    spacing: 12
 
                     // ===== Locale selection card =====
                     Rectangle {
                         id: localeCard
                         Layout.fillWidth: true
-                        Layout.preferredHeight: localeContent.implicitHeight + 48
-                        radius: 12
+                        Layout.preferredHeight: localeContent.implicitHeight + 32
+                        radius: 10
                         color: surfaceColor
 
                         layer.enabled: true
@@ -107,8 +107,8 @@ Item {
                         ColumnLayout {
                             id: localeContent
                             anchors.fill: parent
-                            anchors.margins: 24
-                            spacing: 12
+                            anchors.margins: 16
+                            spacing: 8
 
                             RowLayout {
                                 Layout.fillWidth: true
@@ -130,86 +130,30 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 text: qsTr("Select your preferred system language and locale")
-                                font.pixelSize: 13
+                                font.pixelSize: 12
                                 color: textMutedColor
                                 wrapMode: Text.WordWrap
                             }
 
-                            ComboBox {
+                            SearchableComboBox {
                                 id: localeCombo
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 44
+                                Layout.preferredHeight: 40
 
                                 model: localesModel
-                                currentIndex: findIndex(localesModel, selectedLocale)
+                                currentValue: selectedLocale
+                                placeholder: qsTr("Select language...")
+                                searchPlaceholder: qsTr("Search languages...")
 
-                                function findIndex(model, value) {
-                                    if (!model || !value) return 0
-                                    for (var i = 0; i < model.length; i++) {
-                                        if (model[i] === value) return i
-                                    }
-                                    return 0
-                                }
+                                primaryColor: root.primaryColor
+                                backgroundColor: root.backgroundColor
+                                surfaceColor: root.surfaceColor
+                                textColor: root.textColor
+                                textMutedColor: root.textMutedColor
 
-                                onActivated: function(index) {
-                                    if (model && model[index]) {
-                                        selectedLocale = model[index]
-                                        localeSelected(selectedLocale)
-                                    }
-                                }
-
-                                background: Rectangle {
-                                    radius: 8
-                                    color: localeCombo.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
-                                    border.color: localeCombo.activeFocus ? primaryColor : Qt.darker(surfaceColor, 1.2)
-                                    border.width: 2
-                                }
-
-                                contentItem: Text {
-                                    text: localeCombo.displayText || qsTr("Select language...")
-                                    font.pixelSize: 14
-                                    color: localeCombo.displayText ? textColor : textMutedColor
-                                    verticalAlignment: Text.AlignVCenter
-                                    leftPadding: 12
-                                    elide: Text.ElideRight
-                                }
-
-                                popup: Popup {
-                                    y: localeCombo.height + 4
-                                    width: localeCombo.width
-                                    height: Math.min(contentItem.implicitHeight + 16, 300)
-                                    padding: 8
-
-                                    background: Rectangle {
-                                        radius: 8
-                                        color: surfaceColor
-                                        border.color: primaryColor
-                                        border.width: 1
-                                    }
-
-                                    contentItem: ListView {
-                                        clip: true
-                                        implicitHeight: contentHeight
-                                        model: localeCombo.popup.visible ? localeCombo.delegateModel : null
-                                        currentIndex: localeCombo.highlightedIndex
-                                        ScrollIndicator.vertical: ScrollIndicator { }
-                                    }
-                                }
-
-                                delegate: ItemDelegate {
-                                    width: localeCombo.width - 16
-                                    height: 40
-                                    contentItem: Text {
-                                        text: modelData
-                                        font.pixelSize: 14
-                                        color: highlighted ? textColor : textMutedColor
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-                                    background: Rectangle {
-                                        radius: 4
-                                        color: highlighted ? Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.2) : "transparent"
-                                    }
-                                    highlighted: localeCombo.highlightedIndex === index
+                                onValueSelected: function(value) {
+                                    selectedLocale = value
+                                    localeSelected(value)
                                 }
                             }
                         }
@@ -219,8 +163,8 @@ Item {
                     Rectangle {
                         id: timezoneCard
                         Layout.fillWidth: true
-                        Layout.preferredHeight: timezoneContent.implicitHeight + 48
-                        radius: 12
+                        Layout.preferredHeight: timezoneContent.implicitHeight + 32
+                        radius: 10
                         color: surfaceColor
 
                         layer.enabled: true
@@ -235,8 +179,8 @@ Item {
                         ColumnLayout {
                             id: timezoneContent
                             anchors.fill: parent
-                            anchors.margins: 24
-                            spacing: 12
+                            anchors.margins: 16
+                            spacing: 8
 
                             RowLayout {
                                 Layout.fillWidth: true
@@ -258,86 +202,30 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 text: qsTr("Select your timezone for accurate time display")
-                                font.pixelSize: 13
+                                font.pixelSize: 12
                                 color: textMutedColor
                                 wrapMode: Text.WordWrap
                             }
 
-                            ComboBox {
+                            SearchableComboBox {
                                 id: timezoneCombo
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 44
+                                Layout.preferredHeight: 40
 
                                 model: timezonesModel
-                                currentIndex: findIndex(timezonesModel, selectedTimezone)
+                                currentValue: selectedTimezone
+                                placeholder: qsTr("Select timezone...")
+                                searchPlaceholder: qsTr("Search timezones...")
 
-                                function findIndex(model, value) {
-                                    if (!model || !value) return 0
-                                    for (var i = 0; i < model.length; i++) {
-                                        if (model[i] === value) return i
-                                    }
-                                    return 0
-                                }
+                                primaryColor: root.primaryColor
+                                backgroundColor: root.backgroundColor
+                                surfaceColor: root.surfaceColor
+                                textColor: root.textColor
+                                textMutedColor: root.textMutedColor
 
-                                onActivated: function(index) {
-                                    if (model && model[index]) {
-                                        selectedTimezone = model[index]
-                                        timezoneSelected(selectedTimezone)
-                                    }
-                                }
-
-                                background: Rectangle {
-                                    radius: 8
-                                    color: timezoneCombo.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
-                                    border.color: timezoneCombo.activeFocus ? primaryColor : Qt.darker(surfaceColor, 1.2)
-                                    border.width: 2
-                                }
-
-                                contentItem: Text {
-                                    text: timezoneCombo.displayText || qsTr("Select timezone...")
-                                    font.pixelSize: 14
-                                    color: timezoneCombo.displayText ? textColor : textMutedColor
-                                    verticalAlignment: Text.AlignVCenter
-                                    leftPadding: 12
-                                    elide: Text.ElideRight
-                                }
-
-                                popup: Popup {
-                                    y: timezoneCombo.height + 4
-                                    width: timezoneCombo.width
-                                    height: Math.min(contentItem.implicitHeight + 16, 300)
-                                    padding: 8
-
-                                    background: Rectangle {
-                                        radius: 8
-                                        color: surfaceColor
-                                        border.color: primaryColor
-                                        border.width: 1
-                                    }
-
-                                    contentItem: ListView {
-                                        clip: true
-                                        implicitHeight: contentHeight
-                                        model: timezoneCombo.popup.visible ? timezoneCombo.delegateModel : null
-                                        currentIndex: timezoneCombo.highlightedIndex
-                                        ScrollIndicator.vertical: ScrollIndicator { }
-                                    }
-                                }
-
-                                delegate: ItemDelegate {
-                                    width: timezoneCombo.width - 16
-                                    height: 40
-                                    contentItem: Text {
-                                        text: modelData
-                                        font.pixelSize: 14
-                                        color: highlighted ? textColor : textMutedColor
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-                                    background: Rectangle {
-                                        radius: 4
-                                        color: highlighted ? Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.2) : "transparent"
-                                    }
-                                    highlighted: timezoneCombo.highlightedIndex === index
+                                onValueSelected: function(value) {
+                                    selectedTimezone = value
+                                    timezoneSelected(value)
                                 }
                             }
                         }
@@ -347,8 +235,8 @@ Item {
                     Rectangle {
                         id: keymapCard
                         Layout.fillWidth: true
-                        Layout.preferredHeight: keymapContent.implicitHeight + 48
-                        radius: 12
+                        Layout.preferredHeight: keymapContent.implicitHeight + 32
+                        radius: 10
                         color: surfaceColor
 
                         layer.enabled: true
@@ -363,8 +251,8 @@ Item {
                         ColumnLayout {
                             id: keymapContent
                             anchors.fill: parent
-                            anchors.margins: 24
-                            spacing: 12
+                            anchors.margins: 16
+                            spacing: 8
 
                             RowLayout {
                                 Layout.fillWidth: true
@@ -386,93 +274,37 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 text: qsTr("Select your keyboard layout for proper key mapping")
-                                font.pixelSize: 13
+                                font.pixelSize: 12
                                 color: textMutedColor
                                 wrapMode: Text.WordWrap
                             }
 
-                            ComboBox {
+                            SearchableComboBox {
                                 id: keymapCombo
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 44
+                                Layout.preferredHeight: 40
 
                                 model: keymapsModel
-                                currentIndex: findIndex(keymapsModel, selectedKeymap)
+                                currentValue: selectedKeymap
+                                placeholder: qsTr("Select layout...")
+                                searchPlaceholder: qsTr("Search layouts...")
 
-                                function findIndex(model, value) {
-                                    if (!model || !value) return 0
-                                    for (var i = 0; i < model.length; i++) {
-                                        if (model[i] === value) return i
-                                    }
-                                    return 0
-                                }
+                                primaryColor: root.primaryColor
+                                backgroundColor: root.backgroundColor
+                                surfaceColor: root.surfaceColor
+                                textColor: root.textColor
+                                textMutedColor: root.textMutedColor
 
-                                onActivated: function(index) {
-                                    if (model && model[index]) {
-                                        selectedKeymap = model[index]
-                                        keymapSelected(selectedKeymap)
-                                    }
-                                }
-
-                                background: Rectangle {
-                                    radius: 8
-                                    color: keymapCombo.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
-                                    border.color: keymapCombo.activeFocus ? primaryColor : Qt.darker(surfaceColor, 1.2)
-                                    border.width: 2
-                                }
-
-                                contentItem: Text {
-                                    text: keymapCombo.displayText || qsTr("Select layout...")
-                                    font.pixelSize: 14
-                                    color: keymapCombo.displayText ? textColor : textMutedColor
-                                    verticalAlignment: Text.AlignVCenter
-                                    leftPadding: 12
-                                    elide: Text.ElideRight
-                                }
-
-                                popup: Popup {
-                                    y: keymapCombo.height + 4
-                                    width: keymapCombo.width
-                                    height: Math.min(contentItem.implicitHeight + 16, 300)
-                                    padding: 8
-
-                                    background: Rectangle {
-                                        radius: 8
-                                        color: surfaceColor
-                                        border.color: primaryColor
-                                        border.width: 1
-                                    }
-
-                                    contentItem: ListView {
-                                        clip: true
-                                        implicitHeight: contentHeight
-                                        model: keymapCombo.popup.visible ? keymapCombo.delegateModel : null
-                                        currentIndex: keymapCombo.highlightedIndex
-                                        ScrollIndicator.vertical: ScrollIndicator { }
-                                    }
-                                }
-
-                                delegate: ItemDelegate {
-                                    width: keymapCombo.width - 16
-                                    height: 40
-                                    contentItem: Text {
-                                        text: modelData
-                                        font.pixelSize: 14
-                                        color: highlighted ? textColor : textMutedColor
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-                                    background: Rectangle {
-                                        radius: 4
-                                        color: highlighted ? Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.2) : "transparent"
-                                    }
-                                    highlighted: keymapCombo.highlightedIndex === index
+                                onValueSelected: function(value) {
+                                    selectedKeymap = value
+                                    keymapSelected(value)
                                 }
                             }
                         }
                     }
 
                     // Spacer at bottom
-                    Item { Layout.preferredHeight: 20 }
+                    Item { Layout.preferredHeight: 8 }
                 }
             }
         }

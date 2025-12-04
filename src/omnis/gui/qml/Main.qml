@@ -231,6 +231,10 @@ ApplicationWindow {
 
                 onLocaleSelected: function(locale) {
                     engine.setSelectedLocale(locale)
+                    // Trigger live language switching
+                    if (translator) {
+                        translator.setLocale(locale)
+                    }
                 }
                 onTimezoneSelected: function(timezone) {
                     engine.setSelectedTimezone(timezone)
@@ -543,6 +547,20 @@ ApplicationWindow {
 
         function onErrorOccurred(jobName, errorMessage) {
             console.error("Error in", jobName + ":", errorMessage)
+        }
+    }
+
+    // Translator connections for live language switching
+    Connections {
+        target: translator
+
+        function onLanguageChanged() {
+            console.log("Language changed to:", translator.currentLocale)
+            // QML will automatically retranslate qsTr() strings
+        }
+
+        function onLocaleChanged(locale) {
+            console.log("Locale updated:", locale)
         }
     }
 

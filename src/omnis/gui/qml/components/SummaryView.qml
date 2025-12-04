@@ -387,7 +387,7 @@ Item {
                                     Row {
                                         spacing: 12
                                         width: parent.width
-                                        visible: selections.fullName && selections.fullName.length > 0
+                                        visible: (selections.fullName || "").length > 0
 
                                         Text {
                                             text: qsTr("Full Name:")
@@ -397,7 +397,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.fullName
+                                            text: selections.fullName || ""
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -560,7 +560,7 @@ Item {
                                     Row {
                                         spacing: 12
                                         width: parent.width
-                                        visible: selections.diskSize && selections.diskSize.length > 0
+                                        visible: (selections.diskSize || "").length > 0
 
                                         Text {
                                             text: qsTr("Size:")
@@ -570,7 +570,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.diskSize
+                                            text: selections.diskSize || qsTr("Unknown")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
