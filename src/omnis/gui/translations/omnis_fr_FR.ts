@@ -4,8 +4,8 @@
 <context>
     <name>LocaleView</name>
     <message>
-        <source>Locale Settings</source>
-        <translation>Param\u00e8tres r\u00e9gionaux</translation>
+        <source>Country &amp; Language</source>
+        <translation>Pays et langue</translation>
     </message>
     <message>
         <source>Configure your system language, timezone, and keyboard layout</source>
@@ -13,15 +13,15 @@
     </message>
     <message>
         <source>System Language</source>
-        <translation>Langue du syst\u00e8me</translation>
+        <translation>Langue du système</translation>
     </message>
     <message>
         <source>Select your preferred system language and locale</source>
-        <translation>S\u00e9lectionnez votre langue et vos param\u00e8tres r\u00e9gionaux</translation>
+        <translation>Sélectionnez votre langue et vos paramètres régionaux</translation>
     </message>
     <message>
         <source>Select language...</source>
-        <translation>S\u00e9lectionner une langue...</translation>
+        <translation>Sélectionner une langue...</translation>
     </message>
     <message>
         <source>Search languages...</source>
@@ -33,38 +33,58 @@
     </message>
     <message>
         <source>Select your timezone for accurate time display</source>
-        <translation>S\u00e9lectionnez votre fuseau horaire pour un affichage pr\u00e9cis de l'heure</translation>
+        <translation>Sélectionnez votre fuseau horaire pour un affichage précis de l'heure</translation>
     </message>
     <message>
         <source>Select timezone...</source>
-        <translation>S\u00e9lectionner un fuseau horaire...</translation>
+        <translation>Sélectionner un fuseau horaire...</translation>
     </message>
     <message>
         <source>Search timezones...</source>
         <translation>Rechercher un fuseau horaire...</translation>
     </message>
     <message>
-        <source>Keyboard Layout</source>
-        <translation>Disposition du clavier</translation>
+        <source>Keyboard Configuration</source>
+        <translation>Configuration du clavier</translation>
     </message>
     <message>
-        <source>Select your keyboard layout for proper key mapping</source>
-        <translation>S\u00e9lectionnez la disposition de votre clavier</translation>
+        <source>Select your keyboard layout and variant</source>
+        <translation>Sélectionnez votre disposition et variante de clavier</translation>
     </message>
     <message>
-        <source>Select layout...</source>
-        <translation>S\u00e9lectionner une disposition...</translation>
+        <source>Layout</source>
+        <translation>Disposition</translation>
+    </message>
+    <message>
+        <source>Select...</source>
+        <translation>Sélectionner...</translation>
     </message>
     <message>
         <source>Search layouts...</source>
         <translation>Rechercher une disposition...</translation>
+    </message>
+    <message>
+        <source>Variant</source>
+        <translation>Variante</translation>
+    </message>
+    <message>
+        <source>Default</source>
+        <translation>Par défaut</translation>
+    </message>
+    <message>
+        <source>Test:</source>
+        <translation>Test :</translation>
+    </message>
+    <message>
+        <source>Type to test keyboard...</source>
+        <translation>Tapez pour tester le clavier...</translation>
     </message>
 </context>
 <context>
     <name>SearchableComboBox</name>
     <message>
         <source>Select...</source>
-        <translation>S\u00e9lectionner...</translation>
+        <translation>Sélectionner...</translation>
     </message>
     <message>
         <source>Type to search...</source>
@@ -72,30 +92,30 @@
     </message>
     <message>
         <source>%1 items</source>
-        <translation>%1 \u00e9l\u00e9ments</translation>
+        <translation>%1 éléments</translation>
     </message>
     <message>
         <source>%1 of %2 items</source>
-        <translation>%1 sur %2 \u00e9l\u00e9ments</translation>
+        <translation>%1 sur %2 éléments</translation>
     </message>
     <message>
         <source>No results found</source>
-        <translation>Aucun r\u00e9sultat trouv\u00e9</translation>
+        <translation>Aucun résultat trouvé</translation>
     </message>
 </context>
 <context>
     <name>SummaryView</name>
     <message>
         <source>Review Installation</source>
-        <translation>V\u00e9rifier l'installation</translation>
+        <translation>Vérifier l'installation</translation>
     </message>
     <message>
         <source>Please review your selections before starting the installation</source>
-        <translation>Veuillez v\u00e9rifier vos choix avant de lancer l'installation</translation>
+        <translation>Veuillez vérifier vos choix avant de lancer l'installation</translation>
     </message>
     <message>
         <source>System</source>
-        <translation>Syst\u00e8me</translation>
+        <translation>Système</translation>
     </message>
     <message>
         <source>Computer Name:</source>
@@ -103,7 +123,7 @@
     </message>
     <message>
         <source>Not set</source>
-        <translation>Non d\u00e9fini</translation>
+        <translation>Non défini</translation>
     </message>
     <message>
         <source>Edit</source>
@@ -155,11 +175,11 @@
     </message>
     <message>
         <source>Enabled</source>
-        <translation>Activ\u00e9e</translation>
+        <translation>Activée</translation>
     </message>
     <message>
         <source>Disabled</source>
-        <translation>D\u00e9sactiv\u00e9e</translation>
+        <translation>Désactivée</translation>
     </message>
     <message>
         <source>Storage</source>
@@ -191,15 +211,15 @@
     </message>
     <message>
         <source>Ready to Install</source>
-        <translation>Pr\u00eat \u00e0 installer</translation>
+        <translation>Prêt à installer</translation>
     </message>
     <message>
         <source>The installation will begin once you click the Install button. This process will modify your disk and cannot be undone. Please ensure all data is backed up.</source>
-        <translation>L'installation commencera d\u00e8s que vous cliquerez sur le bouton Installer. Ce processus modifiera votre disque et ne peut pas \u00eatre annul\u00e9. Veuillez vous assurer que toutes vos donn\u00e9es sont sauvegard\u00e9es.</translation>
+        <translation>L'installation commencera dès que vous cliquerez sur le bouton Installer. Ce processus modifiera votre disque et ne peut pas être annulé. Veuillez vous assurer que toutes vos données sont sauvegardées.</translation>
     </message>
     <message>
         <source>Previous</source>
-        <translation>Pr\u00e9c\u00e9dent</translation>
+        <translation>Précédent</translation>
     </message>
     <message>
         <source>Install Now</source>
@@ -210,15 +230,15 @@
     <name>FinishedView</name>
     <message>
         <source>Installation Complete!</source>
-        <translation>Installation termin\u00e9e !</translation>
+        <translation>Installation terminée !</translation>
     </message>
     <message>
         <source>Installation Failed</source>
-        <translation>\u00c9chec de l'installation</translation>
+        <translation>Échec de l'installation</translation>
     </message>
     <message>
         <source>The system has been successfully installed on your computer</source>
-        <translation>Le syst\u00e8me a \u00e9t\u00e9 install\u00e9 avec succ\u00e8s sur votre ordinateur</translation>
+        <translation>Le système a été installé avec succès sur votre ordinateur</translation>
     </message>
     <message>
         <source>An error occurred during installation</source>
@@ -226,7 +246,7 @@
     </message>
     <message>
         <source>Installation Summary</source>
-        <translation>R\u00e9sum\u00e9 de l'installation</translation>
+        <translation>Résumé de l'installation</translation>
     </message>
     <message>
         <source>Distribution:</source>
@@ -242,15 +262,15 @@
     </message>
     <message>
         <source>Installation Time:</source>
-        <translation>Dur\u00e9e d'installation :</translation>
+        <translation>Durée d'installation :</translation>
     </message>
     <message>
         <source>Packages Installed:</source>
-        <translation>Paquets install\u00e9s :</translation>
+        <translation>Paquets installés :</translation>
     </message>
     <message>
         <source>Error Details</source>
-        <translation>D\u00e9tails de l'erreur</translation>
+        <translation>Détails de l'erreur</translation>
     </message>
     <message>
         <source>An unknown error occurred during installation</source>
@@ -262,11 +282,11 @@
     </message>
     <message>
         <source>Reboot Now</source>
-        <translation>Red\u00e9marrer maintenant</translation>
+        <translation>Redémarrer maintenant</translation>
     </message>
     <message>
         <source>Shutdown</source>
-        <translation>\u00c9teindre</translation>
+        <translation>Éteindre</translation>
     </message>
     <message>
         <source>Continue</source>
@@ -274,7 +294,7 @@
     </message>
     <message>
         <source>Retry Installation</source>
-        <translation>R\u00e9essayer l'installation</translation>
+        <translation>Réessayer l'installation</translation>
     </message>
     <message>
         <source>Exit Installer</source>
@@ -282,11 +302,11 @@
     </message>
     <message>
         <source>Please remove the installation media before rebooting</source>
-        <translation>Veuillez retirer le support d'installation avant de red\u00e9marrer</translation>
+        <translation>Veuillez retirer le support d'installation avant de redémarrer</translation>
     </message>
     <message>
         <source>Check the logs for more details about the error</source>
-        <translation>Consultez les journaux pour plus de d\u00e9tails sur l'erreur</translation>
+        <translation>Consultez les journaux pour plus de détails sur l'erreur</translation>
     </message>
 </context>
 <context>

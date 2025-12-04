@@ -30,6 +30,22 @@ ApplicationWindow {
     visible: true
     title: branding.name + " Installer"
 
+    // System font for non-Latin languages (CJK, Arabic, Hebrew, etc.)
+    // Uses Noto Sans when a non-Latin locale is selected, otherwise system default
+    readonly property string systemFontFamily: engine.systemFontFamily
+    readonly property bool needsUnicodeFont: engine.needsUnicodeFont
+
+    // Apply font globally to the window (empty string = system default)
+    font.family: needsUnicodeFont && systemFontFamily ? systemFontFamily : ""
+
+    // React to font changes when locale changes
+    Connections {
+        target: engine
+        function onSystemFontChanged() {
+            console.log("System font changed to:", engine.systemFontFamily || "system default")
+        }
+    }
+
     // Dynamic color palette from branding
     readonly property color primaryColor: branding.primaryColor
     readonly property color secondaryColor: branding.secondaryColor
@@ -179,6 +195,8 @@ ApplicationWindow {
                 welcomeTitle: branding.welcomeTitle
                 welcomeSubtitle: branding.welcomeSubtitle
                 installButtonText: branding.installButton
+                brandingCodename: branding.version || ""
+                brandingEdition: branding.edition || ""
 
                 showRequirements: engine.showRequirements
                 requirements: engine.requirementsModel
@@ -232,11 +250,28 @@ ApplicationWindow {
                 textMutedColor: root.textMutedColor
                 accentColor: root.accentColor
 
+                // Auto-detect and apply UI language when LocaleView opens
+                onVisibleChanged: {
+                    if (visible && engine.detectedLocale) {
+                        // Extract base locale (e.g., "fr_FR" from "fr_FR.UTF-8")
+                        var detectedBase = engine.detectedLocale.split(".")[0]
+                        var currentBase = translator.currentLocale.split(".")[0]
+
+                        // Only switch if different and translator is available
+                        if (detectedBase !== currentBase && translator) {
+                            console.log("Auto-switching UI language to:", detectedBase)
+                            translator.setLocale(detectedBase)
+                        }
+                    }
+                }
+
                 onLocaleSelected: function(locale) {
                     engine.setSelectedLocale(locale)
                     // Trigger live language switching
                     if (translator) {
-                        translator.setLocale(locale)
+                        // Normalize locale for translator (remove .UTF-8 suffix)
+                        var normalizedLocale = locale.split(".")[0]
+                        translator.setLocale(normalizedLocale)
                     }
                 }
                 onTimezoneSelected: function(timezone) {

@@ -78,10 +78,24 @@ Item {
         color: Qt.rgba(backgroundColor.r, backgroundColor.g, backgroundColor.b, 0.7)
 
         ScrollView {
+            id: scrollView
             anchors.fill: parent
             anchors.margins: 20
             contentWidth: availableWidth
             clip: true
+
+            // Improve wheel scroll speed (3x faster)
+            WheelHandler {
+                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                onWheel: function(event) {
+                    var flickable = scrollView.contentItem
+                    var multiplier = 3.0
+                    var deltaY = event.angleDelta.y * multiplier
+                    var newY = flickable.contentY - (deltaY / 120.0 * 40)
+                    flickable.contentY = Math.max(0, Math.min(flickable.contentHeight - flickable.height, newY))
+                    event.accepted = true
+                }
+            }
 
             ColumnLayout {
                 width: parent.width
@@ -266,7 +280,7 @@ Item {
                         }
                     }
 
-                    // ===== Keyboard layout card =====
+                    // ===== Keyboard layout & variant card (combined, side-by-side) =====
                     Rectangle {
                         id: keymapCard
                         Layout.fillWidth: true
@@ -299,7 +313,7 @@ Item {
                                 }
 
                                 Text {
-                                    text: qsTr("Keyboard Layout")
+                                    text: qsTr("Keyboard Configuration")
                                     font.pixelSize: 16
                                     font.bold: true
                                     color: textColor
@@ -308,184 +322,166 @@ Item {
 
                             Text {
                                 Layout.fillWidth: true
-                                text: qsTr("Select your keyboard layout for proper key mapping")
+                                text: qsTr("Select your keyboard layout and variant")
                                 font.pixelSize: 12
                                 color: textMutedColor
                                 wrapMode: Text.WordWrap
                             }
 
-                            SearchableComboBox {
-                                id: keymapCombo
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 40
-
-                                model: keymapsModel
-                                currentValue: selectedKeymap
-                                placeholder: qsTr("Select layout...")
-                                searchPlaceholder: qsTr("Search layouts...")
-
-                                primaryColor: root.primaryColor
-                                backgroundColor: root.backgroundColor
-                                surfaceColor: root.surfaceColor
-                                textColor: root.textColor
-                                textMutedColor: root.textMutedColor
-
-                                onValueSelected: function(value) {
-                                    selectedKeymap = value
-                                    keymapSelected(value)
-                                }
-                            }
-                        }
-                    }
-
-                    // ===== Keyboard variant card =====
-                    Rectangle {
-                        id: variantCard
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: variantContent.implicitHeight + 32
-                        radius: 10
-                        color: surfaceColor
-                        visible: keyboardVariantsModel.length > 1
-
-                        layer.enabled: true
-                        layer.effect: MultiEffect {
-                            shadowEnabled: true
-                            shadowColor: Qt.rgba(0, 0, 0, 0.2)
-                            shadowHorizontalOffset: 0
-                            shadowVerticalOffset: 2
-                            shadowBlur: 0.3
-                        }
-
-                        ColumnLayout {
-                            id: variantContent
-                            anchors.fill: parent
-                            anchors.margins: 16
-                            spacing: 8
-
+                            // Side-by-side layout (50/50)
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 12
 
-                                Text {
-                                    text: "\u{1F4DD}"
-                                    font.pixelSize: 24
+                                // Left: Keyboard Layout (50%)
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 100
+                                    spacing: 4
+
+                                    Text {
+                                        text: qsTr("Layout")
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        color: textMutedColor
+                                    }
+
+                                    SearchableComboBox {
+                                        id: keymapCombo
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 36
+
+                                        model: keymapsModel
+                                        currentValue: selectedKeymap
+                                        placeholder: qsTr("Select...")
+                                        searchPlaceholder: qsTr("Search layouts...")
+
+                                        primaryColor: root.primaryColor
+                                        backgroundColor: root.backgroundColor
+                                        surfaceColor: root.surfaceColor
+                                        textColor: root.textColor
+                                        textMutedColor: root.textMutedColor
+
+                                        onValueSelected: function(value) {
+                                            selectedKeymap = value
+                                            keymapSelected(value)
+                                        }
+                                    }
                                 }
 
-                                Text {
-                                    text: qsTr("Keyboard Variant")
-                                    font.pixelSize: 16
-                                    font.bold: true
-                                    color: textColor
+                                // Right: Keyboard Variant (50%)
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 100
+                                    spacing: 4
+
+                                    Text {
+                                        text: qsTr("Variant")
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        color: textMutedColor
+                                    }
+
+                                    ComboBox {
+                                        id: variantCombo
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 36
+
+                                        model: keyboardVariantsModel
+                                        currentIndex: {
+                                            const idx = keyboardVariantsModel.indexOf(selectedKeyboardVariant)
+                                            return idx >= 0 ? idx : 0
+                                        }
+
+                                        background: Rectangle {
+                                            color: backgroundColor
+                                            radius: 6
+                                            border.color: variantCombo.activeFocus ? primaryColor : Qt.rgba(textColor.r, textColor.g, textColor.b, 0.2)
+                                            border.width: variantCombo.activeFocus ? 2 : 1
+                                        }
+
+                                        contentItem: Text {
+                                            leftPadding: 12
+                                            text: variantCombo.displayText || qsTr("Default")
+                                            color: textColor
+                                            verticalAlignment: Text.AlignVCenter
+                                            elide: Text.ElideRight
+                                        }
+
+                                        delegate: ItemDelegate {
+                                            width: variantCombo.width
+                                            contentItem: Text {
+                                                text: modelData || qsTr("Default")
+                                                color: textColor
+                                                elide: Text.ElideRight
+                                            }
+                                            highlighted: variantCombo.highlightedIndex === index
+                                            background: Rectangle {
+                                                color: highlighted ? primaryColor : "transparent"
+                                            }
+                                        }
+
+                                        popup: Popup {
+                                            y: variantCombo.height
+                                            width: variantCombo.width
+                                            implicitHeight: contentItem.implicitHeight
+                                            padding: 1
+
+                                            contentItem: ListView {
+                                                clip: true
+                                                implicitHeight: Math.min(contentHeight, 200)
+                                                model: variantCombo.popup.visible ? variantCombo.delegateModel : null
+                                                currentIndex: variantCombo.highlightedIndex
+                                                ScrollIndicator.vertical: ScrollIndicator {}
+                                            }
+
+                                            background: Rectangle {
+                                                color: surfaceColor
+                                                border.color: Qt.rgba(textColor.r, textColor.g, textColor.b, 0.2)
+                                                radius: 6
+                                            }
+                                        }
+
+                                        onActivated: function(index) {
+                                            const variant = keyboardVariantsModel[index]
+                                            selectedKeyboardVariant = variant
+                                            keyboardVariantSelected(variant)
+                                        }
+                                    }
                                 }
                             }
 
-                            Text {
-                                Layout.fillWidth: true
-                                text: qsTr("Select a specific variant for the keyboard layout")
-                                font.pixelSize: 12
-                                color: textMutedColor
-                                wrapMode: Text.WordWrap
-                            }
-
-                            ComboBox {
-                                id: variantCombo
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 40
-
-                                model: keyboardVariantsModel
-                                currentIndex: {
-                                    const idx = keyboardVariantsModel.indexOf(selectedKeyboardVariant)
-                                    return idx >= 0 ? idx : 0
-                                }
-
-                                background: Rectangle {
-                                    color: backgroundColor
-                                    radius: 6
-                                    border.color: variantCombo.activeFocus ? primaryColor : Qt.rgba(textColor.r, textColor.g, textColor.b, 0.2)
-                                    border.width: variantCombo.activeFocus ? 2 : 1
-                                }
-
-                                contentItem: Text {
-                                    leftPadding: 12
-                                    text: variantCombo.displayText
-                                    color: textColor
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-
-                                onActivated: function(index) {
-                                    const variant = keyboardVariantsModel[index]
-                                    selectedKeyboardVariant = variant
-                                    keyboardVariantSelected(variant)
-                                }
-                            }
-                        }
-                    }
-
-                    // ===== Keyboard test area card =====
-                    Rectangle {
-                        id: testCard
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: testContent.implicitHeight + 32
-                        radius: 10
-                        color: surfaceColor
-
-                        layer.enabled: true
-                        layer.effect: MultiEffect {
-                            shadowEnabled: true
-                            shadowColor: Qt.rgba(0, 0, 0, 0.2)
-                            shadowHorizontalOffset: 0
-                            shadowVerticalOffset: 2
-                            shadowBlur: 0.3
-                        }
-
-                        ColumnLayout {
-                            id: testContent
-                            anchors.fill: parent
-                            anchors.margins: 16
-                            spacing: 8
-
+                            // Compact keyboard test area (inline)
                             RowLayout {
                                 Layout.fillWidth: true
-                                spacing: 12
+                                Layout.topMargin: 4
+                                spacing: 8
 
                                 Text {
-                                    text: "\u{1F4AC}"
-                                    font.pixelSize: 24
+                                    text: qsTr("Test:")
+                                    font.pixelSize: 11
+                                    color: textMutedColor
                                 }
 
-                                Text {
-                                    text: qsTr("Test Your Keyboard")
-                                    font.pixelSize: 16
-                                    font.bold: true
+                                TextField {
+                                    id: keyboardTestField
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 28
+                                    placeholderText: qsTr("Type to test keyboard...")
+                                    font.pixelSize: 12
+
+                                    background: Rectangle {
+                                        color: Qt.rgba(backgroundColor.r, backgroundColor.g, backgroundColor.b, 0.5)
+                                        radius: 4
+                                        border.color: keyboardTestField.activeFocus ? primaryColor : Qt.rgba(textColor.r, textColor.g, textColor.b, 0.15)
+                                        border.width: 1
+                                    }
+
                                     color: textColor
+                                    placeholderTextColor: Qt.rgba(textMutedColor.r, textMutedColor.g, textMutedColor.b, 0.5)
+                                    leftPadding: 8
+                                    rightPadding: 8
                                 }
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: qsTr("Type here to test your keyboard configuration")
-                                font.pixelSize: 12
-                                color: textMutedColor
-                                wrapMode: Text.WordWrap
-                            }
-
-                            TextField {
-                                id: keyboardTestField
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 40
-                                placeholderText: qsTr("Type something to test...")
-
-                                background: Rectangle {
-                                    color: backgroundColor
-                                    radius: 6
-                                    border.color: keyboardTestField.activeFocus ? primaryColor : Qt.rgba(textColor.r, textColor.g, textColor.b, 0.2)
-                                    border.width: keyboardTestField.activeFocus ? 2 : 1
-                                }
-
-                                color: textColor
-                                placeholderTextColor: Qt.rgba(textMutedColor.r, textMutedColor.g, textMutedColor.b, 0.6)
-                                leftPadding: 12
-                                rightPadding: 12
                             }
                         }
                     }

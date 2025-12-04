@@ -26,6 +26,8 @@ Item {
     property string welcomeTitle: ""
     property string welcomeSubtitle: ""
     property string installButtonText: ""
+    property string brandingCodename: ""
+    property string brandingEdition: ""
     property bool showRequirements: true
     property var requirements: []
     property bool canProceed: true
@@ -83,164 +85,199 @@ Item {
         anchors.margins: 48
         spacing: 48
 
-        // Left side: Welcome content
-        ColumnLayout {
+        // Left side: Welcome content - centered between left edge and requirements panel
+        Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.maximumWidth: parent.width * 0.5
-            spacing: 32
 
-            Item { Layout.fillHeight: true }
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 24
 
-            // Logo
-            Item {
-                Layout.preferredWidth: 160
-                Layout.preferredHeight: 160
+                // Flexible spacer at top - centers content vertically
+                Item { Layout.fillHeight: true }
 
-                Image {
-                    id: logoImage
-                    anchors.fill: parent
-                    source: logoUrl
-                    fillMode: Image.PreserveAspectFit
-                    visible: status === Image.Ready
+                // Logo - centered horizontally
+                Item {
+                    Layout.preferredWidth: 160
+                    Layout.preferredHeight: 160
+                    Layout.alignment: Qt.AlignHCenter
 
-                    // Subtle glow effect
-                    layer.enabled: true
-                    layer.effect: MultiEffect {
-                        shadowEnabled: true
-                        shadowColor: primaryColor
-                        shadowHorizontalOffset: 0
-                        shadowVerticalOffset: 0
-                        shadowBlur: 0.3
-                    }
-                }
+                    Image {
+                        id: logoImage
+                        anchors.fill: parent
+                        source: logoUrl
+                        fillMode: Image.PreserveAspectFit
+                        visible: status === Image.Ready
 
-                // Fallback logo placeholder
-                Rectangle {
-                    anchors.fill: parent
-                    radius: 80
-                    color: Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.3)
-                    visible: logoImage.status !== Image.Ready
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: welcomeTitle.charAt(0) || "O"
-                        font.pixelSize: 72
-                        font.bold: true
-                        color: textColor
-                    }
-                }
-            }
-
-            // Welcome text
-            Column {
-                Layout.fillWidth: true
-                spacing: 12
-
-                Text {
-                    text: welcomeTitle
-                    font.pixelSize: 42
-                    font.bold: true
-                    color: textColor
-
-                    // Text shadow for readability
-                    layer.enabled: true
-                    layer.effect: MultiEffect {
-                        shadowEnabled: true
-                        shadowColor: Qt.rgba(0, 0, 0, 0.6)
-                        shadowHorizontalOffset: 2
-                        shadowVerticalOffset: 2
-                        shadowBlur: 0.3
-                    }
-                }
-
-                Text {
-                    text: welcomeSubtitle
-                    font.pixelSize: 18
-                    color: textMutedColor
-                    wrapMode: Text.WordWrap
-                    width: parent.width
-                }
-            }
-
-            // Install button
-            Button {
-                id: installButton
-                Layout.preferredWidth: 280
-                Layout.preferredHeight: 60
-                enabled: canProceed && !isCheckingRequirements
-
-                text: installButtonText || qsTr("Install")
-                font.pixelSize: 18
-                font.bold: true
-
-                background: Rectangle {
-                    radius: 16
-                    color: {
-                        if (!installButton.enabled) return Qt.darker(surfaceColor, 1.2)
-                        if (installButton.pressed) return Qt.darker(primaryColor, 1.3)
-                        if (installButton.hovered) return Qt.lighter(primaryColor, 1.15)
-                        return primaryColor
-                    }
-                    border.color: installButton.enabled ? Qt.lighter(primaryColor, 1.3) : "transparent"
-                    border.width: 1
-
-                    Behavior on color {
-                        ColorAnimation { duration: 150 }
+                        // Subtle glow effect
+                        layer.enabled: true
+                        layer.effect: MultiEffect {
+                            shadowEnabled: true
+                            shadowColor: primaryColor
+                            shadowHorizontalOffset: 0
+                            shadowVerticalOffset: 0
+                            shadowBlur: 0.3
+                        }
                     }
 
-                    // Subtle gradient overlay
+                    // Fallback logo placeholder
                     Rectangle {
                         anchors.fill: parent
-                        radius: parent.radius
-                        gradient: Gradient {
-                            GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.1) }
-                            GradientStop { position: 0.5; color: "transparent" }
+                        radius: 80
+                        color: Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.3)
+                        visible: logoImage.status !== Image.Ready
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: welcomeTitle.charAt(0) || "O"
+                            font.pixelSize: 72
+                            font.bold: true
+                            color: textColor
                         }
-                        visible: installButton.enabled
                     }
                 }
 
-                contentItem: Item {
-                    implicitWidth: buttonRow.implicitWidth
-                    implicitHeight: buttonRow.implicitHeight
+                // Welcome text - centered
+                Column {
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: 8
 
-                    Row {
-                        id: buttonRow
-                        anchors.centerIn: parent
-                        spacing: 8
+                    // Main title: "Welcome to GLF OS"
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: welcomeTitle
+                        font.pixelSize: 42
+                        font.bold: true
+                        color: textColor
 
-                        Text {
-                            text: installButton.text
-                            font: installButton.font
-                            color: installButton.enabled ? textColor : textMutedColor
-                            verticalAlignment: Text.AlignVCenter
-                            anchors.verticalCenter: parent.verticalCenter
+                        // Text shadow for readability
+                        layer.enabled: true
+                        layer.effect: MultiEffect {
+                            shadowEnabled: true
+                            shadowColor: Qt.rgba(0, 0, 0, 0.6)
+                            shadowHorizontalOffset: 2
+                            shadowVerticalOffset: 2
+                            shadowBlur: 0.3
+                        }
+                    }
+
+                    // Codename + Edition: "Omnislash 25.04"
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: brandingCodename + (brandingEdition ? " " + brandingEdition : "")
+                        font.pixelSize: 42
+                        font.bold: true
+                        color: textColor
+                        visible: brandingCodename !== ""
+
+                        layer.enabled: true
+                        layer.effect: MultiEffect {
+                            shadowEnabled: true
+                            shadowColor: Qt.rgba(0, 0, 0, 0.6)
+                            shadowHorizontalOffset: 2
+                            shadowVerticalOffset: 2
+                            shadowBlur: 0.3
+                        }
+                    }
+
+                    // Subtitle
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: welcomeSubtitle
+                        font.pixelSize: 18
+                        color: textMutedColor
+                        wrapMode: Text.WordWrap
+                        width: parent.width
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                }
+
+                // Install button - centered horizontally with welcome text
+                Button {
+                    id: installButton
+                    Layout.preferredWidth: 280
+                    Layout.preferredHeight: 60
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.topMargin: 24
+                    enabled: canProceed && !isCheckingRequirements
+
+                    text: installButtonText || qsTr("Install")
+                    font.pixelSize: 18
+                    font.bold: true
+
+                    background: Rectangle {
+                        radius: 16
+                        color: {
+                            if (!installButton.enabled) return Qt.darker(surfaceColor, 1.2)
+                            if (installButton.pressed) return Qt.darker(primaryColor, 1.3)
+                            if (installButton.hovered) return Qt.lighter(primaryColor, 1.15)
+                            return primaryColor
+                        }
+                        border.color: installButton.enabled ? Qt.lighter(primaryColor, 1.3) : "transparent"
+                        border.width: 1
+
+                        Behavior on color {
+                            ColorAnimation { duration: 150 }
                         }
 
-                        Text {
-                            text: "\u2192"  // Right arrow
-                            font.pixelSize: 20
-                            color: installButton.enabled ? textColor : textMutedColor
-                            verticalAlignment: Text.AlignVCenter
-                            anchors.verticalCenter: parent.verticalCenter
+                        // Subtle gradient overlay
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: parent.radius
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.1) }
+                                GradientStop { position: 0.5; color: "transparent" }
+                            }
                             visible: installButton.enabled
                         }
                     }
+
+                    contentItem: Item {
+                        implicitWidth: buttonRow.implicitWidth
+                        implicitHeight: buttonRow.implicitHeight
+
+                        Row {
+                            id: buttonRow
+                            anchors.centerIn: parent
+                            spacing: 8
+
+                            Text {
+                                text: installButton.text
+                                font: installButton.font
+                                color: installButton.enabled ? textColor : textMutedColor
+                                verticalAlignment: Text.AlignVCenter
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            Text {
+                                text: "\u2192"  // Right arrow
+                                font.pixelSize: 20
+                                color: installButton.enabled ? textColor : textMutedColor
+                                verticalAlignment: Text.AlignVCenter
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: installButton.enabled
+                            }
+                        }
+                    }
+
+                    onClicked: root.installClicked()
                 }
 
-                onClicked: root.installClicked()
-            }
+                // Disabled hint
+                Text {
+                    visible: !canProceed && !isCheckingRequirements
+                    text: qsTr("Please resolve system requirements before installing")
+                    font.pixelSize: 12
+                    color: warningColor
+                    Layout.alignment: Qt.AlignHCenter
+                }
 
-            // Disabled hint
-            Text {
-                visible: !canProceed && !isCheckingRequirements
-                text: qsTr("Please resolve system requirements before installing")
-                font.pixelSize: 12
-                color: warningColor
+                // Flexible spacer at bottom - centers content vertically
+                Item { Layout.fillHeight: true }
             }
-
-            Item { Layout.fillHeight: true }
         }
 
         // Right side: Requirements panel

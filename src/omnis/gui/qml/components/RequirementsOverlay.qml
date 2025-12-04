@@ -134,13 +134,29 @@ Rectangle {
 
         // Requirements list
         ScrollView {
+            id: requirementsScrollView
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: !isLoading
             clip: true
 
+            // Improve wheel scroll speed (3x faster)
+            WheelHandler {
+                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                onWheel: function(event) {
+                    var flickable = requirementsScrollView.contentItem
+                    var multiplier = 3.0
+                    var deltaY = event.angleDelta.y * multiplier
+                    var newY = flickable.contentY - (deltaY / 120.0 * 40)
+                    flickable.contentY = Math.max(0, Math.min(flickable.contentHeight - flickable.height, newY))
+                    event.accepted = true
+                }
+            }
+
             ListView {
                 id: requirementsList
+                width: parent.width
+                implicitHeight: contentHeight
                 model: requirements
                 spacing: 8
 

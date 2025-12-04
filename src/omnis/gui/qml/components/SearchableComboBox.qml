@@ -251,6 +251,18 @@ Item {
                     policy: ScrollBar.AsNeeded
                 }
 
+                // Improve wheel scroll speed (3x faster)
+                WheelHandler {
+                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                    onWheel: function(event) {
+                        var multiplier = 3.0
+                        var deltaY = event.angleDelta.y * multiplier
+                        var newY = listView.contentY - (deltaY / 120.0 * 40)
+                        listView.contentY = Math.max(0, Math.min(listView.contentHeight - listView.height, newY))
+                        event.accepted = true
+                    }
+                }
+
                 delegate: Rectangle {
                     width: listView.width
                     height: 36

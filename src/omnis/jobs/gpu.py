@@ -212,20 +212,24 @@ INTEL_IGPU_MODELS: list[str] = [
     "HD 530",
     "HD 620",
     "HD 630",
-    # UHD Graphics (Gen 9.5+)
+    # UHD Graphics Gen 9.5 (NOT Xe architecture)
     "UHD 620",
     "UHD 630",
-    "UHD 730",
-    "UHD 750",
-    "UHD 770",
-    # Iris Graphics
+    # Iris Plus (Gen 10-11, pre-Xe)
     "Iris Plus 640",
     "Iris Plus 650",
     "Iris Plus 655",
-    # Iris Xe (Gen 12)
+    # === Xe Architecture (Gen 12+) - Everything below passes "Xe" minimum ===
+    # "Xe" is used as a reference point for minimum requirements
+    "Xe",
+    # UHD Graphics Gen 12+ (Xe-LP architecture - Alder Lake/Raptor Lake Desktop)
+    "UHD 730",
+    "UHD 750",
+    "UHD 770",
+    # Iris Xe (Gen 12 Mobile - Tiger Lake/Alder Lake)
     "Iris Xe",
     "Iris Xe MAX",
-    # Iris Xe (Gen 12.5 - Meteor Lake)
+    # Arc Graphics (Gen 12.5+ - Meteor Lake iGPU and discrete)
     "Arc Graphics",
 ]
 
@@ -553,17 +557,29 @@ class GPUDetector:
         integrated_gpus = [gpu for gpu in compatible_gpus if gpu.is_integrated]
 
         # Check model overrides
+        # Logic: If ANY GPU passes its vendor's minimum, the check passes
+        # Only fail if ALL GPUs fail their respective minimums
+        passed_gpus: list[str] = []
         failed_overrides: list[str] = []
+
         for gpu in compatible_gpus:
             vendor_key = gpu.vendor.value.lower()
             min_model = overrides.get(vendor_key, "")
 
             if min_model and gpu.model:
                 model_list = self._get_model_list(gpu.vendor, gpu.gpu_type)
-                if not compare_models(gpu.model, min_model, model_list):
+                if compare_models(gpu.model, min_model, model_list):
+                    # This GPU passes its vendor's minimum
+                    passed_gpus.append(f"{gpu.vendor.value} {gpu.model}")
+                else:
                     failed_overrides.append(f"{gpu.vendor.value} {gpu.model} < {min_model}")
+            else:
+                # No minimum specified for this vendor, GPU passes by default
+                passed_gpus.append(f"{gpu.vendor.value} {gpu.model or 'Unknown'}")
 
-        if failed_overrides:
+        # If at least one GPU passed, don't fail (continue to other checks)
+        # Only fail if ALL GPUs failed their minimums
+        if failed_overrides and not passed_gpus:
             msg = f"GPU below minimum: {', '.join(failed_overrides)}"
             return "fail", msg, gpu_names
 

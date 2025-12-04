@@ -20,45 +20,151 @@ from omnis.utils.locale_detector import LocaleDetectionResult, LocaleDetector
 if TYPE_CHECKING:
     from omnis.core.engine import Engine
 
-# Native names for common locales (displayed in UI)
+# Native names for locales (displayed in UI with proper Unicode characters)
+# Each language is shown in its native script/form
 LOCALE_NATIVE_NAMES: dict[str, str] = {
+    # English variants
     "en_US.UTF-8": "English (United States)",
     "en_GB.UTF-8": "English (United Kingdom)",
     "en_CA.UTF-8": "English (Canada)",
     "en_AU.UTF-8": "English (Australia)",
-    "fr_FR.UTF-8": "Francais (France)",
-    "fr_CA.UTF-8": "Francais (Canada)",
+    "en_NZ.UTF-8": "English (New Zealand)",
+    "en_IE.UTF-8": "English (Ireland)",
+    "en_ZA.UTF-8": "English (South Africa)",
+    "en_IN.UTF-8": "English (India)",
+    # French variants
+    "fr_FR.UTF-8": "Français (France)",
+    "fr_CA.UTF-8": "Français (Canada)",
+    "fr_BE.UTF-8": "Français (Belgique)",
+    "fr_CH.UTF-8": "Français (Suisse)",
+    "fr_LU.UTF-8": "Français (Luxembourg)",
+    # German variants
     "de_DE.UTF-8": "Deutsch (Deutschland)",
-    "de_AT.UTF-8": "Deutsch (Osterreich)",
+    "de_AT.UTF-8": "Deutsch (Österreich)",
     "de_CH.UTF-8": "Deutsch (Schweiz)",
-    "es_ES.UTF-8": "Espanol (Espana)",
-    "es_MX.UTF-8": "Espanol (Mexico)",
-    "es_AR.UTF-8": "Espanol (Argentina)",
+    "de_LU.UTF-8": "Deutsch (Luxemburg)",
+    "de_LI.UTF-8": "Deutsch (Liechtenstein)",
+    # Spanish variants
+    "es_ES.UTF-8": "Español (España)",
+    "es_MX.UTF-8": "Español (México)",
+    "es_AR.UTF-8": "Español (Argentina)",
+    "es_CO.UTF-8": "Español (Colombia)",
+    "es_CL.UTF-8": "Español (Chile)",
+    "es_PE.UTF-8": "Español (Perú)",
+    "es_VE.UTF-8": "Español (Venezuela)",
+    # Italian
     "it_IT.UTF-8": "Italiano (Italia)",
-    "pt_BR.UTF-8": "Portugues (Brasil)",
-    "pt_PT.UTF-8": "Portugues (Portugal)",
-    "ru_RU.UTF-8": "Russkij (Rossija)",
-    "zh_CN.UTF-8": "Zhongwen (Zhongguo)",
-    "zh_TW.UTF-8": "Zhongwen (Taiwan)",
-    "ja_JP.UTF-8": "Nihongo (Nippon)",
-    "ko_KR.UTF-8": "Hangugeo (Hanguk)",
-    "ar_SA.UTF-8": "Al-Arabiya (As-Saudiya)",
-    "pl_PL.UTF-8": "Polski (Polska)",
-    "nl_NL.UTF-8": "Nederlands (Nederland)",
-    "sv_SE.UTF-8": "Svenska (Sverige)",
-    "tr_TR.UTF-8": "Turkce (Turkiye)",
-    "cs_CZ.UTF-8": "Cestina (Cesko)",
-    "hu_HU.UTF-8": "Magyar (Magyarorszag)",
-    "ro_RO.UTF-8": "Romana (Romania)",
-    "el_GR.UTF-8": "Ellinika (Ellada)",
-    "he_IL.UTF-8": "Ivrit (Yisrael)",
-    "th_TH.UTF-8": "Phasa Thai (Prathet Thai)",
-    "vi_VN.UTF-8": "Tieng Viet (Viet Nam)",
+    "it_CH.UTF-8": "Italiano (Svizzera)",
+    # Portuguese variants
+    "pt_BR.UTF-8": "Português (Brasil)",
+    "pt_PT.UTF-8": "Português (Portugal)",
+    # Russian and Cyrillic languages
+    "ru_RU.UTF-8": "Русский (Россия)",
+    "uk_UA.UTF-8": "Українська (Україна)",
+    "be_BY.UTF-8": "Беларуская (Беларусь)",
+    "bg_BG.UTF-8": "Български (България)",
+    "sr_RS.UTF-8": "Српски (Србија)",
+    "mk_MK.UTF-8": "Македонски (Македонија)",
+    # Chinese variants
+    "zh_CN.UTF-8": "简体中文 (中国)",
+    "zh_TW.UTF-8": "繁體中文 (台灣)",
+    "zh_HK.UTF-8": "繁體中文 (香港)",
+    "zh_SG.UTF-8": "简体中文 (新加坡)",
+    # Japanese
+    "ja_JP.UTF-8": "日本語 (日本)",
+    # Korean
+    "ko_KR.UTF-8": "한국어 (대한민국)",
+    # Arabic variants
+    "ar_SA.UTF-8": "العربية (السعودية)",
+    "ar_EG.UTF-8": "العربية (مصر)",
+    "ar_MA.UTF-8": "العربية (المغرب)",
+    "ar_DZ.UTF-8": "العربية (الجزائر)",
+    "ar_TN.UTF-8": "العربية (تونس)",
+    "ar_AE.UTF-8": "العربية (الإمارات)",
+    # Hebrew
+    "he_IL.UTF-8": "עברית (ישראל)",
+    # Persian
+    "fa_IR.UTF-8": "فارسی (ایران)",
+    # Hindi and Indian languages
+    "hi_IN.UTF-8": "हिन्दी (भारत)",
+    "bn_IN.UTF-8": "বাংলা (ভারত)",
+    "bn_BD.UTF-8": "বাংলা (বাংলাদেশ)",
+    "ta_IN.UTF-8": "தமிழ் (இந்தியா)",
+    "te_IN.UTF-8": "తెలుగు (భారతదేశం)",
+    "mr_IN.UTF-8": "मराठी (भारत)",
+    "gu_IN.UTF-8": "ગુજરાતી (ભારત)",
+    "kn_IN.UTF-8": "ಕನ್ನಡ (ಭಾರತ)",
+    "ml_IN.UTF-8": "മലയാളം (ഇന്ത്യ)",
+    "pa_IN.UTF-8": "ਪੰਜਾਬੀ (ਭਾਰਤ)",
+    # Thai
+    "th_TH.UTF-8": "ไทย (ประเทศไทย)",
+    # Vietnamese
+    "vi_VN.UTF-8": "Tiếng Việt (Việt Nam)",
+    # Indonesian and Malay
     "id_ID.UTF-8": "Bahasa Indonesia (Indonesia)",
+    "ms_MY.UTF-8": "Bahasa Melayu (Malaysia)",
+    # Turkish
+    "tr_TR.UTF-8": "Türkçe (Türkiye)",
+    # Greek
+    "el_GR.UTF-8": "Ελληνικά (Ελλάδα)",
+    "el_CY.UTF-8": "Ελληνικά (Κύπρος)",
+    # Polish
+    "pl_PL.UTF-8": "Polski (Polska)",
+    # Dutch
+    "nl_NL.UTF-8": "Nederlands (Nederland)",
+    "nl_BE.UTF-8": "Nederlands (België)",
+    # Nordic languages
+    "sv_SE.UTF-8": "Svenska (Sverige)",
+    "sv_FI.UTF-8": "Svenska (Finland)",
     "da_DK.UTF-8": "Dansk (Danmark)",
+    "nb_NO.UTF-8": "Norsk Bokmål (Norge)",
+    "nn_NO.UTF-8": "Norsk Nynorsk (Norge)",
     "fi_FI.UTF-8": "Suomi (Suomi)",
-    "nb_NO.UTF-8": "Norsk (Norge)",
-    "uk_UA.UTF-8": "Ukrainska (Ukraina)",
+    "is_IS.UTF-8": "Íslenska (Ísland)",
+    # Czech and Slovak
+    "cs_CZ.UTF-8": "Čeština (Česko)",
+    "sk_SK.UTF-8": "Slovenčina (Slovensko)",
+    # Hungarian
+    "hu_HU.UTF-8": "Magyar (Magyarország)",
+    # Romanian
+    "ro_RO.UTF-8": "Română (România)",
+    "ro_MD.UTF-8": "Română (Moldova)",
+    # Baltic languages
+    "lt_LT.UTF-8": "Lietuvių (Lietuva)",
+    "lv_LV.UTF-8": "Latviešu (Latvija)",
+    "et_EE.UTF-8": "Eesti (Eesti)",
+    # Slavic languages
+    "sl_SI.UTF-8": "Slovenščina (Slovenija)",
+    "hr_HR.UTF-8": "Hrvatski (Hrvatska)",
+    "bs_BA.UTF-8": "Bosanski (Bosna i Hercegovina)",
+    # Catalan
+    "ca_ES.UTF-8": "Català (Espanya)",
+    # Basque
+    "eu_ES.UTF-8": "Euskara (Espainia)",
+    # Galician
+    "gl_ES.UTF-8": "Galego (España)",
+    # Welsh
+    "cy_GB.UTF-8": "Cymraeg (Y Deyrnas Unedig)",
+    # Irish
+    "ga_IE.UTF-8": "Gaeilge (Éire)",
+    # Albanian
+    "sq_AL.UTF-8": "Shqip (Shqipëri)",
+    # Georgian
+    "ka_GE.UTF-8": "ქართული (საქართველო)",
+    # Armenian
+    "hy_AM.UTF-8": "Հայերեն (Հայաստան)",
+    # Kazakh
+    "kk_KZ.UTF-8": "Қазақша (Қазақстан)",
+    # Uzbek
+    "uz_UZ.UTF-8": "O'zbek (O'zbekiston)",
+    # Afrikaans
+    "af_ZA.UTF-8": "Afrikaans (Suid-Afrika)",
+    # Swahili
+    "sw_KE.UTF-8": "Kiswahili (Kenya)",
+    # Filipino
+    "fil_PH.UTF-8": "Filipino (Pilipinas)",
+    # Esperanto
+    "eo.UTF-8": "Esperanto",
 }
 
 
@@ -296,6 +402,41 @@ class EngineBridge(QObject):
     keyboardVariantsChanged = Signal()  # emitted when keyboard variants change
     disksChanged = Signal()  # emitted when disks are scanned
     progressChanged = Signal()  # emitted when progress updates
+    systemFontChanged = Signal()  # emitted when system font family changes
+
+    # Locale prefixes that require non-Latin font (CJK, Arabic, Hebrew, etc.)
+    # These scripts need fonts with broader Unicode coverage like Noto Sans
+    NON_LATIN_LOCALE_PREFIXES = (
+        # CJK (Chinese, Japanese, Korean)
+        "zh_", "ja_", "ko_",
+        # Arabic script
+        "ar_", "fa_", "ur_",
+        # Hebrew script
+        "he_", "yi_",
+        # Indic scripts (Devanagari, Bengali, Tamil, etc.)
+        "hi_", "bn_", "ta_", "te_", "mr_", "gu_", "kn_", "ml_", "pa_", "ne_", "si_",
+        # Thai script
+        "th_",
+        # Georgian script
+        "ka_",
+        # Armenian script
+        "hy_",
+        # Greek script (while Latin-based in some ways, benefits from Noto)
+        "el_",
+        # Cyrillic script (Russian, Ukrainian, etc.)
+        "ru_", "uk_", "be_", "bg_", "sr_", "mk_", "kk_", "ky_", "mn_", "tg_",
+        # Other scripts
+        "am_",  # Amharic (Ethiopic)
+        "my_",  # Burmese
+        "km_",  # Khmer
+        "lo_",  # Lao
+    )
+
+    # Font family for non-Latin scripts (Noto Sans has excellent Unicode coverage)
+    UNICODE_FONT_FAMILY = "Noto Sans"
+
+    # Default Latin font family (empty string = system default)
+    LATIN_FONT_FAMILY = ""
 
     def __init__(
         self,
@@ -332,18 +473,219 @@ class EngineBridge(QObject):
         self._locale_detection_result: LocaleDetectionResult | None = None
         self._locale_auto_detection_config: dict[str, Any] = {}
 
-        # Keyboard variants by layout
+        # Keyboard variants by layout (XKB-compatible)
+        # Each layout has a list of available variants
+        # Empty string "" means default/basic variant
         self._keyboard_variants: dict[str, list[str]] = {
-            "us": ["qwerty", "dvorak", "colemak"],
-            "fr": ["azerty", "bepo", "mac"],
-            "de": ["qwertz", "nodeadkeys"],
-            "gb": ["qwerty", "dvorak"],
-            "es": ["qwerty", "mac"],
-            "it": ["qwerty", "mac"],
-            "jp": ["qwerty"],
-            "ru": ["qwerty", "phonetic"],
-            "ar": ["qwerty"],
-            "cn": ["qwerty"],
+            # US layouts
+            "us": [
+                "", "alt-intl", "altgr-intl", "chr", "colemak", "colemak_dh",
+                "colemak_dh_iso", "dvorak", "dvorak-alt-intl", "dvorak-classic",
+                "dvorak-intl", "dvorak-l", "dvorak-r", "dvp", "euro", "hbs",
+                "intl", "mac", "norman", "olpc2", "rus", "workman",
+                "workman-intl",
+            ],
+            # French layouts
+            "fr": [
+                "", "azerty", "bepo", "bepo_afnor", "bepo_latin9", "bre",
+                "dvorak", "geo", "latin9", "mac", "nodeadkeys", "oci", "oss",
+                "oss_latin9", "oss_nodeadkeys", "sun_type6", "us",
+            ],
+            # German layouts
+            "de": [
+                "", "T3", "adnw", "bone", "deadacute", "deadgraveacute",
+                "deadtilde", "dsb", "dsb_qwertz", "dvorak", "e1", "e2",
+                "koy", "legacy", "mac", "mac_nodeadkeys", "neo", "nodeadkeys",
+                "qwerty", "ro", "ro_nodeadkeys", "ru", "sun_type6", "tr",
+            ],
+            # UK layouts
+            "gb": [
+                "", "colemak", "colemak_dh", "dvorak", "dvorakukp", "extd",
+                "intl", "mac", "mac_intl", "sun_type6",
+            ],
+            # Spanish layouts
+            "es": [
+                "", "ast", "cat", "deadtilde", "dvorak", "mac", "nodeadkeys",
+                "sun_type6", "winkeys",
+            ],
+            # Italian layouts
+            "it": [
+                "", "fur", "geo", "ibm", "intl", "lld", "mac", "nodeadkeys",
+                "sun_type6", "us", "winkeys",
+            ],
+            # Portuguese layouts
+            "pt": [
+                "", "mac", "mac_nodeadkeys", "mac_sundeadkeys", "nativo",
+                "nativo-epo", "nativo-us", "nodeadkeys", "sun_type6", "sundeadkeys",
+            ],
+            # Brazilian Portuguese
+            "br": [
+                "", "dvorak", "nativo", "nativo-epo", "nativo-us", "nodeadkeys",
+                "sun_type6", "thinkpad",
+            ],
+            # Russian layouts
+            "ru": [
+                "", "bak", "chm", "chu", "cv", "cv_latin", "dos", "komi",
+                "legacy", "mac", "os_legacy", "os_winkeys", "phonetic",
+                "phonetic_azerty", "phonetic_dvorak", "phonetic_fr",
+                "phonetic_winkeys", "rulemak", "sah", "srp", "sun_type6",
+                "tt", "typewriter", "typewriter-legacy", "udm", "xal",
+            ],
+            # Japanese layouts
+            "jp": [
+                "", "OADG109A", "dvorak", "kana", "kana86", "mac",
+                "sun_type6", "sun_type7", "sun_type7_suncompat",
+            ],
+            # Chinese layouts
+            "cn": ["", "altgr-pinyin", "tib", "tib_asciinum", "ug"],
+            # Korean layouts
+            "kr": ["", "kr104", "sun_type6"],
+            # Arabic layouts
+            "ara": [
+                "", "azerty", "azerty_digits", "basic", "buckwalter", "digits",
+                "mac", "olpc", "qwerty", "qwerty_digits", "sun_type6",
+            ],
+            # Hebrew layouts
+            "il": ["", "biblical", "lyx", "phonetic", "sun_type6"],
+            # Greek layouts
+            "gr": [
+                "", "extended", "nodeadkeys", "polytonic", "simple",
+                "sun_type6",
+            ],
+            # Turkish layouts
+            "tr": [
+                "", "alt", "crh", "crh_alt", "crh_f", "f", "intl",
+                "ku", "ku_alt", "ku_f", "sun_type6",
+            ],
+            # Polish layouts
+            "pl": [
+                "", "csb", "dvorak", "dvorak_altquotes", "dvorak_quotes",
+                "dvp", "legacy", "qwertz", "ru_phonetic_dvorak", "sun_type6",
+                "szl",
+            ],
+            # Dutch layouts
+            "nl": ["", "mac", "std", "sun_type6", "sundeadkeys"],
+            # Swedish layouts
+            "se": [
+                "", "dvorak", "dvorak_a5", "mac", "nodeadkeys", "rus",
+                "rus_nodeadkeys", "smi", "sun_type6", "svdvorak", "swl",
+                "us", "us_dvorak",
+            ],
+            # Norwegian layouts
+            "no": [
+                "", "colemak", "dvorak", "mac", "mac_nodeadkeys", "nodeadkeys",
+                "smi", "smi_nodeadkeys", "sun_type6", "winkeys",
+            ],
+            # Danish layouts
+            "dk": [
+                "", "dvorak", "mac", "mac_nodeadkeys", "nodeadkeys",
+                "sun_type6", "winkeys",
+            ],
+            # Finnish layouts
+            "fi": [
+                "", "classic", "das", "dvorak", "mac", "nodeadkeys", "smi",
+                "sun_type6", "winkeys",
+            ],
+            # Czech layouts
+            "cz": [
+                "", "bksl", "dvorak-ucw", "qwerty", "qwerty_bksl",
+                "sun_type6", "ucw",
+            ],
+            # Slovak layouts
+            "sk": ["", "bksl", "qwerty", "qwerty_bksl", "sun_type6"],
+            # Hungarian layouts
+            "hu": [
+                "", "101_qwerty_comma_dead", "101_qwerty_comma_nodead",
+                "101_qwerty_dot_dead", "101_qwerty_dot_nodead",
+                "101_qwertz_comma_dead", "101_qwertz_comma_nodead",
+                "101_qwertz_dot_dead", "101_qwertz_dot_nodead",
+                "102_qwerty_comma_dead", "102_qwerty_comma_nodead",
+                "102_qwerty_dot_dead", "102_qwerty_dot_nodead",
+                "102_qwertz_comma_dead", "102_qwertz_comma_nodead",
+                "102_qwertz_dot_dead", "102_qwertz_dot_nodead", "nodeadkeys",
+                "qwerty", "standard", "sun_type6",
+            ],
+            # Romanian layouts
+            "ro": [
+                "", "cedilla", "crh_dobruja", "std", "std_cedilla",
+                "sun_type6", "winkeys",
+            ],
+            # Ukrainian layouts
+            "ua": [
+                "", "crh", "crh_alt", "crh_f", "homophonic", "legacy",
+                "macOS", "phonetic", "rstu", "rstu_ru", "sun_type6",
+                "typewriter", "winkeys",
+            ],
+            # Bulgarian layouts
+            "bg": [
+                "", "bas_phonetic", "bekl", "phonetic", "sun_type6",
+            ],
+            # Serbian layouts
+            "rs": [
+                "", "alterstrstrings", "combstrstrings", "latin", "latinyz",
+                "latinunicodeyz", "latinunicode", "rue", "sun_type6",
+            ],
+            # Croatian layouts
+            "hr": [
+                "", "alterstrstrings", "combstrstrings", "sun_type6",
+                "unicode", "unicodeus", "us",
+            ],
+            # Slovenian layouts
+            "si": ["", "alterstrstrings", "sun_type6", "us"],
+            # Lithuanian layouts
+            "lt": [
+                "", "ibm", "lekp", "lekpa", "ratise", "sgs", "std",
+                "sun_type6", "us", "us_dvorak",
+            ],
+            # Latvian layouts
+            "lv": [
+                "", "adapted", "apostrophe", "ergonomic", "fkey",
+                "modern", "sun_type6", "tilde",
+            ],
+            # Estonian layouts
+            "ee": ["", "dvorak", "nodeadkeys", "sun_type6", "us"],
+            # Swiss layouts (multilingual)
+            "ch": [
+                "", "de_mac", "de_nodeadkeys", "de_sundeadkeys", "fr",
+                "fr_mac", "fr_nodeadkeys", "fr_sundeadkeys", "legacy",
+                "sun_type6",
+            ],
+            # Belgian layouts
+            "be": [
+                "", "iso-alternate", "nodeadkeys", "oss", "oss_latin9",
+                "oss_sundeadkeys", "sun_type6", "sundeadkeys", "wang",
+            ],
+            # Canadian layouts
+            "ca": [
+                "", "eng", "fr-dvorak", "fr-legacy", "ike", "kut",
+                "multi", "multi-2gr", "multix", "shs", "sun_type6",
+            ],
+            # Indian layouts
+            "in": [
+                "", "ben", "ben_baishakhi", "ben_bornona", "ben_gitanjali",
+                "ben_inscript", "ben_probhat", "bolnagri", "deva", "eng",
+                "guj", "guru", "hin-kagapa", "hin-wx", "jhelum", "kan",
+                "kan-kagapa", "mal", "mal_enhanced", "mal_lalitha",
+                "mar-kagapa", "ori", "san-kagapa", "tam", "tam_TAB",
+                "tam_TSCII", "tam_keyboard_with_numerals", "tam_unicode",
+                "tel", "tel-kagapa", "urd-phonetic", "urd-phonetic3",
+                "urd-winkeys",
+            ],
+            # Thai layouts
+            "th": ["", "pat", "sun_type6", "tis"],
+            # Vietnamese layouts
+            "vn": ["", "fr", "us"],
+            # Indonesian layouts
+            "id": ["", "phoneticx"],
+            # Catalan layouts
+            "ad": [""],  # Andorra/Catalan
+            # Irish layouts
+            "ie": ["", "CloGaelach", "UnicodeExpert", "ogam", "ogam_is434"],
+            # Default fallback
+            "latam": [
+                "", "colemak", "deadtilde", "dvorak", "nodeadkeys",
+                "sun_type6",
+            ],
         }
 
         # User selections
@@ -450,6 +792,47 @@ class EngineBridge(QObject):
     def dryRun(self) -> bool:
         """Check if dry-run mode is enabled."""
         return self._dry_run
+
+    # =========================================================================
+    # Font Properties for Non-Latin Languages
+    # =========================================================================
+
+    def _needs_unicode_font(self, locale: str) -> bool:
+        """
+        Check if the given locale needs a Unicode-complete font.
+
+        Args:
+            locale: Locale string (e.g., "zh_CN.UTF-8", "ja_JP.UTF-8")
+
+        Returns:
+            True if locale requires non-Latin font (CJK, Arabic, etc.)
+        """
+        # Check if locale starts with any non-Latin prefix
+        return any(locale.startswith(prefix) for prefix in self.NON_LATIN_LOCALE_PREFIXES)
+
+    @Property(str, notify=systemFontChanged)
+    def systemFontFamily(self) -> str:
+        """
+        Get the recommended font family for the current locale.
+
+        Returns:
+            Font family name (e.g., "Noto Sans") or empty string for system default
+        """
+        current_locale = self._selections.get("locale", "en_US.UTF-8")
+        if self._needs_unicode_font(current_locale):
+            return self.UNICODE_FONT_FAMILY
+        return self.LATIN_FONT_FAMILY
+
+    @Property(bool, notify=systemFontChanged)
+    def needsUnicodeFont(self) -> bool:
+        """
+        Check if current locale needs Unicode-complete font.
+
+        Returns:
+            True if current locale is non-Latin (CJK, Arabic, Hebrew, etc.)
+        """
+        current_locale = self._selections.get("locale", "en_US.UTF-8")
+        return self._needs_unicode_font(current_locale)
 
     # Requirements properties
     @Property(bool, notify=requirementsChanged)
@@ -761,11 +1144,23 @@ class EngineBridge(QObject):
 
     @Slot(str)
     def setSelectedLocale(self, locale: str) -> None:
-        """Set selected locale."""
+        """Set selected locale and update font if needed."""
         if self._selections.get("locale") != locale:
+            old_locale = self._selections.get("locale", "en_US.UTF-8")
             self._selections["locale"] = locale
+
             if self._debug:
                 print(f"[Engine] Locale set to: {locale}")
+
+            # Check if font needs to change (Latin <-> non-Latin transition)
+            old_needs_unicode = self._needs_unicode_font(old_locale)
+            new_needs_unicode = self._needs_unicode_font(locale)
+            if old_needs_unicode != new_needs_unicode:
+                if self._debug:
+                    font = self.UNICODE_FONT_FAMILY if new_needs_unicode else "system default"
+                    print(f"[Engine] Font changed to: {font}")
+                self.systemFontChanged.emit()
+
             self.selectionsChanged.emit()
 
     @Property(str, notify=selectionsChanged)

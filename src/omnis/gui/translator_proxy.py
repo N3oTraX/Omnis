@@ -89,15 +89,15 @@ class TranslatorProxy(QObject):
         """Get current language name (human readable)."""
         locale_names = {
             "en_US": "English",
-            "fr_FR": "Fran\u00e7ais",
+            "fr_FR": "Français",
             "de_DE": "Deutsch",
-            "es_ES": "Espa\u00f1ol",
+            "es_ES": "Español",
             "it_IT": "Italiano",
-            "pt_BR": "Portugu\u00eas (Brasil)",
-            "ru_RU": "\u0420\u0443\u0441\u0441\u043a\u0438\u0439",
-            "zh_CN": "\u4e2d\u6587 (\u7b80\u4f53)",
-            "ja_JP": "\u65e5\u672c\u8a9e",
-            "ko_KR": "\ud55c\uad6d\uc5b4",
+            "pt_BR": "Português (Brasil)",
+            "ru_RU": "Русский",
+            "zh_CN": "中文 (简体)",
+            "ja_JP": "日本語",
+            "ko_KR": "한국어",
         }
         # Try exact match, then base language
         if self._current_locale in locale_names:
@@ -242,7 +242,7 @@ class TranslatorProxy(QObject):
             locale: Locale code
 
         Returns:
-            Language name (e.g., "Fran\u00e7ais" for "fr_FR")
+            Language name (e.g., "Français" for "fr_FR")
         """
         qt_locale = QLocale(locale.replace("_", "-"))
         return qt_locale.nativeLanguageName() or locale

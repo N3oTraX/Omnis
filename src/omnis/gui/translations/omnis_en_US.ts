@@ -4,8 +4,8 @@
 <context>
     <name>LocaleView</name>
     <message>
-        <source>Locale Settings</source>
-        <translation>Locale Settings</translation>
+        <source>Country &amp; Language</source>
+        <translation>Country &amp; Language</translation>
     </message>
     <message>
         <source>Configure your system language, timezone, and keyboard layout</source>
@@ -44,20 +44,40 @@
         <translation>Search timezones...</translation>
     </message>
     <message>
-        <source>Keyboard Layout</source>
-        <translation>Keyboard Layout</translation>
+        <source>Keyboard Configuration</source>
+        <translation>Keyboard Configuration</translation>
     </message>
     <message>
-        <source>Select your keyboard layout for proper key mapping</source>
-        <translation>Select your keyboard layout for proper key mapping</translation>
+        <source>Select your keyboard layout and variant</source>
+        <translation>Select your keyboard layout and variant</translation>
     </message>
     <message>
-        <source>Select layout...</source>
-        <translation>Select layout...</translation>
+        <source>Layout</source>
+        <translation>Layout</translation>
+    </message>
+    <message>
+        <source>Select...</source>
+        <translation>Select...</translation>
     </message>
     <message>
         <source>Search layouts...</source>
         <translation>Search layouts...</translation>
+    </message>
+    <message>
+        <source>Variant</source>
+        <translation>Variant</translation>
+    </message>
+    <message>
+        <source>Default</source>
+        <translation>Default</translation>
+    </message>
+    <message>
+        <source>Test:</source>
+        <translation>Test:</translation>
+    </message>
+    <message>
+        <source>Type to test keyboard...</source>
+        <translation>Type to test keyboard...</translation>
     </message>
 </context>
 <context>

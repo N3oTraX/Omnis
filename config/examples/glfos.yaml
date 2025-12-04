@@ -151,14 +151,31 @@ jobs:
           recommend_ssd: true
 
         # -----------------------------------------------------------------
-        # CPU Architecture Check
+        # CPU Check (Architecture + Cores)
         # -----------------------------------------------------------------
-        # Checks processor architecture (x86_64 required for modern Linux gaming).
-        # PASS: x86_64 | WARN: other (if not required) | FAIL: other (if required)
-        cpu_arch:
-          enabled: false  # Usually always x86_64, disabled by default
-          # Whether x86_64 is strictly required (FAIL if not met)
-          require_x86_64: true
+        # Combined CPU checks with two sub-sections:
+        # - cpu_arch: Processor architecture validation
+        # - cpu_cores: Core count validation
+        cpu:
+          # CPU Architecture sub-section
+          # Checks processor architecture (x86_64 required for modern Linux gaming).
+          # PASS: matches required | FAIL: does not match
+          cpu_arch:
+            enabled: true   # Enable architecture check
+            # Required architecture (default: x86_64)
+            required: "x86_64"
+
+          # CPU Cores sub-section
+          # Checks processor core count for performance requirements.
+          # PASS: >= warn_cores | WARN: >= min_cores | FAIL: < min_cores
+          cpu_cores:
+            enabled: true   # Enable core count check
+            # Minimum cores (FAIL if below)
+            min_cores: 4
+            # Warning threshold (WARN if between min and this value)
+            warn_cores: 8
+            # Recommended cores (displayed to user)
+            recommended_cores: 8
 
         # -----------------------------------------------------------------
         # Boot Mode Check (EFI/UEFI)
@@ -237,10 +254,11 @@ jobs:
           overrides:
             # NVIDIA: GeForce GTX 1650+ (Turing architecture)
             nvidia: "GTX 1650"
-            # AMD: No minimum (empty = any AMD GPU)
-            amd: ""
-            # Intel: No minimum (empty = any Intel GPU)
-            intel: ""
+            # AMD: Radeon RX 560+ (Polaris architecture)
+            amd: "RX 560"
+            # Intel: Xe Graphics or Arc (different product lines)
+            # Note: Intel check accepts Xe, Arc, or newer integrated graphics
+            intel: "Xe"
 
   # Selection de la langue et region
   - name: locale
