@@ -216,11 +216,14 @@ ApplicationWindow {
                 opacity: visible ? 1 : 0
 
                 localesModel: engine.localesModel
+                localesModelNative: engine.localesModelNative
                 timezonesModel: engine.timezonesModel
                 keymapsModel: engine.keymapsModel
+                keyboardVariantsModel: engine.keyboardVariantsModel
                 selectedLocale: engine.selectedLocale
                 selectedTimezone: engine.selectedTimezone
                 selectedKeymap: engine.selectedKeymap
+                selectedKeyboardVariant: engine.selectedKeyboardVariant
 
                 primaryColor: root.primaryColor
                 backgroundColor: root.backgroundColor
@@ -241,6 +244,9 @@ ApplicationWindow {
                 }
                 onKeymapSelected: function(keymap) {
                     engine.setSelectedKeymap(keymap)
+                }
+                onKeyboardVariantSelected: function(variant) {
+                    engine.setSelectedKeyboardVariant(variant)
                 }
 
                 Behavior on opacity {

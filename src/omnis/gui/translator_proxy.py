@@ -161,7 +161,7 @@ class TranslatorProxy(QObject):
         Load Qt translation file for the given locale.
 
         Args:
-            locale: Locale code
+            locale: Locale code (e.g., "fr_FR.UTF-8" or "fr_FR")
 
         Returns:
             True if translation was loaded
@@ -179,8 +179,11 @@ class TranslatorProxy(QObject):
         # Create new translator
         self._qt_translator = QTranslator(self)
 
+        # Normalize locale: remove encoding suffix (e.g., "fr_FR.UTF-8" -> "fr_FR")
+        normalized_locale = locale.split(".")[0]
+
         # Try to load translation file
-        qm_file = self._translations_dir / f"omnis_{locale}.qm"
+        qm_file = self._translations_dir / f"omnis_{normalized_locale}.qm"
         if qm_file.exists():
             if self._qt_translator.load(str(qm_file)):
                 app.installTranslator(self._qt_translator)

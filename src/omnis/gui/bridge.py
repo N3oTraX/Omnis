@@ -293,6 +293,7 @@ class EngineBridge(QObject):
     # Signals for user selections
     selectionsChanged = Signal()  # emitted when any selection changes
     localeDataChanged = Signal()  # emitted when locale data is loaded
+    keyboardVariantsChanged = Signal()  # emitted when keyboard variants change
     disksChanged = Signal()  # emitted when disks are scanned
     progressChanged = Signal()  # emitted when progress updates
 
@@ -327,14 +328,30 @@ class EngineBridge(QObject):
         self._locales_model_native: list[dict[str, str]] = []
         self._timezones_model: list[str] = []
         self._keymaps_model: list[str] = []
+        self._keyboard_variants_model: list[str] = []
         self._locale_detection_result: LocaleDetectionResult | None = None
         self._locale_auto_detection_config: dict[str, Any] = {}
+
+        # Keyboard variants by layout
+        self._keyboard_variants: dict[str, list[str]] = {
+            "us": ["qwerty", "dvorak", "colemak"],
+            "fr": ["azerty", "bepo", "mac"],
+            "de": ["qwertz", "nodeadkeys"],
+            "gb": ["qwerty", "dvorak"],
+            "es": ["qwerty", "mac"],
+            "it": ["qwerty", "mac"],
+            "jp": ["qwerty"],
+            "ru": ["qwerty", "phonetic"],
+            "ar": ["qwerty"],
+            "cn": ["qwerty"],
+        }
 
         # User selections
         self._selections: dict[str, Any] = {
             "locale": "en_US.UTF-8",
             "timezone": "UTC",
             "keymap": "us",
+            "keyboardVariant": "qwerty",
             "username": "",
             "fullName": "",
             "hostname": "",
@@ -615,6 +632,11 @@ class EngineBridge(QObject):
         """Get available keyboard layouts for QML."""
         return self._keymaps_model
 
+    @Property(list, notify=keyboardVariantsChanged)
+    def keyboardVariantsModel(self) -> list[str]:
+        """Get available keyboard variants for selected layout."""
+        return self._keyboard_variants_model
+
     @Property(str, notify=localeDataChanged)
     def detectedLocale(self) -> str:
         """Get auto-detected locale."""
@@ -691,6 +713,8 @@ class EngineBridge(QObject):
             self._selections["keymap"] = self._locale_detection_result.keymap
             if self._debug:
                 print("[Engine] Applied auto-detected locale settings")
+            # Emit signal to update QML UI with detected values
+            self.selectionsChanged.emit()
 
     @Slot()
     def loadLocaleData(self) -> None:
@@ -764,12 +788,48 @@ class EngineBridge(QObject):
 
     @Slot(str)
     def setSelectedKeymap(self, keymap: str) -> None:
-        """Set selected keyboard layout."""
+        """Set selected keyboard layout and update available variants."""
         if self._selections.get("keymap") != keymap:
             self._selections["keymap"] = keymap
+
+            # Update keyboard variants for new layout
+            self._update_keyboard_variants(keymap)
+
             if self._debug:
                 print(f"[Engine] Keymap set to: {keymap}")
+                print(f"[Engine] Available variants: {self._keyboard_variants_model}")
             self.selectionsChanged.emit()
+
+    @Property(str, notify=selectionsChanged)
+    def selectedKeyboardVariant(self) -> str:
+        """Get selected keyboard variant."""
+        return str(self._selections.get("keyboardVariant", "qwerty"))
+
+    @Slot(str)
+    def setSelectedKeyboardVariant(self, variant: str) -> None:
+        """Set selected keyboard variant."""
+        if self._selections.get("keyboardVariant") != variant:
+            self._selections["keyboardVariant"] = variant
+            if self._debug:
+                print(f"[Engine] Keyboard variant set to: {variant}")
+            self.selectionsChanged.emit()
+
+    def _update_keyboard_variants(self, keymap: str) -> None:
+        """Update keyboard variants model based on selected keymap."""
+        # Extract base layout code (e.g., "us" from "us" or "fr_CA" from "fr")
+        base_layout = keymap.split("_")[0] if "_" in keymap else keymap
+
+        # Get variants for this layout (default to qwerty if unknown)
+        self._keyboard_variants_model = self._keyboard_variants.get(
+            base_layout, ["qwerty"]
+        )
+
+        # Auto-select first variant if current one is not available
+        current_variant = self._selections.get("keyboardVariant", "")
+        if current_variant not in self._keyboard_variants_model:
+            self._selections["keyboardVariant"] = self._keyboard_variants_model[0]
+
+        self.keyboardVariantsChanged.emit()
 
     @Property(str, notify=selectionsChanged)
     def username(self) -> str:
