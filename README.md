@@ -4,7 +4,7 @@
 
 | Métrique | Valeur |
 |----------|--------|
-| Version | `0.2.0` (IPC) |
+| Version | `0.3.0` (WelcomeJob) |
 | Python | `>=3.11` |
 | GUI | PySide6 (Qt6) + QML |
 | IPC | Unix Socket + JSON |
@@ -310,7 +310,19 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 
 ## État du Projet
 
-### v0.2.0 - IPC (Actuel)
+### v0.3.0 - WelcomeJob (Actuel)
+
+**Welcome Screen (Écran d'accueil complet)**
+- [x] Requirements panel avec checks système configurables
+- [x] Checks disponibles : RAM, Disk, CPU, EFI, Secure Boot, Internet, Power, GPU
+- [x] GPU : Détection dGPU/iGPU, noms courts marketing, tri par type
+- [x] Power : Détection laptop-only (filtre batteries wireless)
+- [x] Tooltips informatifs sur hover (warn/fail)
+- [x] Panel masqué automatiquement si tous checks désactivés
+- [x] Lien website cliquable dans footer (configurable)
+- [x] BrandingLinks model (website, git, documentation, support)
+
+### v0.2.0 - IPC ✅
 
 **IPC (Inter-Process Communication)**
 - [x] Protocole JSON avec framing length-prefix (4 bytes big-endian)
@@ -333,7 +345,7 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 - [x] Tests d'intégration (multi-clients, events, reconnection)
 - [x] Tests launcher (dispatcher, handlers)
 
-### v0.1.0 - Squelette
+### v0.1.0 - Squelette ✅
 
 **Core**
 - [x] Structure projet complète
@@ -358,9 +370,10 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 | Version | Objectif | Status |
 |---------|----------|--------|
 | v0.1.0 | Squelette + Thèmes | ✅ Terminé |
-| v0.2.0 | IPC UI/Engine | ✅ Actuel |
-| v0.3.0 | Jobs de base | 🔲 À faire |
-| v0.4.0 | UI Wizard complet | 🔲 À faire |
+| v0.2.0 | IPC UI/Engine | ✅ Terminé |
+| v0.3.0 | WelcomeJob + Requirements | ✅ Actuel |
+| v0.4.0 | Jobs de base (Locale, Users, Partition) | 🔲 À faire |
+| v0.5.0 | UI Wizard complet | 🔲 À faire |
 | v1.0.0 | Release stable | 🔲 À faire |
 
 ---

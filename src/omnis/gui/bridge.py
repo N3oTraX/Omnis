@@ -353,6 +353,10 @@ class EngineBridge(QObject):
         if self._requirements_checker is None:
             self._init_requirements_checker()
 
+        # Safety check for mypy (should never be None after init)
+        if self._requirements_checker is None:
+            return
+
         self._is_checking_requirements = True
         self.requirementsChanged.emit()
 
