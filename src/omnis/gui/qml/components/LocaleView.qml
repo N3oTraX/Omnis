@@ -60,7 +60,7 @@ Item {
                     spacing: 4
 
                     Text {
-                        text: qsTr("Locale Settings")
+                        text: qsTr("Country & Language")
                         font.pixelSize: 24
                         font.bold: true
                         color: textColor

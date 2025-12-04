@@ -15,9 +15,51 @@ from PySide6.QtCore import Property, QObject, QThread, QUrl, Signal, Slot
 from omnis.i18n.translator import get_translator
 from omnis.jobs.locale import LocaleJob
 from omnis.jobs.requirements import SystemRequirementsChecker
+from omnis.utils.locale_detector import LocaleDetectionResult, LocaleDetector
 
 if TYPE_CHECKING:
     from omnis.core.engine import Engine
+
+# Native names for common locales (displayed in UI)
+LOCALE_NATIVE_NAMES: dict[str, str] = {
+    "en_US.UTF-8": "English (United States)",
+    "en_GB.UTF-8": "English (United Kingdom)",
+    "en_CA.UTF-8": "English (Canada)",
+    "en_AU.UTF-8": "English (Australia)",
+    "fr_FR.UTF-8": "Francais (France)",
+    "fr_CA.UTF-8": "Francais (Canada)",
+    "de_DE.UTF-8": "Deutsch (Deutschland)",
+    "de_AT.UTF-8": "Deutsch (Osterreich)",
+    "de_CH.UTF-8": "Deutsch (Schweiz)",
+    "es_ES.UTF-8": "Espanol (Espana)",
+    "es_MX.UTF-8": "Espanol (Mexico)",
+    "es_AR.UTF-8": "Espanol (Argentina)",
+    "it_IT.UTF-8": "Italiano (Italia)",
+    "pt_BR.UTF-8": "Portugues (Brasil)",
+    "pt_PT.UTF-8": "Portugues (Portugal)",
+    "ru_RU.UTF-8": "Russkij (Rossija)",
+    "zh_CN.UTF-8": "Zhongwen (Zhongguo)",
+    "zh_TW.UTF-8": "Zhongwen (Taiwan)",
+    "ja_JP.UTF-8": "Nihongo (Nippon)",
+    "ko_KR.UTF-8": "Hangugeo (Hanguk)",
+    "ar_SA.UTF-8": "Al-Arabiya (As-Saudiya)",
+    "pl_PL.UTF-8": "Polski (Polska)",
+    "nl_NL.UTF-8": "Nederlands (Nederland)",
+    "sv_SE.UTF-8": "Svenska (Sverige)",
+    "tr_TR.UTF-8": "Turkce (Turkiye)",
+    "cs_CZ.UTF-8": "Cestina (Cesko)",
+    "hu_HU.UTF-8": "Magyar (Magyarorszag)",
+    "ro_RO.UTF-8": "Romana (Romania)",
+    "el_GR.UTF-8": "Ellinika (Ellada)",
+    "he_IL.UTF-8": "Ivrit (Yisrael)",
+    "th_TH.UTF-8": "Phasa Thai (Prathet Thai)",
+    "vi_VN.UTF-8": "Tieng Viet (Viet Nam)",
+    "id_ID.UTF-8": "Bahasa Indonesia (Indonesia)",
+    "da_DK.UTF-8": "Dansk (Danmark)",
+    "fi_FI.UTF-8": "Suomi (Suomi)",
+    "nb_NO.UTF-8": "Norsk (Norge)",
+    "uk_UA.UTF-8": "Ukrainska (Ukraina)",
+}
 
 
 class InstallationWorker(QObject):
@@ -282,8 +324,11 @@ class EngineBridge(QObject):
 
         # Locale data
         self._locales_model: list[str] = []
+        self._locales_model_native: list[dict[str, str]] = []
         self._timezones_model: list[str] = []
         self._keymaps_model: list[str] = []
+        self._locale_detection_result: LocaleDetectionResult | None = None
+        self._locale_auto_detection_config: dict[str, Any] = {}
 
         # User selections
         self._selections: dict[str, Any] = {
@@ -556,6 +601,11 @@ class EngineBridge(QObject):
         return self._locales_model
 
     @Property(list, notify=localeDataChanged)
+    def localesModelNative(self) -> list[dict[str, str]]:
+        """Get available locales with native names for QML."""
+        return self._locales_model_native
+
+    @Property(list, notify=localeDataChanged)
     def timezonesModel(self) -> list[str]:
         """Get available timezones for QML."""
         return self._timezones_model
@@ -565,14 +615,101 @@ class EngineBridge(QObject):
         """Get available keyboard layouts for QML."""
         return self._keymaps_model
 
+    @Property(str, notify=localeDataChanged)
+    def detectedLocale(self) -> str:
+        """Get auto-detected locale."""
+        if self._locale_detection_result:
+            return self._locale_detection_result.language
+        return ""
+
+    @Property(str, notify=localeDataChanged)
+    def detectedTimezone(self) -> str:
+        """Get auto-detected timezone."""
+        if self._locale_detection_result:
+            return self._locale_detection_result.timezone
+        return ""
+
+    @Property(str, notify=localeDataChanged)
+    def detectedKeymap(self) -> str:
+        """Get auto-detected keymap."""
+        if self._locale_detection_result:
+            return self._locale_detection_result.keymap
+        return ""
+
+    @Property(str, notify=localeDataChanged)
+    def detectionSource(self) -> str:
+        """Get detection source (geoip, cmdline, efi, default)."""
+        if self._locale_detection_result:
+            return self._locale_detection_result.source
+        return ""
+
+    @Property(float, notify=localeDataChanged)
+    def detectionConfidence(self) -> float:
+        """Get detection confidence (0.0-1.0)."""
+        if self._locale_detection_result:
+            return self._locale_detection_result.confidence
+        return 0.0
+
+    def _load_locale_auto_detection_config(self) -> None:
+        """Load auto-detection configuration from locale job config."""
+        for job_def in self._engine.config.normalize_jobs():
+            if job_def.name == "locale":
+                self._locale_auto_detection_config = job_def.config.get(
+                    "auto_detection", {}
+                )
+                break
+        if self._debug:
+            print(
+                f"[Engine] Locale auto-detection config: "
+                f"{self._locale_auto_detection_config}"
+            )
+
+    def _run_locale_detection(self) -> None:
+        """Run locale auto-detection if enabled."""
+        if not self._locale_auto_detection_config.get("enabled", False):
+            if self._debug:
+                print("[Engine] Locale auto-detection disabled")
+            return
+
+        detector = LocaleDetector.from_config(self._locale_auto_detection_config)
+        self._locale_detection_result = detector.detect()
+
+        if self._debug:
+            result = self._locale_detection_result
+            print(
+                f"[Engine] Auto-detected locale: {result.language} "
+                f"(source: {result.source}, confidence: {result.confidence})"
+            )
+            print(f"[Engine] Auto-detected timezone: {result.timezone}")
+            print(f"[Engine] Auto-detected keymap: {result.keymap}")
+
+        # Apply detected values if confidence is high enough
+        threshold = self._locale_auto_detection_config.get("confidence_threshold", 0.8)
+        if self._locale_detection_result.confidence >= threshold:
+            self._selections["locale"] = self._locale_detection_result.language
+            self._selections["timezone"] = self._locale_detection_result.timezone
+            self._selections["keymap"] = self._locale_detection_result.keymap
+            if self._debug:
+                print("[Engine] Applied auto-detected locale settings")
+
     @Slot()
     def loadLocaleData(self) -> None:
         """Load locale, timezone, and keymap data."""
         if self._debug:
             print("[Engine] Loading locale data...")
 
+        # Load auto-detection config and run detection
+        self._load_locale_auto_detection_config()
+        self._run_locale_detection()
+
         # Load locales from LocaleJob
         self._locales_model = list(LocaleJob.COMMON_LOCALES)
+
+        # Build native names model
+        self._locales_model_native = []
+        for locale_code in self._locales_model:
+            native_name = LOCALE_NATIVE_NAMES.get(locale_code, locale_code)
+            self._locales_model_native.append({"code": locale_code, "name": native_name})
 
         # Load timezones from system
         locale_job = LocaleJob()

@@ -248,6 +248,19 @@ jobs:
       default_language: "fr_FR"
       default_timezone: "Europe/Paris"
       show_keyboard_preview: true
+      # Auto-detection configuration
+      auto_detection:
+        enabled: true
+        methods:
+          geoip:
+            enabled: true
+            timeout: 2.0
+          cmdline:
+            enabled: true
+          efi:
+            enabled: true
+        override_mode: "auto"  # "auto", "prefer_geoip", "prefer_local"
+        confidence_threshold: 0.8
 
   # Partitionnement
   - name: partition

@@ -38,7 +38,7 @@ Item {
     implicitHeight: 40
     implicitWidth: 200
 
-    // Filter function
+    // Filter function with enhanced timezone search
     function filterItems(searchText) {
         if (!searchText || searchText.length === 0) {
             filteredModel = model
@@ -47,8 +47,20 @@ Item {
             var filtered = []
             for (var i = 0; i < model.length; i++) {
                 var item = model[i].toLowerCase()
+                // Direct substring match
                 if (item.indexOf(lowerSearch) !== -1) {
                     filtered.push(model[i])
+                    continue
+                }
+                // Enhanced timezone search: match continent or city separately
+                if (item.indexOf("/") !== -1) {
+                    var parts = item.split("/")
+                    for (var j = 0; j < parts.length; j++) {
+                        if (parts[j].indexOf(lowerSearch) !== -1) {
+                            filtered.push(model[i])
+                            break
+                        }
+                    }
                 }
             }
             filteredModel = filtered
