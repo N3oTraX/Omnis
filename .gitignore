@@ -234,4 +234,4 @@ local.yaml
 
 # Claude Code local memory (not synced)
 .claude/
-.serena/
+.serena/CLAUDE.md

@@ -267,11 +267,11 @@ class TestSaveLogs:
 class TestSafeUnmount:
     """Tests for safe unmount functionality."""
 
-    @patch("subprocess.run")
-    @patch("pathlib.Path.exists")
-    def test_unmount_not_mounted(self, mock_exists: Mock, mock_run: Mock) -> None:
+    @patch("omnis.jobs.finished.subprocess.run")
+    @patch("omnis.jobs.finished.os.path.ismount")
+    def test_unmount_not_mounted(self, mock_ismount: Mock, mock_run: Mock) -> None:
         """Should skip unmount if path is not mounted."""
-        mock_exists.return_value = False
+        mock_ismount.return_value = False
 
         job = FinishedJob()
         result = job._safe_unmount(Path("/not/mounted"))
@@ -280,11 +280,11 @@ class TestSafeUnmount:
         # Should not call subprocess
         mock_run.assert_not_called()
 
-    @patch("subprocess.run")
-    @patch("pathlib.Path.exists")
-    def test_unmount_success(self, mock_exists: Mock, mock_run: Mock) -> None:
+    @patch("omnis.jobs.finished.subprocess.run")
+    @patch("omnis.jobs.finished.os.path.ismount")
+    def test_unmount_success(self, mock_ismount: Mock, mock_run: Mock) -> None:
         """Should successfully unmount filesystem."""
-        mock_exists.return_value = True
+        mock_ismount.return_value = True
         mock_run.return_value = MagicMock(returncode=0)
 
         job = FinishedJob()
@@ -294,11 +294,11 @@ class TestSafeUnmount:
         mock_run.assert_called_once()
         assert "umount" in mock_run.call_args[0][0]
 
-    @patch("subprocess.run")
-    @patch("pathlib.Path.exists")
-    def test_unmount_lazy_fallback(self, mock_exists: Mock, mock_run: Mock) -> None:
+    @patch("omnis.jobs.finished.subprocess.run")
+    @patch("omnis.jobs.finished.os.path.ismount")
+    def test_unmount_lazy_fallback(self, mock_ismount: Mock, mock_run: Mock) -> None:
         """Should use lazy unmount if normal unmount fails."""
-        mock_exists.return_value = True
+        mock_ismount.return_value = True
 
         # First call (normal unmount) fails, second call (lazy) succeeds
         from subprocess import CalledProcessError
@@ -315,11 +315,11 @@ class TestSafeUnmount:
         assert result is True
         assert mock_run.call_count == 2
 
-    @patch("subprocess.run")
-    @patch("pathlib.Path.exists")
-    def test_unmount_failure(self, mock_exists: Mock, mock_run: Mock) -> None:
+    @patch("omnis.jobs.finished.subprocess.run")
+    @patch("omnis.jobs.finished.os.path.ismount")
+    def test_unmount_failure(self, mock_ismount: Mock, mock_run: Mock) -> None:
         """Should return False if all unmount attempts fail."""
-        mock_exists.return_value = True
+        mock_ismount.return_value = True
 
         # Both normal and lazy unmount fail
         from subprocess import CalledProcessError
@@ -341,10 +341,14 @@ class TestCleanupMounts:
     """Tests for filesystem cleanup."""
 
     @patch("omnis.jobs.finished.FinishedJob._safe_unmount")
-    @patch("subprocess.run")
-    def test_cleanup_unmounts_in_order(self, mock_run: Mock, mock_unmount: Mock) -> None:
+    @patch("omnis.jobs.finished.os.path.ismount")
+    @patch("omnis.jobs.finished.subprocess.run")
+    def test_cleanup_unmounts_in_order(
+        self, mock_run: Mock, mock_ismount: Mock, mock_unmount: Mock
+    ) -> None:
         """Should unmount filesystems in correct order."""
         mock_unmount.return_value = True
+        mock_ismount.return_value = True  # Simulate mounted filesystems
         mock_run.return_value = MagicMock(returncode=0)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -359,7 +363,7 @@ class TestCleanupMounts:
 
             assert result.success is True
             # Should call unmount at least once (root directory exists)
-            # EFI mount will be checked but may not trigger unmount if not actually mounted
+            # Both EFI and root should be unmounted
             assert mock_unmount.call_count >= 1
 
     @patch("omnis.jobs.finished.FinishedJob._safe_unmount")
@@ -387,8 +391,11 @@ class TestCleanupMounts:
             assert len(swapoff_calls) >= 1
 
     @patch("omnis.jobs.finished.FinishedJob._safe_unmount")
-    def test_cleanup_reports_errors(self, mock_unmount: Mock) -> None:
+    @patch("omnis.jobs.finished.os.path.ismount")
+    def test_cleanup_reports_errors(self, mock_ismount: Mock, mock_unmount: Mock) -> None:
         """Should report cleanup errors."""
+        # Simulate mounted filesystems
+        mock_ismount.return_value = True
         # Simulate unmount failures
         mock_unmount.return_value = False
 
@@ -691,10 +698,14 @@ class TestFinishedJobIntegration:
     """Integration tests for complete FinishedJob workflow."""
 
     @patch("omnis.jobs.finished.FinishedJob._safe_unmount")
-    @patch("subprocess.run")
-    def test_full_workflow(self, mock_run: Mock, mock_unmount: Mock) -> None:
+    @patch("omnis.jobs.finished.os.path.ismount")
+    @patch("omnis.jobs.finished.subprocess.run")
+    def test_full_workflow(
+        self, mock_run: Mock, mock_ismount: Mock, mock_unmount: Mock
+    ) -> None:
         """Test complete finished job workflow."""
         mock_unmount.return_value = True
+        mock_ismount.return_value = True  # Simulate mounted filesystems
         mock_run.return_value = MagicMock(returncode=0)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -739,8 +750,12 @@ class TestFinishedJobIntegration:
             assert mock_unmount.called
 
     @patch("omnis.jobs.finished.FinishedJob._safe_unmount")
-    def test_workflow_with_cleanup_failure(self, mock_unmount: Mock) -> None:
+    @patch("omnis.jobs.finished.os.path.ismount")
+    def test_workflow_with_cleanup_failure(
+        self, mock_ismount: Mock, mock_unmount: Mock
+    ) -> None:
         """Test workflow when cleanup fails."""
+        mock_ismount.return_value = True  # Simulate mounted filesystems
         mock_unmount.return_value = False  # Simulate unmount failure
 
         with tempfile.TemporaryDirectory() as tmpdir:
