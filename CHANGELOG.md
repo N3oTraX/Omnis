@@ -5,6 +5,54 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.3.0] - 2025-12-04
+
+### Added
+
+#### Welcome Screen (WelcomeJob)
+- Panel requirements avec checks système configurables (`jobs/requirements.py`)
+  - RAM : Vérification mémoire disponible vs minimum requis
+  - Disk : Espace disque disponible vs minimum requis
+  - CPU : Nombre de cœurs vs minimum requis
+  - EFI : Détection mode boot UEFI
+  - Secure Boot : Détection état Secure Boot
+  - Internet : Test connectivité réseau
+  - Power : Détection alimentation secteur (laptop-only)
+  - GPU : Détection cartes graphiques
+- GPU Detector avancé (`jobs/gpu.py`)
+  - Parsing lspci pour détection vendor/model
+  - Extraction noms marketing courts (`_get_short_gpu_name()`)
+  - Différenciation dGPU/iGPU avec tri automatique
+  - Support AMD, NVIDIA, Intel
+- Interface QML Requirements (`gui/qml/components/`)
+  - `RequirementsOverlay.qml` : Panel overlay avec animation
+  - `RequirementItem.qml` : Item individuel avec icône status
+  - Tooltips informatifs sur hover (warn/fail)
+  - Panel masqué si tous checks désactivés
+
+#### Branding Links
+- Modèle `BrandingLinks` dans `BrandingConfig` (`core/engine.py`)
+  - website : URL site web distribution
+  - website_label : Label optionnel pour le lien
+  - git : URL repository Git
+  - documentation : URL documentation
+  - support : URL support/forum
+- Lien website cliquable dans footer (`gui/qml/Main.qml`)
+  - Visible uniquement sur écran Welcome
+  - Full URL affichée avec hover effect
+  - Aligné à droite (symétrique à "Powered by Omnis")
+
+#### Configuration
+- Section `links:` dans config YAML (`config/examples/glfos.yaml`)
+- Section `requirements:` avec paramètres par check
+  - `enabled` : Activer/désactiver le check
+  - `type` : "error" ou "warning"
+  - `minimum` : Valeur seuil pour checks quantitatifs
+
+### Changed
+- Footer QML restructuré pour affichage conditionnel du lien website
+- `WelcomeView.qml` simplifié (lien déplacé vers `Main.qml`)
+
 ## [0.2.0] - 2025-12-03
 
 ### Added

@@ -70,6 +70,16 @@ class BrandingStrings(BaseModel):
     finished_message: str = ""
 
 
+class BrandingLinks(BaseModel):
+    """External links configuration."""
+
+    website: str = ""  # Main distribution website
+    website_label: str = ""  # Display text for website link
+    git: str = ""  # Git repository URL
+    documentation: str = ""  # Documentation URL
+    support: str = ""  # Support/forum URL
+
+
 class BrandingConfig(BaseModel):
     """Complete branding configuration."""
 
@@ -80,6 +90,7 @@ class BrandingConfig(BaseModel):
     assets: BrandingAssets = Field(default_factory=BrandingAssets)
     strings: BrandingStrings = Field(default_factory=BrandingStrings)
     fonts: BrandingFonts = Field(default_factory=BrandingFonts)
+    links: BrandingLinks = Field(default_factory=BrandingLinks)
 
 
 class JobDefinition(BaseModel):

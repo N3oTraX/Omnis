@@ -48,6 +48,24 @@ jobs:
       allow_encryption: true
       allow_manual_partitioning: true
 
+  # Package selection
+  - name: packages
+    config:
+      flavors:
+        - id: base
+          name: "Base System"
+          description: "Minimal Arch Linux base installation"
+          default: true
+        - id: gnome
+          name: "GNOME Desktop"
+          description: "Complete GNOME desktop environment"
+        - id: kde
+          name: "KDE Plasma"
+          description: "Complete KDE Plasma desktop environment"
+        - id: xfce
+          name: "XFCE Desktop"
+          description: "Lightweight XFCE desktop environment"
+
   - name: install
     config:
       source: "/run/archiso/bootmnt/arch/x86_64/airootfs.sfs"

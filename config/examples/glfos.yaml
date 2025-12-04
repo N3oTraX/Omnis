@@ -13,23 +13,41 @@ version: "1.0"
 theme: "../themes/glfos"
 
 # -----------------------------------------------------------------------------
-# Branding - Identité visuelle officielle GLF OS
+# Internationalization (i18n)
+# -----------------------------------------------------------------------------
+i18n:
+  # Default locale at startup (must match a file in config/i18n/)
+  default_locale: "en_US"
+  # Available locales for user selection
+  available_locales:
+    - "en_US"
+    - "fr_FR"
+  # Fallback locale if selected locale is unavailable
+  fallback_locale: "en_US"
+
+# -----------------------------------------------------------------------------
+# Branding - Identite visuelle officielle GLF OS
 # -----------------------------------------------------------------------------
 branding:
-  # Identité
+  # Identite
   name: "GLF OS"
   version: "Omnislash"
   edition: "25.04"
+  tagline: "Linux Gaming made easy!"
 
   # Couleurs officielles (source: gaminglinux.fr)
   colors:
     primary: "#5597e6"      # Bleu GLF (titres, accents)
     secondary: "#4a8bd4"    # Bleu secondaire
-    accent: "#5597e6"       # Accent (même que primary)
+    accent: "#5597e6"       # Accent (meme que primary)
     background: "#1a1a1a"   # Fond sombre
-    surface: "#32373c"      # Surface éléments/boutons
+    surface: "#32373c"      # Surface elements/boutons
     text: "#fffded"         # Texte principal (cream)
     text_muted: "#9CA3AF"   # Texte secondaire
+    # Status colors
+    success: "#10B981"
+    warning: "#F59E0B"
+    error: "#EF4444"
 
   # Assets (chemins relatifs au theme directory)
   assets:
@@ -43,34 +61,188 @@ branding:
     bootloader: "boot/glf-bootloader.png"
     efi_icon: "boot/glf-efi.png"
 
-  # Textes personnalisés
-  strings:
-    welcome_title: "Bienvenue sur GLF OS"
-    welcome_subtitle: "Linux Gaming made easy!"
-    install_button: "Installer GLF OS"
-    finished_title: "Installation terminée !"
-    finished_message: "GLF OS est prêt. Redémarrez pour découvrir le gaming sur Linux."
-
   # Typographie
   fonts:
     primary: "Poppins"
     display: "Lemon Milk"
     monospace: "Roboto Mono"
 
+  # Liens externes (affichés sur l'écran d'accueil)
+  links:
+    # Site web principal (affiché en bas à droite de l'écran Welcome)
+    website: "https://www.gaminglinux.fr/glf-os/"
+    # Texte affiché pour le lien (si vide, utilise l'URL)
+    website_label: "gaminglinux.fr"
+    # Dépôt Git du projet
+    git: "https://github.com/Gaming-Linux-FR/GLF-OS"
+    # Documentation
+    documentation: "https://docs.gaminglinux.fr/"
+    # Support / Forum
+    support: "https://discord.gg/gaminglinux"
+
 # -----------------------------------------------------------------------------
 # Jobs - Workflow d'installation NixOS
 # -----------------------------------------------------------------------------
 jobs:
-  # Écran d'accueil et vérifications
+  # Ecran d'accueil et verifications
   - name: welcome
     config:
       show_release_notes: true
-      check_requirements:
-        min_ram_gb: 4
-        min_disk_gb: 40
-        require_efi: true  # NixOS recommande EFI
 
-  # Sélection de la langue et région
+      # Wallpapers for welcome screen (relative to theme directory)
+      wallpapers:
+        dark: "wallpapers/welcome-dark.jpg"
+        light: "wallpapers/welcome-light.jpg"
+        fallback: "wallpapers/dark.jpg"
+
+      # Icons for requirement status (relative to theme directory)
+      # These icons should be downloaded and placed in the theme
+      icons:
+        # Memory icons
+        ram_pass: "icons/requirements/mem-pass.svg"
+        ram_warn: "icons/requirements/mem-warn.svg"
+        ram_fail: "icons/requirements/mem-fail.svg"
+        # Disk icons
+        disk_pass: "icons/requirements/hd-pass.svg"
+        disk_warn: "icons/requirements/hd-warn.svg"
+        disk_fail: "icons/requirements/hd-fail.svg"
+        # GPU icons
+        gpu_pass: "icons/requirements/gpu-pass.svg"
+        gpu_warn: "icons/requirements/gpu-warn.svg"
+        gpu_fail: "icons/requirements/gpu-fail.svg"
+
+      # ---------------------------------------------------------------------
+      # System Requirements Configuration
+      # ---------------------------------------------------------------------
+      # Each check can be enabled/disabled and has configurable overrides.
+      # Set 'enabled: false' or remove the 'enabled' key to disable a check.
+      # An empty/null override value uses the default.
+      #
+      # If ALL checks are disabled, the requirements panel will be hidden.
+      # ---------------------------------------------------------------------
+
+      requirements:
+        # -----------------------------------------------------------------
+        # RAM Check
+        # -----------------------------------------------------------------
+        # Checks available system memory against minimum and recommended.
+        # PASS: >= warn_gb | WARN: >= min_gb | FAIL: < min_gb
+        ram:
+          enabled: true
+          # Minimum RAM in GB (FAIL if below)
+          min_gb: 8
+          # Warning threshold in GB (WARN if between min and this value)
+          warn_gb: 16
+          # Recommended RAM in GB (displayed to user)
+          recommended_gb: 16
+
+        # -----------------------------------------------------------------
+        # Disk Space Check
+        # -----------------------------------------------------------------
+        # Checks largest available storage device.
+        # PASS: >= recommended_gb | WARN: >= min_gb | FAIL: < min_gb
+        disk:
+          enabled: true
+          # Minimum disk space in GB (FAIL if below)
+          min_gb: 60
+          # Recommended disk space in GB (WARN if between min and this)
+          recommended_gb: 120
+          # Whether to recommend SSD (informational only)
+          recommend_ssd: true
+
+        # -----------------------------------------------------------------
+        # CPU Architecture Check
+        # -----------------------------------------------------------------
+        # Checks processor architecture (x86_64 required for modern Linux gaming).
+        # PASS: x86_64 | WARN: other (if not required) | FAIL: other (if required)
+        cpu_arch:
+          enabled: false  # Usually always x86_64, disabled by default
+          # Whether x86_64 is strictly required (FAIL if not met)
+          require_x86_64: true
+
+        # -----------------------------------------------------------------
+        # Boot Mode Check (EFI/UEFI)
+        # -----------------------------------------------------------------
+        # Checks if system is booted in UEFI mode.
+        # PASS: UEFI | WARN: Legacy (if not required) | FAIL: Legacy (if required)
+        efi:
+          enabled: false  # Disabled by default
+          # Whether UEFI is strictly required (FAIL if Legacy BIOS)
+          required: true
+
+        # -----------------------------------------------------------------
+        # Secure Boot Check
+        # -----------------------------------------------------------------
+        # Checks Secure Boot status (may interfere with some drivers).
+        # PASS: Disabled | WARN: Enabled (if not required) | FAIL: Enabled (if required)
+        secure_boot:
+          enabled: false  # Disabled by default
+          # Whether Secure Boot must be disabled (FAIL if enabled)
+          require_disabled: false
+
+        # -----------------------------------------------------------------
+        # Internet Connectivity Check
+        # -----------------------------------------------------------------
+        # Checks for active internet connection (for package updates).
+        # PASS: Connected | WARN: Not connected (if recommended) | FAIL: Not connected (if required)
+        internet:
+          enabled: false  # Disabled by default
+          # Whether internet is strictly required (FAIL if no connection)
+          required: false
+          # Whether to show warning if not connected
+          recommended: true
+
+        # -----------------------------------------------------------------
+        # Power Source Check (LAPTOP ONLY)
+        # -----------------------------------------------------------------
+        # This check is SKIPPED on desktop systems (no battery detected).
+        # Only checks on laptops/portables with batteries.
+        #
+        # Logic:
+        # - SKIP: Desktop system (no battery)
+        # - PASS: On AC power
+        # - WARN: On battery AND battery >= min_battery_percent
+        # - FAIL: On battery AND battery < min_battery_percent
+        power:
+          enabled: true
+          # Minimum battery percentage when not plugged in (FAIL if below)
+          # Default: 80% - Ensure sufficient battery for installation
+          min_battery_percent: 80
+
+        # -----------------------------------------------------------------
+        # GPU Compatibility Check
+        # -----------------------------------------------------------------
+        # Checks GPU vendor compatibility and minimum model requirements.
+        # Displays GPUs in order: dGPU first, then iGPU.
+        #
+        # Logic:
+        # - PASS: Compatible dGPU detected meeting minimum requirements
+        # - WARN: Only iGPU (if dedicated not required) or below recommended
+        # - FAIL: No compatible GPU or below minimum model requirement
+        gpu:
+          enabled: true
+          # Supported GPU vendors (empty = all vendors)
+          # Values: AMD, INTEL, NVIDIA
+          availability:
+            - AMD
+            - INTEL
+            - NVIDIA
+
+          # Whether dedicated GPU is required (WARN if only iGPU)
+          require_dedicated: false
+
+          # Minimum GPU model overrides by vendor
+          # Empty string = no minimum requirement for that vendor
+          # See docs/gpu-compatibility.md for model reference
+          overrides:
+            # NVIDIA: GeForce GTX 1650+ (Turing architecture)
+            nvidia: "GTX 1650"
+            # AMD: No minimum (empty = any AMD GPU)
+            amd: ""
+            # Intel: No minimum (empty = any Intel GPU)
+            intel: ""
+
+  # Selection de la langue et region
   - name: locale
     config:
       default_language: "fr_FR"
@@ -86,7 +258,38 @@ jobs:
       efi_partition_size_mb: 512
       swap_strategy: auto
 
-  # Installation du système (NixOS)
+  # Selection de la saveur (DE/Edition)
+  - name: packages
+    config:
+      # Saveurs disponibles pour GLF OS
+      flavors:
+        - id: gnome
+          name: "GLF OS GNOME"
+          description: "Edition GNOME - Interface moderne et epuree"
+          icon: "flavors/gnome.png"
+          default: true
+        - id: kde
+          name: "GLF OS KDE"
+          description: "Edition KDE Plasma - Personnalisation maximale"
+          icon: "flavors/kde.png"
+        - id: minimal
+          name: "GLF OS Minimal"
+          description: "Base minimale sans environnement de bureau"
+          icon: "flavors/minimal.png"
+      # Groupes de paquets optionnels
+      optional_groups:
+        - id: gaming
+          name: "Gaming"
+          description: "Steam, Lutris, Wine, Proton-GE, MangoHud"
+          default: true
+        - id: streaming
+          name: "Streaming"
+          description: "OBS Studio, plugins streaming"
+        - id: emulation
+          name: "Emulation"
+          description: "RetroArch, Dolphin, PCSX2, RPCS3"
+
+  # Installation du systeme (NixOS)
   - name: install
     config:
       source: "/iso/nixos"
@@ -110,7 +313,7 @@ jobs:
     config:
       type: systemd-boot
       install_path: auto
-      enable_os_prober: false  # NixOS gère son propre boot
+      enable_os_prober: false  # NixOS gere son propre boot
 
   # Finalization
   - name: finished
@@ -119,7 +322,7 @@ jobs:
       auto_reboot_delay: 10
 
 # -----------------------------------------------------------------------------
-# Options avancées
+# Options avancees
 # -----------------------------------------------------------------------------
 advanced:
   log_level: info
