@@ -897,8 +897,8 @@ class TestMountPartitions:
             swap_partition="/dev/sda3",
         )
 
-        # Make only swapon fail
-        def run_cmd_side_effect(cmd: list[str], _description: str, _dry_run: bool) -> JobResult:
+        # Make only swapon fail - use **kwargs since method is called with keyword args
+        def run_cmd_side_effect(cmd: list[str], **_kwargs: object) -> JobResult:
             if "swapon" in cmd:
                 return JobResult.fail("Swap activation failed")
             return JobResult.ok()
