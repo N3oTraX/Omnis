@@ -226,9 +226,8 @@ class NetworkHelper:
         for host, port in test_hosts:
             try:
                 socket.setdefaulttimeout(timeout)
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.connect((host, port))
-                sock.close()
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    sock.connect((host, port))
                 logger.debug(f"Internet connectivity confirmed via {host}:{port}")
                 return True
             except (OSError, TimeoutError):
