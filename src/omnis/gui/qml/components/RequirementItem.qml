@@ -12,6 +12,9 @@ import QtQuick.Layouts
 Rectangle {
     id: root
 
+    // Signals
+    signal configureNetworkClicked()
+
     // Required properties
     property string name: ""
     property string description: ""
@@ -69,6 +72,7 @@ Rectangle {
             case "ram": return "\ud83d\udcbe"       // Floppy disk
             case "disk": return "\ud83d\udcbf"      // CD
             case "cpu_arch": return "\ud83d\udda5"  // Desktop
+            case "cpu_cores": return "\u2699"       // Gear (for CPU cores)
             case "efi": return "\u26a1"             // Lightning
             case "secure_boot": return "\ud83d\udd12" // Lock
             case "internet": return "\ud83c\udf10"  // Globe
@@ -82,7 +86,9 @@ Rectangle {
     // Check if we have a valid icon URL
     readonly property bool hasIconUrl: currentIconUrl !== ""
 
-    height: contentColumn.height + 16
+    // Use implicit height from content, with minimum of 60px
+    implicitHeight: Math.max(60, contentColumn.implicitHeight + 16)
+    height: implicitHeight
     radius: 12
     color: Qt.rgba(surfaceColor.r, surfaceColor.g, surfaceColor.b, 0.5)
     border.color: Qt.rgba(statusColor.r, statusColor.g, statusColor.b, 0.3)
@@ -171,11 +177,50 @@ Rectangle {
                 wrapMode: Text.WordWrap
                 width: parent.width
             }
+
+            // Configure Network button (only for internet requirement when warn/fail)
+            Button {
+                id: configureNetworkButton
+                visible: root.name === "internet" && (root.status === "warn" || root.status === "fail")
+                text: qsTr("Configure Network")
+                font.pixelSize: 11
+
+                background: Rectangle {
+                    implicitWidth: 130
+                    implicitHeight: 28
+                    radius: 6
+                    color: configureNetworkButton.pressed ? Qt.darker(root.primaryColor, 1.2) :
+                           configureNetworkButton.hovered ? Qt.lighter(root.primaryColor, 1.1) : root.primaryColor
+                    border.color: Qt.lighter(root.primaryColor, 1.3)
+                    border.width: 1
+                }
+
+                contentItem: Row {
+                    spacing: 4
+                    anchors.centerIn: parent
+
+                    Text {
+                        text: "\ud83d\udcf6"  // WiFi emoji
+                        font.pixelSize: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                        text: configureNetworkButton.text
+                        font: configureNetworkButton.font
+                        color: root.textColor
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+
+                onClicked: root.configureNetworkClicked()
+            }
         }
 
-        // Status badge with tooltip on hover for warn/fail
+        // Status badge with tooltip on hover for warn/fail - aligned to right
         Rectangle {
             id: statusBadge
+            Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
             width: 28
             height: 28
             radius: 14

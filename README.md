@@ -1,10 +1,16 @@
 # Omnis Installer
 
+[![CI](https://github.com/N3oTraX/Omnis/actions/workflows/ci.yml/badge.svg)](https://github.com/N3oTraX/Omnis/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![Qt6](https://img.shields.io/badge/Qt-6-41CD52.svg)](https://www.qt.io/)
+
 **Installeur Linux universel, modulaire et moderne** - Alternative à Calamares.
 
 | Métrique | Valeur |
 |----------|--------|
-| Version | `0.3.0` (WelcomeJob) |
+| Version | `0.4.0` (Phase 1 UI) |
 | Python | `>=3.11` |
 | GUI | PySide6 (Qt6) + QML |
 | IPC | Unix Socket + JSON |
@@ -310,7 +316,25 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 
 ## État du Projet
 
-### v0.3.0 - WelcomeJob (Actuel)
+### v0.4.0 - Jobs de Base + Phase 1 UI (Actuel)
+
+**Jobs d'installation**
+- [x] LocaleJob : Configuration langue, timezone, clavier
+- [x] UsersJob : Création utilisateur, mot de passe, options admin
+- [x] PartitionJob : Partitionnement automatique avec sécurité critique
+- [x] PackagesJob : Installation packages (pacman/apt)
+- [x] FinishedJob : Résumé et nettoyage
+
+**Interface utilisateur (Phase 1)**
+- [x] LocaleView : Sélection locale/timezone/keymap
+- [x] UsersView : Formulaire utilisateur complet
+- [x] PartitionView : Sélection disque et mode
+- [x] SummaryView : Récapitulatif avant installation
+- [x] ProgressView : Barre de progression jobs
+- [x] FinishedView : Écran de fin (reboot/shutdown)
+- [x] Navigation wizard multi-étapes
+
+### v0.3.0 - WelcomeJob ✅
 
 **Welcome Screen (Écran d'accueil complet)**
 - [x] Requirements panel avec checks système configurables
@@ -371,8 +395,8 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 |---------|----------|--------|
 | v0.1.0 | Squelette + Thèmes | ✅ Terminé |
 | v0.2.0 | IPC UI/Engine | ✅ Terminé |
-| v0.3.0 | WelcomeJob + Requirements | ✅ Actuel |
-| v0.4.0 | Jobs de base (Locale, Users, Partition) | 🔲 À faire |
+| v0.3.0 | WelcomeJob + Requirements | ✅ Terminé |
+| v0.4.0 | Jobs de base + Phase 1 UI | ✅ Actuel |
 | v0.5.0 | UI Wizard complet | 🔲 À faire |
 | v1.0.0 | Release stable | 🔲 À faire |
 
