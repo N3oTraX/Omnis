@@ -33,6 +33,8 @@ Item {
     property string distroName: ""
     property string distroLogo: ""
     property string backgroundUrl: ""
+    property string websiteUrl: ""
+    property string websiteLabel: ""
 
     // Theme colors
     property color primaryColor: "#5597e6"
@@ -328,7 +330,7 @@ Item {
                             Row {
                                 width: parent.width
                                 spacing: 12
-                                visible: installationSummary.installedPackages > 0
+                                visible: (installationSummary.installedPackages || 0) > 0
 
                                 Text {
                                     text: qsTr("Packages Installed:")
@@ -338,7 +340,7 @@ Item {
                                 }
 
                                 Text {
-                                    text: installationSummary.installedPackages.toString()
+                                    text: (installationSummary.installedPackages || 0).toString()
                                     font.pixelSize: 14
                                     font.bold: true
                                     color: textColor
@@ -654,6 +656,66 @@ Item {
             }
 
             Item { Layout.fillHeight: true }
+        }
+    }
+
+    // Footer bar - transparent (anchored at bottom, aligned with Main.qml footer)
+    Item {
+        id: footerBar
+        anchors {
+            left: parent.left
+            right: parent.right
+            bottom: parent.bottom
+            margins: 0  // No additional margins - parent already has 32px from ColumnLayout
+        }
+        height: 48
+
+        RowLayout {
+            anchors.fill: parent
+            spacing: 16
+
+            // "Powered by Omnis Installer" (left)
+            Text {
+                text: qsTr("Powered by Omnis Installer")
+                font.pixelSize: 12
+                color: textMutedColor
+                Layout.alignment: Qt.AlignVCenter
+            }
+
+            Item { Layout.fillWidth: true }
+
+            // Website URL (right)
+            Text {
+                id: websiteLink
+                text: root.websiteLabel || root.websiteUrl
+                font.pixelSize: 12
+                color: primaryColor
+                visible: root.websiteUrl !== ""
+                Layout.alignment: Qt.AlignVCenter
+
+                MouseArea {
+                    id: footerWebsiteMouseArea
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    hoverEnabled: true
+                    onClicked: Qt.openUrlExternally(root.websiteUrl)
+                }
+
+                // Underline on hover
+                Rectangle {
+                    width: parent.width
+                    height: 1
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: -2
+                    color: primaryColor
+                    visible: footerWebsiteMouseArea.containsMouse
+                }
+
+                opacity: footerWebsiteMouseArea.containsMouse ? 0.7 : 1.0
+                Behavior on opacity {
+                    NumberAnimation { duration: 150 }
+                }
+            }
         }
     }
 }

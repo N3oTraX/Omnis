@@ -30,6 +30,22 @@ ApplicationWindow {
     visible: true
     title: branding.name + " Installer"
 
+    // System font for non-Latin languages (CJK, Arabic, Hebrew, etc.)
+    // Uses Noto Sans when a non-Latin locale is selected, otherwise system default
+    readonly property string systemFontFamily: engine.systemFontFamily
+    readonly property bool needsUnicodeFont: engine.needsUnicodeFont
+
+    // Apply font globally to the window (empty string = system default)
+    font.family: needsUnicodeFont && systemFontFamily ? systemFontFamily : ""
+
+    // React to font changes when locale changes
+    Connections {
+        target: engine
+        function onSystemFontChanged() {
+            console.log("System font changed to:", engine.systemFontFamily || "system default")
+        }
+    }
+
     // Dynamic color palette from branding
     readonly property color primaryColor: branding.primaryColor
     readonly property color secondaryColor: branding.secondaryColor
@@ -179,6 +195,10 @@ ApplicationWindow {
                 welcomeTitle: branding.welcomeTitle
                 welcomeSubtitle: branding.welcomeSubtitle
                 installButtonText: branding.installButton
+                brandingCodename: branding.version || ""
+                brandingEdition: branding.edition || ""
+                websiteUrl: branding.websiteUrl
+                websiteLabel: branding.websiteLabel
 
                 showRequirements: engine.showRequirements
                 requirements: engine.requirementsModel
@@ -195,12 +215,19 @@ ApplicationWindow {
                 errorColor: root.errorColor
 
                 onInstallClicked: {
-                    engine.loadLocaleData()
+                    // Locale data already loaded at startup for early detection
                     currentStep = 1
                 }
 
                 onRequirementsChecked: {
                     engine.checkRequirements()
+                }
+
+                onConfigureNetworkRequested: {
+                    console.log("Launching network configuration...")
+                    engine.launchNetworkSettings()
+                    // Schedule a recheck after a delay to allow user to configure network
+                    networkRecheckTimer.start()
                 }
 
                 Behavior on opacity {
@@ -216,11 +243,14 @@ ApplicationWindow {
                 opacity: visible ? 1 : 0
 
                 localesModel: engine.localesModel
+                localesModelNative: engine.localesModelNative
                 timezonesModel: engine.timezonesModel
                 keymapsModel: engine.keymapsModel
+                keyboardVariantsModel: engine.keyboardVariantsModel
                 selectedLocale: engine.selectedLocale
                 selectedTimezone: engine.selectedTimezone
                 selectedKeymap: engine.selectedKeymap
+                selectedKeyboardVariant: engine.selectedKeyboardVariant
 
                 primaryColor: root.primaryColor
                 backgroundColor: root.backgroundColor
@@ -229,14 +259,38 @@ ApplicationWindow {
                 textMutedColor: root.textMutedColor
                 accentColor: root.accentColor
 
+                // Auto-detect and apply UI language when LocaleView opens
+                onVisibleChanged: {
+                    if (visible && engine.detectedLocale) {
+                        // Extract base locale (e.g., "fr_FR" from "fr_FR.UTF-8")
+                        var detectedBase = engine.detectedLocale.split(".")[0]
+                        var currentBase = translator.currentLocale.split(".")[0]
+
+                        // Only switch if different and translator is available
+                        if (detectedBase !== currentBase && translator) {
+                            console.log("Auto-switching UI language to:", detectedBase)
+                            translator.setLocale(detectedBase)
+                        }
+                    }
+                }
+
                 onLocaleSelected: function(locale) {
                     engine.setSelectedLocale(locale)
+                    // Trigger live language switching
+                    if (translator) {
+                        // Normalize locale for translator (remove .UTF-8 suffix)
+                        var normalizedLocale = locale.split(".")[0]
+                        translator.setLocale(normalizedLocale)
+                    }
                 }
                 onTimezoneSelected: function(timezone) {
                     engine.setSelectedTimezone(timezone)
                 }
                 onKeymapSelected: function(keymap) {
                     engine.setSelectedKeymap(keymap)
+                }
+                onKeyboardVariantSelected: function(variant) {
+                    engine.setSelectedKeyboardVariant(variant)
                 }
 
                 Behavior on opacity {
@@ -385,6 +439,8 @@ ApplicationWindow {
                 distroName: branding.name
                 distroLogo: branding.logoUrl
                 backgroundUrl: branding.backgroundUrl
+                websiteUrl: branding.websiteUrl
+                websiteLabel: branding.websiteLabel
 
                 primaryColor: root.primaryColor
                 backgroundColor: root.backgroundColor
@@ -411,7 +467,7 @@ ApplicationWindow {
             visible: currentStep >= 1 && currentStep <= 4
 
             Text {
-                text: "Powered by Omnis Installer"
+                text: qsTr("Powered by Omnis Installer")
                 font.pixelSize: 12
                 color: textMutedColor
             }
@@ -420,7 +476,7 @@ ApplicationWindow {
 
             // Back button
             Button {
-                text: "Back"
+                text: qsTr("Back")
                 onClicked: navigateBack()
 
                 background: Rectangle {
@@ -444,7 +500,7 @@ ApplicationWindow {
 
             // Next/Install button
             Button {
-                text: currentStep === 4 ? "Install" : "Next"
+                text: currentStep === 4 ? qsTr("Install") : qsTr("Next")
                 enabled: canProceedToNext()
 
                 background: Rectangle {
@@ -466,6 +522,39 @@ ApplicationWindow {
                 }
 
                 onClicked: navigateNext()
+            }
+
+            Item { Layout.fillWidth: true }
+
+            // Website link (right-aligned)
+            Text {
+                text: branding.websiteLabel || branding.websiteUrl
+                font.pixelSize: 12
+                color: accentColor
+
+                MouseArea {
+                    id: websiteLinkMouseArea
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    hoverEnabled: true
+                    onClicked: Qt.openUrlExternally(branding.websiteUrl)
+                }
+
+                // Underline on hover
+                Rectangle {
+                    width: parent.width
+                    height: 1
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: -2
+                    color: accentColor
+                    visible: websiteLinkMouseArea.containsMouse
+                }
+
+                // Brighten on hover
+                opacity: websiteLinkMouseArea.containsMouse ? 0.8 : 1.0
+                Behavior on opacity {
+                    NumberAnimation { duration: 150 }
+                }
             }
         }
     }
@@ -546,6 +635,22 @@ ApplicationWindow {
         }
     }
 
+    // Translator connections for live language switching
+    Connections {
+        target: translator
+
+        function onLanguageChanged() {
+            console.log("Language changed to:", translator.currentLocale)
+            // QML will automatically retranslate qsTr() strings
+            // Also retranslate branding strings from Python translator
+            branding.retranslate()
+        }
+
+        function onLocaleChanged(locale) {
+            console.log("Locale updated:", locale)
+        }
+    }
+
     // Keyboard shortcuts
     Shortcut {
         sequence: "Escape"
@@ -559,11 +664,34 @@ ApplicationWindow {
         onActivated: navigateNext()
     }
 
+    // Timer to recheck network status after user configures WiFi
+    Timer {
+        id: networkRecheckTimer
+        interval: 5000  // 5 seconds delay to allow network connection
+        repeat: false
+        onTriggered: {
+            console.log("Rechecking internet connectivity...")
+            engine.recheckInternetStatus()
+        }
+    }
+
     // Initialize
     Component.onCompleted: {
         console.log("Omnis Installer started")
         console.log("Debug mode:", engine.debugMode)
         console.log("Dry run:", engine.dryRun)
+
+        // Early locale detection for immediate UI translation
+        engine.loadLocaleData()
+
+        // Apply detected locale for UI translation
+        if (engine.detectedLocale && translator) {
+            var detectedBase = engine.detectedLocale.split(".")[0]
+            console.log("Early locale detection - applying UI language:", detectedBase)
+            translator.setLocale(detectedBase)
+        }
+
+        // Check system requirements
         engine.checkRequirements()
     }
 }

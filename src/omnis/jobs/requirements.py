@@ -131,37 +131,56 @@ class SystemRequirementsChecker:
         """
         result = RequirementsResult()
 
-        # Hardware checks
+        # =================================================================
+        # Order: CPU → RAM → Storage → GPU → Boot → Network → Power
+        # =================================================================
+
+        # 1. CPU checks (cores first, then architecture)
+        cpu_config = self.config.get("cpu", {})
+        if isinstance(cpu_config, dict):
+            # CPU Cores (most important for gaming performance)
+            cpu_cores_cfg = cpu_config.get("cpu_cores", {})
+            if isinstance(cpu_cores_cfg, dict) and cpu_cores_cfg.get("enabled", True):
+                result.checks.append(self._check_cpu_cores(cpu_cores_cfg))
+
+            # CPU Architecture
+            cpu_arch_cfg = cpu_config.get("cpu_arch", {})
+            if isinstance(cpu_arch_cfg, dict) and cpu_arch_cfg.get("enabled", True):
+                result.checks.append(self._check_cpu_architecture_v2(cpu_arch_cfg))
+
+        # Legacy support for old cpu_arch format
+        elif self._is_enabled("cpu_arch"):
+            result.checks.append(self._check_cpu_architecture())
+
+        # 2. RAM
         if self._is_enabled("ram"):
             result.checks.append(self._check_ram())
 
+        # 3. Storage (Disk)
         if self._is_enabled("disk"):
             result.checks.append(self._check_disk_space())
 
-        if self._is_enabled("cpu_arch"):
-            result.checks.append(self._check_cpu_architecture())
+        # 4. GPU
+        if self._is_enabled("gpu"):
+            result.checks.append(self._check_gpu())
 
-        # Boot checks
+        # 5. Boot checks (EFI, Secure Boot)
         if self._is_enabled("efi"):
             result.checks.append(self._check_efi_mode())
 
         if self._is_enabled("secure_boot"):
             result.checks.append(self._check_secure_boot())
 
-        # Connectivity checks
+        # 6. Network connectivity
         if self._is_enabled("internet"):
             result.checks.append(self._check_internet())
 
-        # Power check (combined power source + battery for laptops only)
+        # 7. Power check (laptops only)
         if self._is_enabled("power"):
             power_check = self._check_power()
             # Only add if not skipped (i.e., it's a laptop)
             if power_check.status != RequirementStatus.SKIP:
                 result.checks.append(power_check)
-
-        # GPU check
-        if self._is_enabled("gpu"):
-            result.checks.append(self._check_gpu())
 
         return result
 
@@ -290,7 +309,7 @@ class SystemRequirementsChecker:
             )
 
     def _check_cpu_architecture(self) -> RequirementCheck:
-        """Check CPU architecture."""
+        """Check CPU architecture (legacy format)."""
         cfg = self._get_check_config("cpu_arch")
         require_x86_64 = cfg.get("require_x86_64", True)
 
@@ -322,6 +341,98 @@ class SystemRequirementsChecker:
                 description="CPU Architecture",
                 status=RequirementStatus.SKIP,
                 details=f"Could not check architecture: {e}",
+            )
+
+    def _check_cpu_architecture_v2(self, cfg: dict[str, Any]) -> RequirementCheck:
+        """
+        Check CPU architecture (new format with sub-section config).
+
+        Args:
+            cfg: Configuration dict with 'required' key (default: x86_64)
+        """
+        required_arch = cfg.get("required", "x86_64")
+
+        try:
+            arch = os.uname().machine
+
+            if arch == required_arch:
+                status = RequirementStatus.PASS
+                details = f"{arch} architecture detected"
+            else:
+                status = RequirementStatus.FAIL
+                details = f"{required_arch} architecture required, detected: {arch}"
+
+            return RequirementCheck(
+                name="cpu_arch",
+                description="CPU Architecture",
+                status=status,
+                current_value=arch,
+                required_value=required_arch,
+                details=details,
+            )
+
+        except Exception as e:
+            return RequirementCheck(
+                name="cpu_arch",
+                description="CPU Architecture",
+                status=RequirementStatus.SKIP,
+                details=f"Could not check architecture: {e}",
+            )
+
+    def _check_cpu_cores(self, cfg: dict[str, Any]) -> RequirementCheck:
+        """
+        Check CPU core count.
+
+        Args:
+            cfg: Configuration dict with 'min_cores' and 'warn_cores' keys
+
+        Thresholds:
+        - Below min_cores: FAIL
+        - Between min_cores and warn_cores: WARN
+        - Above warn_cores: PASS
+        """
+        min_cores = cfg.get("min_cores", 4)
+        warn_cores = cfg.get("warn_cores", 8)
+        recommended_cores = cfg.get("recommended_cores", 8)
+
+        try:
+            # Get CPU core count
+            cpu_count = os.cpu_count()
+            if cpu_count is None:
+                # Fallback: read from /proc/cpuinfo
+                with open("/proc/cpuinfo") as f:
+                    cpu_count = sum(1 for line in f if line.startswith("processor"))
+
+            current_cores = cpu_count or 0
+
+            # Determine status based on thresholds
+            if current_cores < min_cores:
+                status = RequirementStatus.FAIL
+                details = f"Insufficient CPU cores: {current_cores} detected, minimum {min_cores} required"
+            elif current_cores < warn_cores:
+                status = RequirementStatus.WARN
+                details = f"CPU cores below recommended: {current_cores} detected, {warn_cores} recommended"
+            else:
+                status = RequirementStatus.PASS
+                details = "Sufficient CPU cores for optimal performance"
+
+            return RequirementCheck(
+                name="cpu_cores",
+                description="CPU Cores",
+                status=status,
+                current_value=f"{current_cores} cores",
+                required_value=f"{min_cores} cores",
+                recommended_value=f"{recommended_cores} cores",
+                details=details,
+            )
+
+        except Exception as e:
+            logger.warning(f"Could not check CPU cores: {e}")
+            return RequirementCheck(
+                name="cpu_cores",
+                description="CPU Cores",
+                status=RequirementStatus.SKIP,
+                details=f"Could not check CPU cores: {e}",
             )
 
     def _check_efi_mode(self) -> RequirementCheck:

@@ -29,30 +29,205 @@ class LocaleJob(BaseJob):
     name = "locale"
     description = "System locale, timezone and keyboard configuration"
 
-    # Common locales available on most Linux systems
+    # Comprehensive list of locales available on most Linux systems
+    # Sorted by language family for better organization
     COMMON_LOCALES = [
+        # English variants
         "en_US.UTF-8",
         "en_GB.UTF-8",
+        "en_CA.UTF-8",
+        "en_AU.UTF-8",
+        "en_NZ.UTF-8",
+        "en_IE.UTF-8",
+        "en_ZA.UTF-8",
+        "en_IN.UTF-8",
+        # French variants
         "fr_FR.UTF-8",
+        "fr_CA.UTF-8",
+        "fr_BE.UTF-8",
+        "fr_CH.UTF-8",
+        "fr_LU.UTF-8",
+        # German variants
         "de_DE.UTF-8",
+        "de_AT.UTF-8",
+        "de_CH.UTF-8",
+        "de_LU.UTF-8",
+        "de_LI.UTF-8",
+        # Spanish variants
         "es_ES.UTF-8",
+        "es_MX.UTF-8",
+        "es_AR.UTF-8",
+        "es_CO.UTF-8",
+        "es_CL.UTF-8",
+        "es_PE.UTF-8",
+        "es_VE.UTF-8",
+        # Italian
         "it_IT.UTF-8",
+        "it_CH.UTF-8",
+        # Portuguese variants
         "pt_BR.UTF-8",
+        "pt_PT.UTF-8",
+        # Russian and Cyrillic languages
         "ru_RU.UTF-8",
+        "uk_UA.UTF-8",
+        "be_BY.UTF-8",
+        "bg_BG.UTF-8",
+        "sr_RS.UTF-8",
+        "mk_MK.UTF-8",
+        # Chinese variants
         "zh_CN.UTF-8",
+        "zh_TW.UTF-8",
+        "zh_HK.UTF-8",
+        "zh_SG.UTF-8",
+        # Japanese
         "ja_JP.UTF-8",
+        # Korean
+        "ko_KR.UTF-8",
+        # Arabic variants
+        "ar_SA.UTF-8",
+        "ar_EG.UTF-8",
+        "ar_MA.UTF-8",
+        "ar_DZ.UTF-8",
+        "ar_TN.UTF-8",
+        "ar_AE.UTF-8",
+        # Hebrew
+        "he_IL.UTF-8",
+        # Persian
+        "fa_IR.UTF-8",
+        # Hindi and Indian languages
+        "hi_IN.UTF-8",
+        "bn_IN.UTF-8",
+        "bn_BD.UTF-8",
+        "ta_IN.UTF-8",
+        "te_IN.UTF-8",
+        "mr_IN.UTF-8",
+        "gu_IN.UTF-8",
+        "kn_IN.UTF-8",
+        "ml_IN.UTF-8",
+        "pa_IN.UTF-8",
+        # Thai
+        "th_TH.UTF-8",
+        # Vietnamese
+        "vi_VN.UTF-8",
+        # Indonesian and Malay
+        "id_ID.UTF-8",
+        "ms_MY.UTF-8",
+        # Turkish
+        "tr_TR.UTF-8",
+        # Greek
+        "el_GR.UTF-8",
+        "el_CY.UTF-8",
+        # Polish
+        "pl_PL.UTF-8",
+        # Dutch
+        "nl_NL.UTF-8",
+        "nl_BE.UTF-8",
+        # Nordic languages
+        "sv_SE.UTF-8",
+        "sv_FI.UTF-8",
+        "da_DK.UTF-8",
+        "nb_NO.UTF-8",
+        "nn_NO.UTF-8",
+        "fi_FI.UTF-8",
+        "is_IS.UTF-8",
+        # Czech and Slovak
+        "cs_CZ.UTF-8",
+        "sk_SK.UTF-8",
+        # Hungarian
+        "hu_HU.UTF-8",
+        # Romanian
+        "ro_RO.UTF-8",
+        "ro_MD.UTF-8",
+        # Baltic languages
+        "lt_LT.UTF-8",
+        "lv_LV.UTF-8",
+        "et_EE.UTF-8",
+        # Slavic languages
+        "sl_SI.UTF-8",
+        "hr_HR.UTF-8",
+        "bs_BA.UTF-8",
+        # Catalan
+        "ca_ES.UTF-8",
+        # Basque
+        "eu_ES.UTF-8",
+        # Galician
+        "gl_ES.UTF-8",
+        # Welsh
+        "cy_GB.UTF-8",
+        # Irish
+        "ga_IE.UTF-8",
+        # Albanian
+        "sq_AL.UTF-8",
+        # Georgian
+        "ka_GE.UTF-8",
+        # Armenian
+        "hy_AM.UTF-8",
+        # Kazakh
+        "kk_KZ.UTF-8",
+        # Uzbek
+        "uz_UZ.UTF-8",
+        # Afrikaans
+        "af_ZA.UTF-8",
+        # Swahili
+        "sw_KE.UTF-8",
+        # Filipino
+        "fil_PH.UTF-8",
+        # Esperanto
+        "eo.UTF-8",
     ]
 
-    # Common keyboard layouts
+    # Comprehensive keyboard layouts (XKB-compatible)
     COMMON_KEYMAPS = [
+        # Major layouts
         "us",
-        "uk",
+        "gb",
         "fr",
         "de",
         "es",
         "it",
         "pt",
+        "br",
         "ru",
+        "jp",
+        "kr",
+        "cn",
+        # Middle Eastern
+        "ara",
+        "il",
+        "tr",
+        "fa",
+        # European
+        "pl",
+        "nl",
+        "se",
+        "no",
+        "dk",
+        "fi",
+        "cz",
+        "sk",
+        "hu",
+        "ro",
+        "gr",
+        "ua",
+        "bg",
+        "rs",
+        "hr",
+        "si",
+        "lt",
+        "lv",
+        "ee",
+        "ch",
+        "be",
+        "ca",
+        "ie",
+        "is",
+        # Asian
+        "in",
+        "th",
+        "vn",
+        "id",
+        # Special layouts
+        "latam",
         "dvorak",
     ]
 

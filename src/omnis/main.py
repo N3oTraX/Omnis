@@ -235,6 +235,7 @@ def run_ui_mode(
 
     from omnis.core.engine import Engine
     from omnis.gui.bridge import EngineBridge
+    from omnis.gui.translator_proxy import TranslatorProxy
     from omnis.launcher import DEFAULT_SOCKET_PATH, EngineProcess
 
     # Load configuration for branding info
@@ -287,9 +288,13 @@ def run_ui_mode(
             # For now, fall back to direct bridge
             bridge = EngineBridge(engine, theme_base, debug=debug, dry_run=dry_run)
 
-        # Expose bridge to QML
+        # Create translator proxy for live language switching
+        translator_proxy = TranslatorProxy(engine=qml_engine)
+
+        # Expose bridge and translator to QML
         qml_engine.rootContext().setContextProperty("engine", bridge)
         qml_engine.rootContext().setContextProperty("branding", bridge.branding_proxy)
+        qml_engine.rootContext().setContextProperty("translator", translator_proxy)
 
         # Load QML
         try:
