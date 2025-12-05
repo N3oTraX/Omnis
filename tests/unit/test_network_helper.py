@@ -203,39 +203,45 @@ class TestLaunchNetworkSettings:
 class TestCheckInternetConnectivity:
     """Tests for check_internet_connectivity method."""
 
+    def _create_socket_mock(self, connect_side_effect: object = None) -> MagicMock:
+        """Create a properly configured socket mock for context manager usage."""
+        mock_socket_instance = MagicMock()
+        if connect_side_effect is not None:
+            mock_socket_instance.connect.side_effect = connect_side_effect
+        # Configure context manager to return the mock instance
+        mock_socket_instance.__enter__ = MagicMock(return_value=mock_socket_instance)
+        mock_socket_instance.__exit__ = MagicMock(return_value=False)
+        return mock_socket_instance
+
     def test_internet_available(self) -> None:
         """Test returns True when internet is available."""
-        mock_socket = MagicMock()
+        mock_socket = self._create_socket_mock()
         with patch("socket.socket", return_value=mock_socket):
             result = NetworkHelper.check_internet_connectivity(timeout=1.0)
             assert result is True
             mock_socket.connect.assert_called_once()
-            mock_socket.close.assert_called_once()
 
     def test_no_internet_connection(self) -> None:
         """Test returns False when no internet connection."""
-        mock_socket = MagicMock()
-        mock_socket.connect.side_effect = OSError("No route to host")
-
+        # All three hosts fail with OSError
+        mock_socket = self._create_socket_mock(connect_side_effect=OSError("No route to host"))
         with patch("socket.socket", return_value=mock_socket):
             result = NetworkHelper.check_internet_connectivity(timeout=1.0)
             assert result is False
 
     def test_timeout_error(self) -> None:
         """Test returns False on timeout."""
-        mock_socket = MagicMock()
-        mock_socket.connect.side_effect = TimeoutError()
-
+        mock_socket = self._create_socket_mock(connect_side_effect=TimeoutError())
         with patch("socket.socket", return_value=mock_socket):
             result = NetworkHelper.check_internet_connectivity(timeout=1.0)
             assert result is False
 
     def test_tries_multiple_hosts(self) -> None:
         """Test that multiple hosts are tried before giving up."""
-        mock_socket = MagicMock()
-        # First two hosts fail, third succeeds
-        mock_socket.connect.side_effect = [OSError(), OSError(), None]
-
+        mock_socket = self._create_socket_mock(
+            # First two hosts fail, third succeeds
+            connect_side_effect=[OSError(), OSError(), None]
+        )
         with patch("socket.socket", return_value=mock_socket):
             result = NetworkHelper.check_internet_connectivity(timeout=1.0)
             assert result is True

@@ -125,9 +125,7 @@ class NetworkHelper:
         return DesktopEnvironment.UNKNOWN
 
     @classmethod
-    def get_network_settings_command(
-        cls, de: DesktopEnvironment | None = None
-    ) -> list[str] | None:
+    def get_network_settings_command(cls, de: DesktopEnvironment | None = None) -> list[str] | None:
         """Get the network settings command for the given desktop environment.
 
         Args:

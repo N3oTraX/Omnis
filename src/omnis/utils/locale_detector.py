@@ -159,9 +159,7 @@ EFI_LANG_TO_LOCALE: dict[str, str] = {
 }
 
 # English locales to ignore for cmdline/EFI detection (prefer geoip)
-ENGLISH_DEFAULTS = frozenset(
-    {"en_US.UTF-8", "en_US", "en-US", "C", "C.UTF-8", "POSIX", ""}
-)
+ENGLISH_DEFAULTS = frozenset({"en_US.UTF-8", "en_US", "en-US", "C", "C.UTF-8", "POSIX", ""})
 
 
 @dataclass(frozen=True)
@@ -275,9 +273,7 @@ class LocaleDetector:
                 headers={"User-Agent": self.GEOIP_USER_AGENT},
             )
 
-            with urllib.request.urlopen(
-                req, timeout=self.config.geoip_timeout
-            ) as response:
+            with urllib.request.urlopen(req, timeout=self.config.geoip_timeout) as response:
                 import json
 
                 data = json.loads(response.read().decode("utf-8"))

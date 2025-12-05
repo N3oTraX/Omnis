@@ -22,35 +22,98 @@ TRANSLATIONS_DIR = Path(__file__).parent.parent.parent / "src" / "omnis" / "gui"
 # All locales declared in the bridge.py LOCALE_NATIVE_NAMES
 # This list should match the locales defined in bridge.py
 DECLARED_LOCALES = [
-    "en_US", "en_GB", "en_CA", "en_AU", "en_NZ", "en_IE", "en_ZA", "en_IN",
-    "fr_FR", "fr_CA", "fr_BE", "fr_CH", "fr_LU",
-    "de_DE", "de_AT", "de_CH", "de_LU", "de_LI",
-    "es_ES", "es_MX", "es_AR", "es_CO", "es_CL", "es_PE", "es_VE",
-    "it_IT", "it_CH",
-    "pt_BR", "pt_PT",
-    "ru_RU", "uk_UA", "be_BY", "bg_BG", "sr_RS", "mk_MK",
-    "zh_CN", "zh_TW", "zh_HK", "zh_SG",
+    "en_US",
+    "en_GB",
+    "en_CA",
+    "en_AU",
+    "en_NZ",
+    "en_IE",
+    "en_ZA",
+    "en_IN",
+    "fr_FR",
+    "fr_CA",
+    "fr_BE",
+    "fr_CH",
+    "fr_LU",
+    "de_DE",
+    "de_AT",
+    "de_CH",
+    "de_LU",
+    "de_LI",
+    "es_ES",
+    "es_MX",
+    "es_AR",
+    "es_CO",
+    "es_CL",
+    "es_PE",
+    "es_VE",
+    "it_IT",
+    "it_CH",
+    "pt_BR",
+    "pt_PT",
+    "ru_RU",
+    "uk_UA",
+    "be_BY",
+    "bg_BG",
+    "sr_RS",
+    "mk_MK",
+    "zh_CN",
+    "zh_TW",
+    "zh_HK",
+    "zh_SG",
     "ja_JP",
     "ko_KR",
-    "ar_SA", "ar_EG", "ar_MA", "ar_DZ", "ar_TN", "ar_AE",
+    "ar_SA",
+    "ar_EG",
+    "ar_MA",
+    "ar_DZ",
+    "ar_TN",
+    "ar_AE",
     "he_IL",
     "fa_IR",
-    "hi_IN", "bn_IN", "bn_BD", "ta_IN", "te_IN", "mr_IN", "gu_IN", "kn_IN", "ml_IN", "pa_IN",
+    "hi_IN",
+    "bn_IN",
+    "bn_BD",
+    "ta_IN",
+    "te_IN",
+    "mr_IN",
+    "gu_IN",
+    "kn_IN",
+    "ml_IN",
+    "pa_IN",
     "th_TH",
     "vi_VN",
-    "id_ID", "ms_MY",
+    "id_ID",
+    "ms_MY",
     "tr_TR",
-    "el_GR", "el_CY",
+    "el_GR",
+    "el_CY",
     "pl_PL",
-    "nl_NL", "nl_BE",
-    "sv_SE", "sv_FI", "da_DK", "nb_NO", "nn_NO", "fi_FI", "is_IS",
-    "cs_CZ", "sk_SK",
+    "nl_NL",
+    "nl_BE",
+    "sv_SE",
+    "sv_FI",
+    "da_DK",
+    "nb_NO",
+    "nn_NO",
+    "fi_FI",
+    "is_IS",
+    "cs_CZ",
+    "sk_SK",
     "hu_HU",
-    "ro_RO", "ro_MD",
-    "lt_LT", "lv_LV", "et_EE",
-    "sl_SI", "hr_HR", "bs_BA",
-    "ca_ES", "eu_ES", "gl_ES",
-    "cy_GB", "ga_IE",
+    "ro_RO",
+    "ro_MD",
+    "lt_LT",
+    "lv_LV",
+    "et_EE",
+    "sl_SI",
+    "hr_HR",
+    "bs_BA",
+    "ca_ES",
+    "eu_ES",
+    "gl_ES",
+    "cy_GB",
+    "ga_IE",
     "sq_AL",
 ]
 
@@ -127,7 +190,9 @@ class TestTranslationFileExistence:
         qm_locales = get_existing_qm_locales()
 
         missing_qm = ts_locales - qm_locales
-        assert not missing_qm, f".ts files without .qm: {missing_qm}. Run: scripts/compile_translations.sh"
+        assert not missing_qm, (
+            f".ts files without .qm: {missing_qm}. Run: scripts/compile_translations.sh"
+        )
 
     def test_qm_files_are_not_empty(self) -> None:
         """Verify .qm files for core locales are not empty (have actual content)."""
@@ -141,7 +206,9 @@ class TestTranslationFileExistence:
                 if locale in CORE_LOCALES:
                     empty_files.append(locale)
 
-        assert not empty_files, f"Empty .qm files for core locales: {empty_files}. Add translations to .ts files."
+        assert not empty_files, (
+            f"Empty .qm files for core locales: {empty_files}. Add translations to .ts files."
+        )
 
     def test_extended_locales_have_ts_files(self) -> None:
         """Verify extended locales have .ts files (may be incomplete)."""
@@ -177,9 +244,10 @@ class TestTranslationFileFormat:
 
         try:
             content = ts_file.read_text(encoding="utf-8")
-            assert '<?xml version="1.0" encoding="utf-8"?>' in content.lower() or \
-                   '<?xml version="1.0" encoding="UTF-8"?>' in content, \
-                   f"Missing UTF-8 encoding declaration in omnis_{locale}.ts"
+            assert (
+                '<?xml version="1.0" encoding="utf-8"?>' in content.lower()
+                or '<?xml version="1.0" encoding="UTF-8"?>' in content
+            ), f"Missing UTF-8 encoding declaration in omnis_{locale}.ts"
         except UnicodeDecodeError:
             pytest.fail(f"omnis_{locale}.ts is not valid UTF-8")
 
@@ -193,7 +261,7 @@ class TestTranslationFileFormat:
         content = ts_file.read_text(encoding="utf-8")
 
         # Pattern for Unicode escape sequences
-        escape_pattern = r'\\u[0-9a-fA-F]{4}'
+        escape_pattern = r"\\u[0-9a-fA-F]{4}"
         matches = re.findall(escape_pattern, content)
 
         if matches:
@@ -256,8 +324,7 @@ class TestTranslationContent:
         if len(mismatches) > 5:
             sample = mismatches[:5]
             pytest.fail(
-                f"en_US has {len(mismatches)} source!=translation mismatches. "
-                f"Sample: {sample}"
+                f"en_US has {len(mismatches)} source!=translation mismatches. Sample: {sample}"
             )
 
 

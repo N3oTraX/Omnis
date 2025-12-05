@@ -21,9 +21,7 @@ except ImportError:
     HAS_LOCALE_DETECTOR = False
 
 # Skip entire module if omnis locale detector is not available
-pytestmark = pytest.mark.skipif(
-    not HAS_LOCALE_DETECTOR, reason="LocaleDetector not available"
-)
+pytestmark = pytest.mark.skipif(not HAS_LOCALE_DETECTOR, reason="LocaleDetector not available")
 
 
 # =============================================================================
@@ -182,9 +180,7 @@ class TestGeoIPDetection:
         ).encode()
 
         with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.return_value.__enter__.return_value.read.return_value = (
-                mock_response
-            )
+            mock_urlopen.return_value.__enter__.return_value.read.return_value = mock_response
             detector = LocaleDetector()
             result = detector._detect_geoip()
 
@@ -202,9 +198,7 @@ class TestGeoIPDetection:
         ).encode()
 
         with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.return_value.__enter__.return_value.read.return_value = (
-                mock_response
-            )
+            mock_urlopen.return_value.__enter__.return_value.read.return_value = mock_response
             detector = LocaleDetector()
             result = detector._detect_geoip()
 
@@ -233,14 +227,10 @@ class TestGeoIPDetection:
 
     def test_geoip_error_status(self) -> None:
         """GeoIP should return None on error status."""
-        mock_response = json.dumps(
-            {"status": "fail", "message": "private range"}
-        ).encode()
+        mock_response = json.dumps({"status": "fail", "message": "private range"}).encode()
 
         with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.return_value.__enter__.return_value.read.return_value = (
-                mock_response
-            )
+            mock_urlopen.return_value.__enter__.return_value.read.return_value = mock_response
             detector = LocaleDetector()
             result = detector._detect_geoip()
 
@@ -253,9 +243,7 @@ class TestGeoIPDetection:
         ).encode()
 
         with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.return_value.__enter__.return_value.read.return_value = (
-                mock_response
-            )
+            mock_urlopen.return_value.__enter__.return_value.read.return_value = mock_response
             detector = LocaleDetector()
             result = detector._detect_geoip()
 
@@ -443,9 +431,7 @@ class TestEFIDetection:
             patch.object(Path, "exists", return_value=True),
             patch("subprocess.run") as mock_run,
         ):
-            mock_run.return_value = Mock(
-                returncode=1, stdout="", stderr="Variable not found"
-            )
+            mock_run.return_value = Mock(returncode=1, stdout="", stderr="Variable not found")
             detector = LocaleDetector()
             result = detector._detect_efi()
 
@@ -481,9 +467,7 @@ class TestCascadeFallback:
         ).encode()
 
         with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.return_value.__enter__.return_value.read.return_value = (
-                mock_response
-            )
+            mock_urlopen.return_value.__enter__.return_value.read.return_value = mock_response
             detector = LocaleDetector()
             result = detector.detect()
 
@@ -509,9 +493,7 @@ class TestCascadeFallback:
     def test_cascade_fallback_to_default(self) -> None:
         """Detection should fall back to default when all methods fail."""
         # Disable all detection methods except default
-        config = LocaleDetectorConfig(
-            geoip_enabled=False, cmdline_enabled=False, efi_enabled=False
-        )
+        config = LocaleDetectorConfig(geoip_enabled=False, cmdline_enabled=False, efi_enabled=False)
         detector = LocaleDetector(config)
         result = detector.detect()
 
@@ -550,9 +532,7 @@ class TestDisabledMethods:
 
     def test_cmdline_disabled(self) -> None:
         """Cmdline should be skipped when disabled."""
-        config = LocaleDetectorConfig(
-            geoip_enabled=False, cmdline_enabled=False, efi_enabled=False
-        )
+        config = LocaleDetectorConfig(geoip_enabled=False, cmdline_enabled=False, efi_enabled=False)
         detector = LocaleDetector(config)
 
         with patch.object(Path, "read_text") as mock_read:
@@ -561,9 +541,7 @@ class TestDisabledMethods:
 
     def test_efi_disabled(self) -> None:
         """EFI should be skipped when disabled."""
-        config = LocaleDetectorConfig(
-            geoip_enabled=False, cmdline_enabled=False, efi_enabled=False
-        )
+        config = LocaleDetectorConfig(geoip_enabled=False, cmdline_enabled=False, efi_enabled=False)
         detector = LocaleDetector(config)
 
         with patch("subprocess.run") as mock_run:
