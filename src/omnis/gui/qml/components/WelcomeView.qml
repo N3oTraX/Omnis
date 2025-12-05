@@ -19,6 +19,7 @@ Item {
     // Signals
     signal installClicked()
     signal requirementsChecked()
+    signal configureNetworkRequested()
 
     // External properties
     property string welcomeWallpaper: ""
@@ -32,6 +33,8 @@ Item {
     property var requirements: []
     property bool canProceed: true
     property bool isCheckingRequirements: false
+    property string websiteUrl: ""
+    property string websiteLabel: ""
 
     // Theme-based requirement icons (object with ram_pass, ram_warn, etc.)
     property var requirementIcons: ({})
@@ -301,10 +304,73 @@ Item {
             warningColor: root.warningColor
             errorColor: root.errorColor
 
+            // Propagate network configuration signal
+            onConfigureNetworkClicked: root.configureNetworkRequested()
+
             // Animation on show
             opacity: visible ? 1 : 0
             Behavior on opacity {
                 NumberAnimation { duration: 400; easing.type: Easing.OutCubic }
+            }
+        }
+    }
+
+    // Footer bar - transparent (anchored at bottom, aligned with Main.qml footer)
+    Item {
+        id: footerBar
+        anchors {
+            left: parent.left
+            right: parent.right
+            bottom: parent.bottom
+            margins: 0  // No additional margins - parent already has 32px from ColumnLayout
+        }
+        height: 48
+
+        RowLayout {
+            anchors.fill: parent
+            spacing: 16
+
+            // "Powered by Omnis Installer" (left)
+            Text {
+                text: qsTr("Powered by Omnis Installer")
+                font.pixelSize: 12
+                color: textMutedColor
+                Layout.alignment: Qt.AlignVCenter
+            }
+
+            Item { Layout.fillWidth: true }
+
+            // Website URL (right)
+            Text {
+                id: websiteLink
+                text: root.websiteLabel || root.websiteUrl
+                font.pixelSize: 12
+                color: primaryColor
+                visible: root.websiteUrl !== ""
+                Layout.alignment: Qt.AlignVCenter
+
+                MouseArea {
+                    id: footerWebsiteMouseArea
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    hoverEnabled: true
+                    onClicked: Qt.openUrlExternally(root.websiteUrl)
+                }
+
+                // Underline on hover
+                Rectangle {
+                    width: parent.width
+                    height: 1
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: -2
+                    color: primaryColor
+                    visible: footerWebsiteMouseArea.containsMouse
+                }
+
+                opacity: footerWebsiteMouseArea.containsMouse ? 0.7 : 1.0
+                Behavior on opacity {
+                    NumberAnimation { duration: 150 }
+                }
             }
         }
     }

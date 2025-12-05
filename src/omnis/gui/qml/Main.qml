@@ -197,6 +197,8 @@ ApplicationWindow {
                 installButtonText: branding.installButton
                 brandingCodename: branding.version || ""
                 brandingEdition: branding.edition || ""
+                websiteUrl: branding.websiteUrl
+                websiteLabel: branding.websiteLabel
 
                 showRequirements: engine.showRequirements
                 requirements: engine.requirementsModel
@@ -213,12 +215,19 @@ ApplicationWindow {
                 errorColor: root.errorColor
 
                 onInstallClicked: {
-                    engine.loadLocaleData()
+                    // Locale data already loaded at startup for early detection
                     currentStep = 1
                 }
 
                 onRequirementsChecked: {
                     engine.checkRequirements()
+                }
+
+                onConfigureNetworkRequested: {
+                    console.log("Launching network configuration...")
+                    engine.launchNetworkSettings()
+                    // Schedule a recheck after a delay to allow user to configure network
+                    networkRecheckTimer.start()
                 }
 
                 Behavior on opacity {
@@ -430,6 +439,8 @@ ApplicationWindow {
                 distroName: branding.name
                 distroLogo: branding.logoUrl
                 backgroundUrl: branding.backgroundUrl
+                websiteUrl: branding.websiteUrl
+                websiteLabel: branding.websiteLabel
 
                 primaryColor: root.primaryColor
                 backgroundColor: root.backgroundColor
@@ -456,7 +467,7 @@ ApplicationWindow {
             visible: currentStep >= 1 && currentStep <= 4
 
             Text {
-                text: "Powered by Omnis Installer"
+                text: qsTr("Powered by Omnis Installer")
                 font.pixelSize: 12
                 color: textMutedColor
             }
@@ -465,7 +476,7 @@ ApplicationWindow {
 
             // Back button
             Button {
-                text: "Back"
+                text: qsTr("Back")
                 onClicked: navigateBack()
 
                 background: Rectangle {
@@ -489,7 +500,7 @@ ApplicationWindow {
 
             // Next/Install button
             Button {
-                text: currentStep === 4 ? "Install" : "Next"
+                text: currentStep === 4 ? qsTr("Install") : qsTr("Next")
                 enabled: canProceedToNext()
 
                 background: Rectangle {
@@ -511,6 +522,39 @@ ApplicationWindow {
                 }
 
                 onClicked: navigateNext()
+            }
+
+            Item { Layout.fillWidth: true }
+
+            // Website link (right-aligned)
+            Text {
+                text: branding.websiteLabel || branding.websiteUrl
+                font.pixelSize: 12
+                color: accentColor
+
+                MouseArea {
+                    id: websiteLinkMouseArea
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    hoverEnabled: true
+                    onClicked: Qt.openUrlExternally(branding.websiteUrl)
+                }
+
+                // Underline on hover
+                Rectangle {
+                    width: parent.width
+                    height: 1
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: -2
+                    color: accentColor
+                    visible: websiteLinkMouseArea.containsMouse
+                }
+
+                // Brighten on hover
+                opacity: websiteLinkMouseArea.containsMouse ? 0.8 : 1.0
+                Behavior on opacity {
+                    NumberAnimation { duration: 150 }
+                }
             }
         }
     }
@@ -598,6 +642,8 @@ ApplicationWindow {
         function onLanguageChanged() {
             console.log("Language changed to:", translator.currentLocale)
             // QML will automatically retranslate qsTr() strings
+            // Also retranslate branding strings from Python translator
+            branding.retranslate()
         }
 
         function onLocaleChanged(locale) {
@@ -618,11 +664,34 @@ ApplicationWindow {
         onActivated: navigateNext()
     }
 
+    // Timer to recheck network status after user configures WiFi
+    Timer {
+        id: networkRecheckTimer
+        interval: 5000  // 5 seconds delay to allow network connection
+        repeat: false
+        onTriggered: {
+            console.log("Rechecking internet connectivity...")
+            engine.recheckInternetStatus()
+        }
+    }
+
     // Initialize
     Component.onCompleted: {
         console.log("Omnis Installer started")
         console.log("Debug mode:", engine.debugMode)
         console.log("Dry run:", engine.dryRun)
+
+        // Early locale detection for immediate UI translation
+        engine.loadLocaleData()
+
+        // Apply detected locale for UI translation
+        if (engine.detectedLocale && translator) {
+            var detectedBase = engine.detectedLocale.split(".")[0]
+            console.log("Early locale detection - applying UI language:", detectedBase)
+            translator.setLocale(detectedBase)
+        }
+
+        // Check system requirements
         engine.checkRequirements()
     }
 }

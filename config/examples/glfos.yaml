@@ -203,7 +203,7 @@ jobs:
         # Checks for active internet connection (for package updates).
         # PASS: Connected | WARN: Not connected (if recommended) | FAIL: Not connected (if required)
         internet:
-          enabled: false  # Disabled by default
+          enabled: true  # Enabled for GLF OS (NixOS requires network)
           # Whether internet is strictly required (FAIL if no connection)
           required: false
           # Whether to show warning if not connected

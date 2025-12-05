@@ -16,6 +16,7 @@ from omnis.i18n.translator import get_translator
 from omnis.jobs.locale import LocaleJob
 from omnis.jobs.requirements import SystemRequirementsChecker
 from omnis.utils.locale_detector import LocaleDetectionResult, LocaleDetector
+from omnis.utils.network_helper import NetworkHelper
 
 if TYPE_CHECKING:
     from omnis.core.engine import Engine
@@ -191,6 +192,9 @@ class InstallationWorker(QObject):
 class BrandingProxy(QObject):
     """Exposes branding configuration to QML."""
 
+    # Signal emitted when translatable text properties change
+    brandingChanged = Signal()
+
     def __init__(
         self, engine: Engine, theme_base: Path, parent: QObject | None = None, debug: bool = False
     ) -> None:
@@ -273,7 +277,7 @@ class BrandingProxy(QObject):
         """Muted text color."""
         return self._branding.colors.text_muted
 
-    @Property(str, constant=True)
+    @Property(str, notify=brandingChanged)
     def welcomeTitle(self) -> str:
         """Welcome screen title with i18n interpolation."""
         translator = get_translator()
@@ -284,7 +288,7 @@ class BrandingProxy(QObject):
             distro_name=self._branding.name,
         )
 
-    @Property(str, constant=True)
+    @Property(str, notify=brandingChanged)
     def welcomeSubtitle(self) -> str:
         """Welcome screen subtitle with i18n interpolation."""
         translator = get_translator()
@@ -297,7 +301,7 @@ class BrandingProxy(QObject):
             distro_tagline=tagline,
         )
 
-    @Property(str, constant=True)
+    @Property(str, notify=brandingChanged)
     def installButton(self) -> str:
         """Install button text with i18n interpolation."""
         translator = get_translator()
@@ -347,17 +351,11 @@ class BrandingProxy(QObject):
 
     @Property(str, constant=True)
     def websiteLabel(self) -> str:
-        """Display label for website link (falls back to URL if empty)."""
+        """Display label for website link (falls back to full URL if empty)."""
         label = self._branding.links.website_label
         if not label and self._branding.links.website:
-            # Extract domain from URL as fallback
-            url = self._branding.links.website
-            # Remove protocol and www prefix for cleaner display
-            for prefix in ("https://", "http://", "www."):
-                if url.startswith(prefix):
-                    url = url[len(prefix) :]
-            # Remove trailing slash
-            label = url.rstrip("/")
+            # Use full URL as fallback, only remove trailing slash
+            label = self._branding.links.website.rstrip("/")
         return label
 
     @Property(str, constant=True)
@@ -374,6 +372,18 @@ class BrandingProxy(QObject):
     def supportUrl(self) -> str:
         """Support/forum URL."""
         return self._branding.links.support
+
+    @Slot()
+    def retranslate(self) -> None:
+        """
+        Force re-evaluation of all translatable text properties.
+
+        Call this when the application language changes to update
+        all QML bindings that use branding text properties.
+        """
+        if self._debug:
+            print("[Branding] Retranslating branding strings...")
+        self.brandingChanged.emit()
 
 
 class EngineBridge(QObject):
@@ -395,6 +405,11 @@ class EngineBridge(QObject):
     jobCompleted = Signal(str, bool)  # job_name, success
     errorOccurred = Signal(str, str)  # job_name, error_message
     requirementsChanged = Signal()  # emitted when requirements check completes
+
+    # Network settings signals
+    networkSettingsLaunched = Signal(str)  # command that was launched
+    networkSettingsError = Signal(str)  # error message
+    internetStatusChanged = Signal(bool)  # connected: bool
 
     # Signals for user selections
     selectionsChanged = Signal()  # emitted when any selection changes
@@ -1144,13 +1159,21 @@ class EngineBridge(QObject):
 
     @Slot(str)
     def setSelectedLocale(self, locale: str) -> None:
-        """Set selected locale and update font if needed."""
+        """Set selected locale and update font/keymap if needed."""
         if self._selections.get("locale") != locale:
             old_locale = self._selections.get("locale", "en_US.UTF-8")
             self._selections["locale"] = locale
 
             if self._debug:
                 print(f"[Engine] Locale set to: {locale}")
+
+            # Auto-derive keymap from locale
+            derived_keymap = self._derive_keymap_from_locale(locale)
+            if self._selections.get("keymap") != derived_keymap:
+                self._selections["keymap"] = derived_keymap
+                self._update_keyboard_variants(derived_keymap)
+                if self._debug:
+                    print(f"[Engine] Keymap auto-derived to: {derived_keymap}")
 
             # Check if font needs to change (Latin <-> non-Latin transition)
             old_needs_unicode = self._needs_unicode_font(old_locale)
@@ -1562,3 +1585,213 @@ class EngineBridge(QObject):
         # The engine context will receive these during job execution
         # Jobs read from context.selections which we'll populate
         self._engine.set_selections(self._selections)
+
+    # =========================================================================
+    # Network Settings
+    # =========================================================================
+
+    @Slot()
+    def launchNetworkSettings(self) -> None:
+        """Launch the native network configuration tool."""
+        if self._debug:
+            print("[Engine] Launching network settings...")
+
+        success, message = NetworkHelper.launch_network_settings()
+
+        if success:
+            if self._debug:
+                print(f"[Engine] Network settings launched: {message}")
+            self.networkSettingsLaunched.emit(message)
+        else:
+            if self._debug:
+                print(f"[Engine] Network settings error: {message}")
+            self.networkSettingsError.emit(message)
+
+    @Slot(result=bool)
+    def checkInternetConnectivity(self) -> bool:
+        """Check if internet connectivity is available."""
+        connected = NetworkHelper.check_internet_connectivity()
+        if self._debug:
+            print(f"[Engine] Internet connectivity: {connected}")
+        self.internetStatusChanged.emit(connected)
+        return connected
+
+    @Slot()
+    def recheckInternetStatus(self) -> None:
+        """Re-check internet status and update requirements if changed."""
+        if self._debug:
+            print("[Engine] Re-checking internet status...")
+
+        # Check connectivity (this emits internetStatusChanged signal)
+        self.checkInternetConnectivity()
+
+        # Re-run requirements check to update the internet requirement status
+        if self._requirements_checker is not None:
+            self.checkRequirements()
+
+    # =========================================================================
+    # Locale to Keymap Derivation
+    # =========================================================================
+
+    # Mapping from locale prefix to keyboard layout
+    LOCALE_TO_KEYMAP: dict[str, str] = {
+        # English variants
+        "en_US": "us",
+        "en_GB": "gb",
+        "en_CA": "ca",
+        "en_AU": "us",  # Australia uses US layout
+        "en_NZ": "us",  # New Zealand uses US layout
+        "en_IE": "ie",
+        "en_ZA": "us",
+        "en_IN": "in",
+        # French variants
+        "fr_FR": "fr",
+        "fr_CA": "ca",
+        "fr_BE": "be",
+        "fr_CH": "ch",
+        "fr_LU": "fr",
+        # German variants
+        "de_DE": "de",
+        "de_AT": "de",
+        "de_CH": "ch",
+        "de_LU": "de",
+        "de_LI": "ch",
+        # Spanish variants
+        "es_ES": "es",
+        "es_MX": "latam",
+        "es_AR": "latam",
+        "es_CO": "latam",
+        "es_CL": "latam",
+        "es_PE": "latam",
+        "es_VE": "latam",
+        # Italian
+        "it_IT": "it",
+        "it_CH": "ch",
+        # Portuguese variants
+        "pt_BR": "br",
+        "pt_PT": "pt",
+        # Russian and Cyrillic
+        "ru_RU": "ru",
+        "uk_UA": "ua",
+        "be_BY": "by",
+        "bg_BG": "bg",
+        "sr_RS": "rs",
+        "mk_MK": "mk",
+        # Chinese
+        "zh_CN": "cn",
+        "zh_TW": "tw",
+        "zh_HK": "cn",
+        "zh_SG": "cn",
+        # Japanese
+        "ja_JP": "jp",
+        # Korean
+        "ko_KR": "kr",
+        # Arabic
+        "ar_SA": "ara",
+        "ar_EG": "ara",
+        "ar_MA": "ara",
+        "ar_DZ": "ara",
+        "ar_TN": "ara",
+        "ar_AE": "ara",
+        # Hebrew
+        "he_IL": "il",
+        # Persian
+        "fa_IR": "ir",
+        # Hindi and Indian
+        "hi_IN": "in",
+        "bn_IN": "in",
+        "bn_BD": "bd",
+        "ta_IN": "in",
+        "te_IN": "in",
+        # Thai
+        "th_TH": "th",
+        # Vietnamese
+        "vi_VN": "vn",
+        # Indonesian and Malay
+        "id_ID": "id",
+        "ms_MY": "my",
+        # Turkish
+        "tr_TR": "tr",
+        # Greek
+        "el_GR": "gr",
+        "el_CY": "gr",
+        # Polish
+        "pl_PL": "pl",
+        # Dutch
+        "nl_NL": "nl",
+        "nl_BE": "be",
+        # Nordic languages
+        "sv_SE": "se",
+        "sv_FI": "fi",
+        "da_DK": "dk",
+        "nb_NO": "no",
+        "nn_NO": "no",
+        "fi_FI": "fi",
+        "is_IS": "is",
+        # Czech and Slovak
+        "cs_CZ": "cz",
+        "sk_SK": "sk",
+        # Hungarian
+        "hu_HU": "hu",
+        # Romanian
+        "ro_RO": "ro",
+        "ro_MD": "ro",
+        # Baltic
+        "lt_LT": "lt",
+        "lv_LV": "lv",
+        "et_EE": "ee",
+        # Slavic
+        "sl_SI": "si",
+        "hr_HR": "hr",
+        "bs_BA": "ba",
+        # Catalan, Basque, Galician
+        "ca_ES": "es",
+        "eu_ES": "es",
+        "gl_ES": "es",
+        # Welsh, Irish
+        "cy_GB": "gb",
+        "ga_IE": "ie",
+        # Albanian
+        "sq_AL": "al",
+        # Georgian
+        "ka_GE": "ge",
+        # Armenian
+        "hy_AM": "am",
+        # Kazakh
+        "kk_KZ": "kz",
+        # Uzbek
+        "uz_UZ": "uz",
+        # Afrikaans
+        "af_ZA": "za",
+    }
+
+    def _derive_keymap_from_locale(self, locale: str) -> str:
+        """
+        Derive keyboard layout from locale.
+
+        Args:
+            locale: Locale string (e.g., "fr_FR.UTF-8", "de_DE.UTF-8")
+
+        Returns:
+            Keyboard layout code (e.g., "fr", "de", "us")
+        """
+        # Remove .UTF-8 suffix if present
+        locale_base = locale.replace(".UTF-8", "").replace(".utf8", "")
+
+        # Try exact match first
+        if locale_base in self.LOCALE_TO_KEYMAP:
+            return self.LOCALE_TO_KEYMAP[locale_base]
+
+        # Try matching just the language part (e.g., "fr" from "fr_FR")
+        lang_code = locale_base.split("_")[0]
+        for locale_prefix, keymap in self.LOCALE_TO_KEYMAP.items():
+            if locale_prefix.startswith(lang_code + "_"):
+                return keymap
+
+        # Default to US layout if no match
+        return "us"
+
+    @Slot(str, result=str)
+    def deriveKeymapFromLocale(self, locale: str) -> str:
+        """QML-accessible slot to derive keymap from locale."""
+        return self._derive_keymap_from_locale(locale)

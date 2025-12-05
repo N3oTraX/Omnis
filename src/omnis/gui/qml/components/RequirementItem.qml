@@ -12,6 +12,9 @@ import QtQuick.Layouts
 Rectangle {
     id: root
 
+    // Signals
+    signal configureNetworkClicked()
+
     // Required properties
     property string name: ""
     property string description: ""
@@ -173,6 +176,44 @@ Rectangle {
                 visible: details !== "" && (status === "fail" || status === "skip")
                 wrapMode: Text.WordWrap
                 width: parent.width
+            }
+
+            // Configure Network button (only for internet requirement when warn/fail)
+            Button {
+                id: configureNetworkButton
+                visible: root.name === "internet" && (root.status === "warn" || root.status === "fail")
+                text: qsTr("Configure Network")
+                font.pixelSize: 11
+
+                background: Rectangle {
+                    implicitWidth: 130
+                    implicitHeight: 28
+                    radius: 6
+                    color: configureNetworkButton.pressed ? Qt.darker(root.primaryColor, 1.2) :
+                           configureNetworkButton.hovered ? Qt.lighter(root.primaryColor, 1.1) : root.primaryColor
+                    border.color: Qt.lighter(root.primaryColor, 1.3)
+                    border.width: 1
+                }
+
+                contentItem: Row {
+                    spacing: 4
+                    anchors.centerIn: parent
+
+                    Text {
+                        text: "\ud83d\udcf6"  // WiFi emoji
+                        font.pixelSize: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                        text: configureNetworkButton.text
+                        font: configureNetworkButton.font
+                        color: root.textColor
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+
+                onClicked: root.configureNetworkClicked()
             }
         }
 

@@ -15,6 +15,9 @@ import QtQuick.Effects
 Rectangle {
     id: root
 
+    // Signals
+    signal configureNetworkClicked()
+
     // Properties from parent/backend
     property var requirements: []
     property bool canProceed: true
@@ -182,6 +185,9 @@ Rectangle {
                     successColor: root.successColor
                     warningColor: root.warningColor
                     errorColor: root.errorColor
+
+                    // Propagate network configuration signal
+                    onConfigureNetworkClicked: root.configureNetworkClicked()
                 }
             }
         }
