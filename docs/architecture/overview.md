@@ -59,7 +59,7 @@ class BaseJob(ABC):
         """Exécute le job. Retourne succès ou erreur."""
 
     @abstractmethod
-    def estimate_duration(self) -> int:
+    def estimate_time(self) -> int:
         """Estimation en secondes pour l'UI."""
 
     def validate(self, context: JobContext) -> JobResult:
@@ -247,17 +247,23 @@ jobs:
 - [x] Système i18n avec 37 locales
 - [x] Détection automatique de la locale
 - [x] Live language switching
-- [x] Phase 1 UI (tous les composants QML)
+- [x] Phase 1 UI (tous les composants QML intégrés)
 - [x] Network helper avec checks connectivité
 
-### En Cours 🔄
+### En Cours 🔄 (v0.4.2 - UsersView Integration)
 
-- [ ] Phase 2 UI (polish et animations)
-- [ ] Tests d'intégration UI/Engine end-to-end
-- [ ] Documentation utilisateur
+- [ ] Tests unitaires validation UsersView
+- [ ] Icons utilisateur (config/themes/glfos/icons/users/)
+- [ ] Integration complète Engine ↔ UsersView
+- [ ] Tests E2E UsersView ↔ UsersJob
 
 ### Planifié 📋
 
-- [ ] Support NixOS modules
-- [ ] Mode recovery/repair
-- [ ] Plugin system pour jobs custom
+- [ ] v0.4.3: PartitionView Polish
+- [ ] v0.4.4: SummaryView Polish
+- [ ] v0.4.5: ProgressView Polish
+- [ ] v0.4.6: FinishedView Polish
+- [ ] v0.7.0: UI Complete Validation
+- [ ] v1.0.0: GLFOS Installation Ready
+
+Roadmap complet : [`docs/roadmap.md`](roadmap.md)

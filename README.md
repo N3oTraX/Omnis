@@ -432,9 +432,19 @@ Thèmes :
 | v0.3.0 | WelcomeJob + Requirements | ✅ Terminé |
 | v0.4.0 | Jobs de base + Phase 1 UI | ✅ Terminé |
 | v0.4.1 | i18n + Locale Detection | ✅ Terminé |
-| v0.4.2 | Stabilisation + Polish | 🔄 En cours |
-| v0.5.0 | UI Wizard complet | 🔲 À faire |
-| v1.0.0 | Release stable | 🔲 À faire |
+| v0.4.2 | UsersView Integration | 🔄 En cours |
+| v0.4.3 | PartitionView Polish | 🔲 À faire |
+| v0.4.4 | SummaryView Polish | 🔲 À faire |
+| v0.4.5 | ProgressView Polish | 🔲 À faire |
+| v0.4.6 | FinishedView Polish | 🔲 À faire |
+| v0.5.0 | E2E Integration Tests | 🔲 À faire |
+| v0.6.0 | IPC Production Ready | 🔲 À faire |
+| v0.7.0 | UI Complete Validation | 🔲 Milestone |
+| v0.8.0 | GLFOS Module Integration | 🔲 À faire |
+| v0.9.0 | Production Hardening | 🔲 À faire |
+| v1.0.0 | First Stable Release | 🔲 Release |
+
+Roadmap détaillé : [`docs/roadmap.md`](docs/roadmap.md)
 
 ---
 
