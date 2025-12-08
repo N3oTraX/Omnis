@@ -5,7 +5,7 @@
  * - Username input with validation
  * - Full name input
  * - Hostname input with validation
- * - Password fields with strength indicator
+ * - Password fields with strength indicator and criteria checklist
  * - Autologin checkbox
  * - Admin privileges checkbox
  */
@@ -21,6 +21,9 @@ Item {
     // Signals
     signal nextClicked()
     signal previousClicked()
+
+    // Required property for branding access (icons)
+    required property var branding
 
     // External properties (for data binding with engine)
     property string username: ""
@@ -46,7 +49,14 @@ Item {
     // Validation states
     readonly property bool usernameValid: usernameField.text.length > 0 && /^[a-z][a-z0-9_-]*$/.test(usernameField.text)
     readonly property bool hostnameValid: hostnameField.text.length > 0 && /^[a-z][a-z0-9-]*$/.test(hostnameField.text)
-    readonly property bool passwordValid: passwordField.text.length >= 8
+
+    // Password criteria (NIST SP 800-63B inspired)
+    readonly property bool pwdHasMinLength: passwordField.text.length >= 8
+    readonly property bool pwdHasUppercase: /[A-Z]/.test(passwordField.text)
+    readonly property bool pwdHasLowercase: /[a-z]/.test(passwordField.text)
+    readonly property bool pwdHasNumber: /[0-9]/.test(passwordField.text)
+    readonly property bool pwdHasSpecial: /[^a-zA-Z0-9]/.test(passwordField.text)
+    readonly property bool passwordValid: pwdHasMinLength
     readonly property bool passwordsMatch: passwordField.text === passwordConfirmField.text && passwordField.text.length > 0
     readonly property bool canProceed: usernameValid && hostnameValid && passwordValid && passwordsMatch
     readonly property alias isValid: root.canProceed  // Alias for Main.qml compatibility
@@ -56,11 +66,11 @@ Item {
         var pwd = passwordField.text;
         if (pwd.length === 0) return 0;
         var strength = 0;
-        if (pwd.length >= 8) strength += 25;
+        if (pwdHasMinLength) strength += 25;
         if (pwd.length >= 12) strength += 25;
-        if (/[a-z]/.test(pwd) && /[A-Z]/.test(pwd)) strength += 25;
-        if (/[0-9]/.test(pwd)) strength += 15;
-        if (/[^a-zA-Z0-9]/.test(pwd)) strength += 10;
+        if (pwdHasLowercase && pwdHasUppercase) strength += 25;
+        if (pwdHasNumber) strength += 15;
+        if (pwdHasSpecial) strength += 10;
         return Math.min(100, strength);
     }
 
@@ -75,6 +85,67 @@ Item {
         if (passwordStrength < 40) return qsTr("Weak");
         if (passwordStrength < 70) return qsTr("Medium");
         return qsTr("Strong");
+    }
+
+    // Reusable component for validation criteria row
+    component CriteriaRow: Row {
+        property bool met: false
+        property string criteriaText: ""
+
+        spacing: 8
+        height: 20
+
+        Image {
+            source: met ? (root.branding ? root.branding.iconCheckUrl : "") : (root.branding ? root.branding.iconCrossUrl : "")
+            width: 16
+            height: 16
+            anchors.verticalCenter: parent.verticalCenter
+            sourceSize.width: 16
+            sourceSize.height: 16
+            visible: source != ""
+
+            // SVG color overlay for theming
+            layer.enabled: true
+            layer.effect: MultiEffect {
+                colorization: 1.0
+                colorizationColor: met ? successColor : textMutedColor
+            }
+        }
+
+        // Fallback text icon when image not available
+        Text {
+            text: met ? "\u2713" : "\u2717"
+            font.pixelSize: 14
+            color: met ? successColor : textMutedColor
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.branding || (root.branding.iconCheckUrl === "" && root.branding.iconCrossUrl === "")
+        }
+
+        Text {
+            text: criteriaText
+            font.pixelSize: 12
+            color: met ? successColor : textMutedColor
+            anchors.verticalCenter: parent.verticalCenter
+        }
+    }
+
+    // Reusable component for section icon
+    component SectionIcon: Image {
+        property string iconSource: ""
+
+        source: iconSource
+        width: 24
+        height: 24
+        sourceSize.width: 24
+        sourceSize.height: 24
+        anchors.verticalCenter: parent.verticalCenter
+        visible: source != ""
+
+        layer.enabled: true
+        layer.effect: MultiEffect {
+            colorization: 1.0
+            colorizationColor: textColor
+        }
     }
 
     // Content container
@@ -102,7 +173,9 @@ Item {
             }
 
             ColumnLayout {
-                width: parent.width
+                width: scrollView.availableWidth
+                anchors.left: parent.left
+                anchors.right: parent.right
                 anchors.margins: 48
                 spacing: 32
 
@@ -153,10 +226,8 @@ Item {
                                 width: parent.width
                                 spacing: 12
 
-                                Text {
-                                    text: "\u{1F464}"  // Person silhouette
-                                    font.pixelSize: 24
-                                    anchors.verticalCenter: parent.verticalCenter
+                                SectionIcon {
+                                    iconSource: root.branding ? root.branding.iconUserUrl : ""
                                 }
 
                                 Text {
@@ -235,10 +306,8 @@ Item {
                                 width: parent.width
                                 spacing: 12
 
-                                Text {
-                                    text: "\u{1F9D1}"  // Person
-                                    font.pixelSize: 24
-                                    anchors.verticalCenter: parent.verticalCenter
+                                SectionIcon {
+                                    iconSource: root.branding ? root.branding.iconFullnameUrl : ""
                                 }
 
                                 Text {
@@ -304,10 +373,8 @@ Item {
                                 width: parent.width
                                 spacing: 12
 
-                                Text {
-                                    text: "\u{1F5A5}\u{FE0F}"  // Desktop computer
-                                    font.pixelSize: 24
-                                    anchors.verticalCenter: parent.verticalCenter
+                                SectionIcon {
+                                    iconSource: root.branding ? root.branding.iconHostnameUrl : ""
                                 }
 
                                 Text {
@@ -386,10 +453,8 @@ Item {
                                 width: parent.width
                                 spacing: 12
 
-                                Text {
-                                    text: "\u{1F512}"  // Lock
-                                    font.pixelSize: 24
-                                    anchors.verticalCenter: parent.verticalCenter
+                                SectionIcon {
+                                    iconSource: root.branding ? root.branding.iconPasswordUrl : ""
                                 }
 
                                 Text {
@@ -482,6 +547,38 @@ Item {
                                 }
                             }
 
+                            // Password criteria checklist
+                            Column {
+                                width: parent.width
+                                spacing: 4
+                                visible: passwordField.text.length > 0
+
+                                CriteriaRow {
+                                    met: pwdHasMinLength
+                                    criteriaText: qsTr("At least 8 characters")
+                                }
+
+                                CriteriaRow {
+                                    met: pwdHasUppercase
+                                    criteriaText: qsTr("At least one uppercase letter")
+                                }
+
+                                CriteriaRow {
+                                    met: pwdHasLowercase
+                                    criteriaText: qsTr("At least one lowercase letter")
+                                }
+
+                                CriteriaRow {
+                                    met: pwdHasNumber
+                                    criteriaText: qsTr("At least one number")
+                                }
+
+                                CriteriaRow {
+                                    met: pwdHasSpecial
+                                    criteriaText: qsTr("At least one special character")
+                                }
+                            }
+
                             TextField {
                                 id: passwordConfirmField
                                 width: parent.width
@@ -514,15 +611,33 @@ Item {
                                 leftPadding: 16
                             }
 
-                            Text {
-                                width: parent.width
-                                text: passwordConfirmField.text.length > 0 && !passwordsMatch ?
-                                      qsTr("Passwords do not match") :
-                                      ""
-                                font.pixelSize: 12
-                                color: errorColor
-                                wrapMode: Text.WordWrap
-                                visible: text.length > 0
+                            // Password match indicator
+                            Row {
+                                spacing: 8
+                                visible: passwordConfirmField.text.length > 0
+
+                                Image {
+                                    source: passwordsMatch ? (root.branding ? root.branding.iconCheckUrl : "") : (root.branding ? root.branding.iconCrossUrl : "")
+                                    width: 16
+                                    height: 16
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    sourceSize.width: 16
+                                    sourceSize.height: 16
+                                    visible: source != ""
+
+                                    layer.enabled: true
+                                    layer.effect: MultiEffect {
+                                        colorization: 1.0
+                                        colorizationColor: passwordsMatch ? successColor : errorColor
+                                    }
+                                }
+
+                                Text {
+                                    text: passwordsMatch ? qsTr("Passwords match") : qsTr("Passwords do not match")
+                                    font.pixelSize: 12
+                                    color: passwordsMatch ? successColor : errorColor
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                             }
 
                             CheckBox {
@@ -540,12 +655,29 @@ Item {
                                     border.width: 2
                                     color: showPasswordCheck.checked ? primaryColor : "transparent"
 
+                                    Image {
+                                        anchors.centerIn: parent
+                                        source: root.branding ? root.branding.iconCheckUrl : ""
+                                        width: 12
+                                        height: 12
+                                        sourceSize.width: 12
+                                        sourceSize.height: 12
+                                        visible: showPasswordCheck.checked && source != ""
+
+                                        layer.enabled: true
+                                        layer.effect: MultiEffect {
+                                            colorization: 1.0
+                                            colorizationColor: textColor
+                                        }
+                                    }
+
+                                    // Fallback checkmark
                                     Text {
                                         anchors.centerIn: parent
                                         text: "\u2713"
                                         color: textColor
                                         font.pixelSize: 14
-                                        visible: showPasswordCheck.checked
+                                        visible: showPasswordCheck.checked && (!root.branding || root.branding.iconCheckUrl === "")
                                     }
                                 }
 
@@ -577,10 +709,8 @@ Item {
                                 width: parent.width
                                 spacing: 12
 
-                                Text {
-                                    text: "\u{2699}\u{FE0F}"  // Gear
-                                    font.pixelSize: 24
-                                    anchors.verticalCenter: parent.verticalCenter
+                                SectionIcon {
+                                    iconSource: root.branding ? root.branding.iconSettingsUrl : ""
                                 }
 
                                 Text {
@@ -610,12 +740,28 @@ Item {
                                     border.width: 2
                                     color: autoLoginCheck.checked ? primaryColor : "transparent"
 
+                                    Image {
+                                        anchors.centerIn: parent
+                                        source: root.branding ? root.branding.iconCheckUrl : ""
+                                        width: 12
+                                        height: 12
+                                        sourceSize.width: 12
+                                        sourceSize.height: 12
+                                        visible: autoLoginCheck.checked && source != ""
+
+                                        layer.enabled: true
+                                        layer.effect: MultiEffect {
+                                            colorization: 1.0
+                                            colorizationColor: textColor
+                                        }
+                                    }
+
                                     Text {
                                         anchors.centerIn: parent
                                         text: "\u2713"
                                         color: textColor
                                         font.pixelSize: 14
-                                        visible: autoLoginCheck.checked
+                                        visible: autoLoginCheck.checked && (!root.branding || root.branding.iconCheckUrl === "")
                                     }
                                 }
 
@@ -647,12 +793,28 @@ Item {
                                     border.width: 2
                                     color: adminCheck.checked ? primaryColor : "transparent"
 
+                                    Image {
+                                        anchors.centerIn: parent
+                                        source: root.branding ? root.branding.iconCheckUrl : ""
+                                        width: 12
+                                        height: 12
+                                        sourceSize.width: 12
+                                        sourceSize.height: 12
+                                        visible: adminCheck.checked && source != ""
+
+                                        layer.enabled: true
+                                        layer.effect: MultiEffect {
+                                            colorization: 1.0
+                                            colorizationColor: textColor
+                                        }
+                                    }
+
                                     Text {
                                         anchors.centerIn: parent
                                         text: "\u2713"
                                         color: textColor
                                         font.pixelSize: 14
-                                        visible: adminCheck.checked
+                                        visible: adminCheck.checked && (!root.branding || root.branding.iconCheckUrl === "")
                                     }
                                 }
 

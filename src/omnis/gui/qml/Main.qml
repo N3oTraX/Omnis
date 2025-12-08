@@ -305,6 +305,7 @@ ApplicationWindow {
                 visible: currentStep === 2
                 opacity: visible ? 1 : 0
 
+                branding: branding
                 username: engine.username
                 fullName: engine.fullName
                 hostname: engine.hostname

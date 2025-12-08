@@ -55,13 +55,23 @@ class TestConfigurationSecurity:
             content = config_file.read_text()
             for pattern in password_patterns:
                 matches = re.findall(pattern, content, re.IGNORECASE)
-                # Filter out placeholder values
+                # Filter out placeholder values and asset paths
                 real_matches = [
                     m
                     for m in matches
                     if not any(
                         placeholder in m.lower()
-                        for placeholder in ["example", "changeme", "xxx", "your_", "<", ">"]
+                        for placeholder in [
+                            "example",
+                            "changeme",
+                            "xxx",
+                            "your_",
+                            "<",
+                            ">",
+                            ".svg",  # icon asset paths
+                            ".png",  # image asset paths
+                            "icon_",  # icon configuration keys
+                        ]
                     )
                 ]
                 assert not real_matches, (

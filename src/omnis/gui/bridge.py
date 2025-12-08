@@ -343,6 +343,42 @@ class BrandingProxy(QObject):
         """URL to icon."""
         return self._resolve_asset(self._branding.assets.icon)
 
+    # Users view icons (configurable via theme)
+    @Property(str, constant=True)
+    def iconUserUrl(self) -> str:
+        """URL to user icon for UsersView."""
+        return self._resolve_asset(self._branding.assets.icon_user)
+
+    @Property(str, constant=True)
+    def iconFullnameUrl(self) -> str:
+        """URL to fullname/identity icon for UsersView."""
+        return self._resolve_asset(self._branding.assets.icon_fullname)
+
+    @Property(str, constant=True)
+    def iconHostnameUrl(self) -> str:
+        """URL to hostname/computer icon for UsersView."""
+        return self._resolve_asset(self._branding.assets.icon_hostname)
+
+    @Property(str, constant=True)
+    def iconPasswordUrl(self) -> str:
+        """URL to password/lock icon for UsersView."""
+        return self._resolve_asset(self._branding.assets.icon_password)
+
+    @Property(str, constant=True)
+    def iconSettingsUrl(self) -> str:
+        """URL to settings/gear icon for UsersView."""
+        return self._resolve_asset(self._branding.assets.icon_settings)
+
+    @Property(str, constant=True)
+    def iconCheckUrl(self) -> str:
+        """URL to check/valid icon for validation feedback."""
+        return self._resolve_asset(self._branding.assets.icon_check)
+
+    @Property(str, constant=True)
+    def iconCrossUrl(self) -> str:
+        """URL to cross/error icon for validation feedback."""
+        return self._resolve_asset(self._branding.assets.icon_cross)
+
     # Links
     @Property(str, constant=True)
     def websiteUrl(self) -> str:

@@ -60,6 +60,14 @@ branding:
     icon: "logos/logo-256.png"
     bootloader: "boot/glf-bootloader.png"
     efi_icon: "boot/glf-efi.png"
+    # Users view icons (configurable via theme)
+    icon_user: "icons/users/user.svg"
+    icon_fullname: "icons/users/fullname.svg"
+    icon_hostname: "icons/users/hostname.svg"
+    icon_password: "icons/users/password.svg"
+    icon_settings: "icons/users/settings.svg"
+    icon_check: "icons/users/check.svg"
+    icon_cross: "icons/users/cross.svg"
 
   # Typographie
   fonts:

@@ -50,6 +50,14 @@ class BrandingAssets(BaseModel):
     icon: str = ""
     bootloader: str = ""
     efi_icon: str = ""
+    # Users view icons (configurable via theme)
+    icon_user: str = ""
+    icon_fullname: str = ""
+    icon_hostname: str = ""
+    icon_password: str = ""
+    icon_settings: str = ""
+    icon_check: str = ""
+    icon_cross: str = ""
 
 
 class BrandingFonts(BaseModel):
