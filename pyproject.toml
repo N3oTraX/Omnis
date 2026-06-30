@@ -1,6 +1,6 @@
 [project]
 name = "omnis-installer"
-version = "0.1.0"
+version = "0.4.2"
 description = "Next-generation, modular, and universal Linux installer"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
@@ -10,7 +10,7 @@ authors = [
 ]
 keywords = ["linux", "installer", "qt6", "pyside6", "calamares-alternative"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Environment :: X11 Applications :: Qt",
     "Intended Audience :: System Administrators",
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
