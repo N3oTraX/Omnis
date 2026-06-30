@@ -231,7 +231,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.alignment: Qt.AlignHCenter
                 Layout.maximumWidth: 700
-                Layout.preferredHeight: detailsColumn.height + 48
+                Layout.preferredHeight: detailsColumn.implicitHeight + 48
                 radius: 16
                 color: surfaceColor
 

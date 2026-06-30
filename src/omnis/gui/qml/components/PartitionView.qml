@@ -17,8 +17,6 @@ Item {
     id: root
 
     // Signals
-    signal nextClicked()
-    signal previousClicked()
     signal diskSelected(string disk)
     signal modeSelected(string mode)
 
@@ -100,7 +98,7 @@ Item {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignHCenter
                     Layout.maximumWidth: 900
-                    Layout.preferredHeight: warningColumn.height + 32
+                    Layout.preferredHeight: warningColumn.implicitHeight + 32
                     radius: 12
                     color: Qt.rgba(errorColor.r, errorColor.g, errorColor.b, 0.15)
                     border.color: errorColor
@@ -162,7 +160,7 @@ Item {
 
                         Rectangle {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: diskColumn.height + 32
+                            Layout.preferredHeight: diskColumn.implicitHeight + 32
                             radius: 16
                             color: selectedDisk === modelData.name ? Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.2) : surfaceColor
                             border.color: selectedDisk === modelData.name ? primaryColor : "transparent"
@@ -535,81 +533,6 @@ Item {
                                 }
                             }
                         }
-                    }
-                }
-
-                Item { Layout.preferredHeight: 16 }
-
-                // Navigation buttons
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.maximumWidth: 900
-                    spacing: 16
-
-                    Button {
-                        text: qsTr("Previous")
-                        Layout.preferredWidth: 150
-                        Layout.preferredHeight: 48
-                        font.pixelSize: 16
-
-                        background: Rectangle {
-                            radius: 8
-                            color: parent.pressed ? Qt.darker(surfaceColor, 1.2) : surfaceColor
-                            border.color: textMutedColor
-                            border.width: 1
-
-                            Behavior on color {
-                                ColorAnimation { duration: 150 }
-                            }
-                        }
-
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: textColor
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-
-                        onClicked: root.previousClicked()
-                    }
-
-                    Item { Layout.fillWidth: true }
-
-                    Button {
-                        text: qsTr("Next")
-                        Layout.preferredWidth: 150
-                        Layout.preferredHeight: 48
-                        font.pixelSize: 16
-                        font.bold: true
-                        enabled: canProceed
-
-                        background: Rectangle {
-                            radius: 8
-                            color: {
-                                if (!parent.enabled) return Qt.darker(surfaceColor, 1.2)
-                                if (parent.pressed) return Qt.darker(primaryColor, 1.3)
-                                if (parent.hovered) return Qt.lighter(primaryColor, 1.15)
-                                return primaryColor
-                            }
-                            border.color: parent.enabled ? Qt.lighter(primaryColor, 1.3) : "transparent"
-                            border.width: 1
-
-                            Behavior on color {
-                                ColorAnimation { duration: 150 }
-                            }
-                        }
-
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: parent.enabled ? textColor : textMutedColor
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-
-                        onClicked: root.nextClicked()
                     }
                 }
 

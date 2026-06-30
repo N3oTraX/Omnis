@@ -85,7 +85,7 @@ Item {
                 // Overall progress card
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: overallProgressColumn.height + 48
+                    Layout.preferredHeight: overallProgressColumn.implicitHeight + 48
                     radius: 16
                     color: surfaceColor
 
@@ -183,7 +183,7 @@ Item {
                 // Current job card
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: currentJobColumn.height + 48
+                    Layout.preferredHeight: currentJobColumn.implicitHeight + 48
                     radius: 16
                     color: surfaceColor
                     visible: currentJobName.length > 0
@@ -286,7 +286,7 @@ Item {
                 // Jobs list card
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Math.min(jobsColumn.height + 48, 400)
+                    Layout.preferredHeight: Math.min(jobsColumn.implicitHeight + 48, 400)
                     radius: 16
                     color: surfaceColor
 
@@ -427,7 +427,7 @@ Item {
                 // Log viewer (collapsible)
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: showLog ? logColumn.height + 48 : 60
+                    Layout.preferredHeight: showLog ? logColumn.implicitHeight + 48 : 60
                     radius: 16
                     color: surfaceColor
                     clip: true

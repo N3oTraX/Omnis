@@ -16,8 +16,6 @@ Item {
     id: root
 
     // Signals
-    signal installClicked()
-    signal previousClicked()
     signal editSection(string section)
     signal editLocale()
     signal editUsers()
@@ -117,7 +115,7 @@ Item {
                     // System section
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: systemColumn.height + 48
+                        Layout.preferredHeight: systemColumn.implicitHeight + 48
                         radius: 16
                         color: surfaceColor
 
@@ -209,7 +207,7 @@ Item {
                     // Locale section
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: localeColumn.height + 48
+                        Layout.preferredHeight: localeColumn.implicitHeight + 48
                         radius: 16
                         color: surfaceColor
 
@@ -341,7 +339,7 @@ Item {
                     // User section
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: userColumn.height + 48
+                        Layout.preferredHeight: userColumn.implicitHeight + 48
                         radius: 16
                         color: surfaceColor
 
@@ -514,7 +512,7 @@ Item {
                     // Storage section
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: storageColumn.height + 48
+                        Layout.preferredHeight: storageColumn.implicitHeight + 48
                         radius: 16
                         color: surfaceColor
 
@@ -650,7 +648,7 @@ Item {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignHCenter
                     Layout.maximumWidth: 800
-                    Layout.preferredHeight: finalWarningColumn.height + 32
+                    Layout.preferredHeight: finalWarningColumn.implicitHeight + 32
                     radius: 12
                     color: Qt.rgba(warningColor.r, warningColor.g, warningColor.b, 0.15)
                     border.color: warningColor
@@ -687,100 +685,6 @@ Item {
                             wrapMode: Text.WordWrap
                             width: parent.width
                         }
-                    }
-                }
-
-                Item { Layout.preferredHeight: 16 }
-
-                // Navigation buttons
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.maximumWidth: 800
-                    spacing: 16
-
-                    Button {
-                        text: qsTr("Previous")
-                        Layout.preferredWidth: 150
-                        Layout.preferredHeight: 48
-                        font.pixelSize: 16
-
-                        background: Rectangle {
-                            radius: 8
-                            color: parent.pressed ? Qt.darker(surfaceColor, 1.2) : surfaceColor
-                            border.color: textMutedColor
-                            border.width: 1
-
-                            Behavior on color {
-                                ColorAnimation { duration: 150 }
-                            }
-                        }
-
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: textColor
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-
-                        onClicked: root.previousClicked()
-                    }
-
-                    Item { Layout.fillWidth: true }
-
-                    Button {
-                        text: qsTr("Install Now")
-                        Layout.preferredWidth: 200
-                        Layout.preferredHeight: 56
-                        font.pixelSize: 18
-                        font.bold: true
-
-                        background: Rectangle {
-                            radius: 12
-                            color: {
-                                if (parent.pressed) return Qt.darker(successColor, 1.3)
-                                if (parent.hovered) return Qt.lighter(successColor, 1.15)
-                                return successColor
-                            }
-                            border.color: Qt.lighter(successColor, 1.3)
-                            border.width: 2
-
-                            Behavior on color {
-                                ColorAnimation { duration: 150 }
-                            }
-
-                            // Gradient overlay
-                            Rectangle {
-                                anchors.fill: parent
-                                radius: parent.radius
-                                gradient: Gradient {
-                                    GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.15) }
-                                    GradientStop { position: 0.5; color: "transparent" }
-                                }
-                            }
-                        }
-
-                        contentItem: Row {
-                            spacing: 12
-                            anchors.centerIn: parent
-
-                            Text {
-                                text: parent.parent.text
-                                font: parent.parent.font
-                                color: textColor
-                                verticalAlignment: Text.AlignVCenter
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-
-                            Text {
-                                text: "\u{1F680}"
-                                font.pixelSize: 20
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                        }
-
-                        onClicked: root.installClicked()
                     }
                 }
 
