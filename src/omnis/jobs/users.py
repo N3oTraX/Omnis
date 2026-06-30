@@ -113,6 +113,18 @@ class UsersJob(BaseJob):
         shell = context.selections.get("shell", "/bin/bash")
         target_root = context.target_root
 
+        # TODO(v0.5): appliquer le mot de passe root.
+        # Les clés `root_password` et `root_same_as_user` sont désormais
+        # disponibles dans context.selections (normalisées depuis l'UI via
+        # EngineBridge.applySelectionsToContext). Elles ne sont PAS encore
+        # consommées ici : le câblage backend est volontairement reporté tant
+        # que la décision n'est pas tranchée entre
+        #   - NixOS déclaratif (users.users.root.hashedPassword), et
+        #   - chpasswd impératif (arch-chroot ... chpasswd pour root).
+        # Si root_same_as_user est True, root doit hériter du mot de passe
+        # utilisateur ; sinon utiliser root_password. SÉCURITÉ : ne jamais
+        # logger root_password (même posture que `password`).
+
         try:
             # Step 1: Create user account
             context.report_progress(20, f"Creating user account '{username}'...")
@@ -135,9 +147,6 @@ class UsersJob(BaseJob):
             )
             if not password_result.success:
                 return password_result
-
-            # Clear password from memory
-            password = ""
 
             # Step 3: Configure hostname (if provided)
             if hostname:
@@ -169,6 +178,10 @@ class UsersJob(BaseJob):
                 f"Unexpected error: {e}",
                 error_code=21,
             )
+        finally:
+            # SECURITY: Clear password from memory in all cases (success, failure,
+            # or unexpected exception), never leaving it referenced.
+            password = ""  # noqa: F841
 
     def _create_user(
         self,
@@ -286,20 +299,22 @@ class UsersJob(BaseJob):
                 check=True,
             )
 
-            # Clear password from memory immediately
-            password_input = ""
-
             # SECURITY: Do NOT log that password was set successfully with any details
             logger.info(f"Password configured for user '{username}'")
             return JobResult.ok("Password set")
 
-        except subprocess.CalledProcessError as e:
-            # SECURITY: Do NOT include password or password_input in error messages
-            logger.error(f"Failed to set password: {e.stderr}")
+        except subprocess.CalledProcessError:
+            # SECURITY: chpasswd peut renvoyer la ligne "username:password" dans
+            # e.stderr. On logue une chaîne statique pour garantir zéro fuite,
+            # quelle que soit la verbosité du logger.
+            logger.error("password change failed")
             return JobResult.fail(
                 "Failed to set user password",
                 error_code=23,
             )
+        finally:
+            # SECURITY: Clear password material from memory in all cases.
+            password_input = ""  # noqa: F841
 
     def _set_hostname(self, target_root: str, hostname: str) -> JobResult:
         """

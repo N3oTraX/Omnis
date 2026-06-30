@@ -1065,6 +1065,8 @@ class EngineBridge(QObject):
             "fullName": "",
             "hostname": "",
             "password": "",
+            "rootPassword": "",
+            "rootSameAsUser": True,
             "autoLogin": False,
             "isAdmin": True,
             "disk": "",
@@ -1643,6 +1645,30 @@ class EngineBridge(QObject):
             self._selections["password"] = password
             self.selectionsChanged.emit()
 
+    @Property(str, notify=selectionsChanged)
+    def rootPassword(self) -> str:
+        """Get root password (for internal use, not displayed)."""
+        return str(self._selections.get("rootPassword", ""))
+
+    @Slot(str)
+    def setRootPassword(self, rootPassword: str) -> None:
+        """Set root password (SECURITY: never logged, same posture as password)."""
+        if self._selections.get("rootPassword") != rootPassword:
+            self._selections["rootPassword"] = rootPassword
+            self.selectionsChanged.emit()
+
+    @Property(bool, notify=selectionsChanged)
+    def rootSameAsUser(self) -> bool:
+        """Get whether the root password mirrors the user account password."""
+        return bool(self._selections.get("rootSameAsUser", True))
+
+    @Slot(bool)
+    def setRootSameAsUser(self, rootSameAsUser: bool) -> None:
+        """Set whether the root password mirrors the user account password."""
+        if self._selections.get("rootSameAsUser") != rootSameAsUser:
+            self._selections["rootSameAsUser"] = rootSameAsUser
+            self.selectionsChanged.emit()
+
     @Property(bool, notify=selectionsChanged)
     def autoLogin(self) -> bool:
         """Get auto-login setting."""
@@ -1923,13 +1949,35 @@ class EngineBridge(QObject):
         """Apply user selections to the engine context before installation."""
         if self._debug:
             print("[Engine] Applying selections to context...")
+            # SECURITY: never log password material (user or root).
+            secret_keys = {"password", "rootPassword"}
             for key, value in self._selections.items():
-                if key != "password":  # Don't log password
+                if key not in secret_keys:
                     print(f"[Engine]   {key}: {value}")
 
-        # The engine context will receive these during job execution
-        # Jobs read from context.selections which we'll populate
-        self._engine.set_selections(self._selections)
+        # The engine context will receive these during job execution.
+        # Jobs read from context.selections which we'll populate.
+        #
+        # Les slots QML stockent certaines clés en camelCase (fullName, isAdmin,
+        # autoLogin), alors que les jobs Python (UsersJob) lisent en snake_case
+        # (fullname, is_admin, auto_login). On normalise dans une copie locale
+        # pour ne PAS muter self._selections : la Property `selections` doit
+        # conserver le camelCase pour le résumé d'installation côté QML.
+        normalized = self._selections.copy()
+        if "fullName" in normalized:
+            normalized["fullname"] = normalized.pop("fullName")
+        if "isAdmin" in normalized:
+            normalized["is_admin"] = normalized.pop("isAdmin")
+        if "autoLogin" in normalized:
+            # TODO(v0.5): autoLogin nécessite détection display-manager
+            # (GDM/LightDM/SDDM)
+            normalized["auto_login"] = normalized.pop("autoLogin")
+        if "rootPassword" in normalized:
+            normalized["root_password"] = normalized.pop("rootPassword")
+        if "rootSameAsUser" in normalized:
+            normalized["root_same_as_user"] = normalized.pop("rootSameAsUser")
+
+        self._engine.set_selections(normalized)
 
     # =========================================================================
     # Network Settings

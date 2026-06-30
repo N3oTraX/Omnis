@@ -38,6 +38,12 @@ ApplicationWindow {
     // Apply font globally to the window (empty string = system default)
     font.family: needsUnicodeFont && systemFontFamily ? systemFontFamily : ""
 
+    // Le style Fusion rend le texte des champs via palette.text (noir par
+    // défaut) en ignorant la propriété color. On force un gris clair lisible
+    // sur le thème sombre, propagé à tous les TextField de l'application.
+    palette.text: "#d1d5db"
+    palette.placeholderText: "#9CA3AF"
+
     // React to font changes when locale changes
     Connections {
         target: engine
@@ -325,6 +331,8 @@ ApplicationWindow {
                 onFullNameChanged: engine.setFullName(fullName)
                 onHostnameChanged: engine.setHostname(hostname)
                 onPasswordChanged: engine.setPassword(password)
+                onRootPasswordChanged: engine.setRootPassword(rootPassword)
+                onRootSameAsUserChanged: engine.setRootSameAsUser(rootSameAsUser)
                 onAutoLoginChanged: engine.setAutoLogin(autoLogin)
                 onIsAdminChanged: engine.setIsAdmin(isAdmin)
 

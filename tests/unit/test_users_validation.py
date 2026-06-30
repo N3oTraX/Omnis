@@ -1,6 +1,11 @@
 """
 Unit tests for UsersView validation logic.
 
+PORTÉE : ce module teste UNIQUEMENT les motifs de validation côté UI/QML
+(reproduits ici en Python pour vérifier les regex utilisées dans UsersView.qml).
+Il NE teste PAS le job Python `UsersJob` : la validation, le run() et la sécurité
+du mot de passe du job sont couverts par tests/unit/test_users_job.py.
+
 Tests the validation patterns used in QML/JavaScript for:
 - Username (POSIX compliant: lowercase letters, numbers, hyphen, underscore)
 - Hostname (RFC 1123: lowercase letters, numbers, hyphen)
@@ -17,13 +22,14 @@ class TestUsernameValidation:
     Tests for username validation pattern.
 
     POSIX username requirements:
-    - Must start with a lowercase letter
+    - Must start with a lowercase letter OR an underscore
     - Can contain lowercase letters, digits, hyphens, and underscores
     - Typically max 32 characters (Linux default)
     """
 
-    # Pattern from UsersView.qml
-    USERNAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
+    # Pattern from UsersView.qml (aligné sur UsersJob.USERNAME_PATTERN :
+    # underscore autorisé en première position).
+    USERNAME_PATTERN = re.compile(r"^[a-z_][a-z0-9_-]*$")
 
     def validate_username(self, username: str) -> bool:
         """Validate username using QML pattern."""
@@ -41,6 +47,8 @@ class TestUsernameValidation:
             "test-user-name",
             "a1b2c3",
             "z",
+            "_system",
+            "_user",
         ],
     )
     def test_valid_usernames(self, username: str) -> None:
@@ -54,7 +62,6 @@ class TestUsernameValidation:
             ("John", "uppercase letter"),
             ("JOHN", "all uppercase"),
             ("123user", "starts with digit"),
-            ("_user", "starts with underscore"),
             ("-user", "starts with hyphen"),
             ("user name", "contains space"),
             ("user@name", "contains @ symbol"),
@@ -364,7 +371,8 @@ class TestPasswordsMatch:
 class TestCanProceed:
     """Tests for the canProceed validation combining all criteria."""
 
-    USERNAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
+    # Aligné sur UsersJob.USERNAME_PATTERN (underscore autorisé en 1ère position).
+    USERNAME_PATTERN = re.compile(r"^[a-z_][a-z0-9_-]*$")
     HOSTNAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 
     def validate_username(self, username: str) -> bool:
