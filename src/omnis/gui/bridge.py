@@ -14,6 +14,11 @@ from PySide6.QtCore import Property, QObject, QThread, QUrl, Signal, Slot
 
 from omnis.i18n.translator import get_translator
 from omnis.jobs.locale import LocaleJob
+from omnis.jobs.partition import (
+    PartitionOperation,
+    simulate_operations,
+    validate_operations,
+)
 from omnis.jobs.requirements import SystemRequirementsChecker
 from omnis.utils import disk_detector
 from omnis.utils.locale_detector import LocaleDetectionResult, LocaleDetector
@@ -168,6 +173,49 @@ LOCALE_NATIVE_NAMES: dict[str, str] = {
     # Esperanto
     "eo.UTF-8": "Esperanto",
 }
+
+
+class _CommandCollector:
+    """Collects joined command strings issued during a dry-run preview."""
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def record(self, cmd: list[str]) -> None:
+        """Append a command as a single joined string."""
+        self.lines.append(" ".join(cmd))
+
+
+def _build_preview_job(
+    disk: str, operations: list[dict[str, Any]], collector: _CommandCollector
+) -> Any:
+    """
+    Build a zero-argument callable that dry-runs the M2 operations.
+
+    Runs :meth:`PartitionJob._apply_operations` in dry-run mode with the
+    command runner swapped for the ``collector`` so no subprocess is spawned
+    and every command line is captured for the UI preview.
+    """
+    from omnis.jobs.base import JobContext, JobResult
+    from omnis.jobs.partition import PartitionJob
+
+    job = PartitionJob()
+
+    def _record(cmd: list[str], description: str, dry_run: bool) -> JobResult:  # noqa: ARG001
+        collector.record(cmd)
+        return JobResult.ok(description)
+
+    job._run_partitioning_command = _record  # type: ignore[method-assign]
+
+    def _run() -> None:
+        job._apply_operations(
+            JobContext(),
+            disk,
+            {"partition_operations": operations},
+            dry_run=True,
+        )
+
+    return _run
 
 
 class InstallationWorker(QObject):
@@ -454,6 +502,7 @@ class EngineBridge(QObject):
     keyboardVariantsChanged = Signal()  # emitted when keyboard variants change
     disksChanged = Signal()  # emitted when disks are scanned
     partitionPlanChanged = Signal()  # emitted when a manual partition assignment changes
+    partitionOperationsChanged = Signal()  # emitted when the M2 operation list/simulation changes
     environmentDataChanged = Signal()  # emitted when DE/edition catalogs are loaded
     progressChanged = Signal()  # emitted when progress updates
     systemFontChanged = Signal()  # emitted when system font family changes
@@ -1106,6 +1155,12 @@ class EngineBridge(QObject):
         # Each value: {"path": str, "mountpoint": str, "format": bool, "fstype": str}
         self._partition_assignments: dict[str, dict[str, Any]] = {}
 
+        # M2 manual editor: ordered list of pending operation dicts (the strict
+        # QML<->Python contract) plus the last computed validity/error message.
+        self._partition_operations: list[dict[str, Any]] = []
+        self._manual_ops_valid: bool = False
+        self._manual_ops_error: str = ""
+
         # Progress tracking
         self._overall_progress: int = 0
         self._current_job_progress: int = 0
@@ -1755,6 +1810,10 @@ class EngineBridge(QObject):
             if self._debug:
                 print(f"[Engine] Disk set to: {disk}")
             self.selectionsChanged.emit()
+            # The M2 simulation/validation is scoped to the selected disk, so a
+            # disk change invalidates the previous geometry and must re-notify.
+            self._revalidate_operations()
+            self.partitionOperationsChanged.emit()
 
     @Property(str, notify=selectionsChanged)
     def selectedDiskSize(self) -> str:
@@ -1935,13 +1994,8 @@ class EngineBridge(QObject):
         """Non-empty mount points currently assigned across all partitions."""
         return [e["mountpoint"] for e in self._partition_assignments.values() if e["mountpoint"]]
 
-    @Property(str, notify=partitionPlanChanged)
-    def manualPlanState(self) -> str:
-        """
-        Coarse state of the manual plan for the UI to map to a message.
-
-        One of ``"ok"``, ``"no_root"``, ``"multi_root"`` or ``"dupe"``.
-        """
+    def _manual_plan_state(self) -> str:
+        """Compute the coarse M1 assignment state (see ``manualPlanState``)."""
         mounts = self._manual_mounts()
         roots = mounts.count("/")
         if roots == 0:
@@ -1952,10 +2006,174 @@ class EngineBridge(QObject):
             return "dupe"
         return "ok"
 
-    @Property(bool, notify=partitionPlanChanged)
+    @Property(str, notify=partitionPlanChanged)
+    def manualPlanState(self) -> str:
+        """
+        Coarse state of the manual plan for the UI to map to a message.
+
+        One of ``"ok"``, ``"no_root"``, ``"multi_root"`` or ``"dupe"``.
+        """
+        return self._manual_plan_state()
+
+    @Property(bool, notify=partitionOperationsChanged)
     def manualPlanValid(self) -> bool:
-        """A manual plan is valid once exactly one partition is mounted at '/'."""
-        return self.manualPlanState == "ok"
+        """
+        Global validity of the manual plan.
+
+        When the M2 operation editor holds pending operations, validity is
+        driven by :func:`validate_operations` over the selected disk geometry.
+        Otherwise it falls back to the M1 assignment rule (exactly one '/').
+        """
+        if self._partition_operations:
+            return self._manual_ops_valid
+        return self._manual_plan_state() == "ok"
+
+    @Property(str, notify=partitionOperationsChanged)
+    def manualPlanError(self) -> str:
+        """
+        Human-readable error for the manual plan (plain English; UI wraps qsTr).
+
+        Empty when the plan is valid. Reflects the M2 operation validation when
+        operations exist, else maps the M1 assignment state to a message.
+        """
+        if self._partition_operations:
+            return self._manual_ops_error
+        state = self._manual_plan_state()
+        messages = {
+            "ok": "",
+            "no_root": "No partition is mounted at /",
+            "multi_root": "More than one partition is mounted at /",
+            "dupe": "A mount point is assigned to more than one partition",
+        }
+        return messages.get(state, "")
+
+    # =========================================================================
+    # Manual partitioning editor (M2: create/delete/format/setflag/resize)
+    # =========================================================================
+
+    def _selected_disk_geometry(self) -> dict[str, Any]:
+        """Return the disk_detector contract dict for the selected disk (or {})."""
+        selected = str(self._selections.get("disk", ""))
+        tail = selected.rsplit("/", 1)[-1]
+        for disk in self._disks_model:
+            if disk.get("name") == tail or f"/dev/{disk.get('name')}" == selected:
+                return disk
+        return {}
+
+    def _parsed_operations(self) -> list[PartitionOperation]:
+        """Parse the pending operation dicts, dropping malformed ones defensively."""
+        parsed: list[PartitionOperation] = []
+        for raw in self._partition_operations:
+            try:
+                parsed.append(PartitionOperation.from_dict(raw))
+            except ValueError:
+                continue
+        return parsed
+
+    def _revalidate_operations(self) -> None:
+        """Recompute validity/error for the current operations + selected disk."""
+        if not self._partition_operations:
+            self._manual_ops_valid = False
+            self._manual_ops_error = ""
+            return
+        geom = self._selected_disk_geometry()
+        if not geom:
+            self._manual_ops_valid = False
+            self._manual_ops_error = "No disk selected"
+            return
+        uefi = Path("/sys/firmware/efi").exists()
+        try:
+            operations = [PartitionOperation.from_dict(op) for op in self._partition_operations]
+        except ValueError as exc:
+            self._manual_ops_valid = False
+            self._manual_ops_error = str(exc)
+            return
+        valid, error = validate_operations(geom, operations, uefi=uefi)
+        self._manual_ops_valid = valid
+        self._manual_ops_error = error
+
+    @Property(list, notify=partitionOperationsChanged)
+    def pendingOperations(self) -> list[dict[str, Any]]:
+        """The ordered list of pending operation dicts (contract shape)."""
+        return self._partition_operations
+
+    @Slot("QVariant")
+    def addPartitionOperation(self, op: Any) -> None:
+        """
+        Append an operation, then revalidate and recompute the simulation.
+
+        ``op`` is the serializable contract dict coming from QML. Malformed
+        operations are rejected (surfaced through manualPlanError) rather than
+        raising into the QML layer.
+        """
+        op_dict = dict(op) if isinstance(op, dict) else op
+        try:
+            # Validate the shape eagerly; keep the raw dict for round-tripping.
+            PartitionOperation.from_dict(op_dict)
+        except ValueError as exc:
+            self._manual_ops_valid = False
+            self._manual_ops_error = str(exc)
+            self.partitionOperationsChanged.emit()
+            return
+        self._partition_operations.append(op_dict)
+        if self._debug:
+            print(f"[Engine] Added partition op: {op_dict.get('type')} on {op_dict.get('target')}")
+        self._revalidate_operations()
+        self.partitionOperationsChanged.emit()
+
+    @Slot(int)
+    def removePartitionOperation(self, index: int) -> None:
+        """Remove the operation at ``index`` (no-op if out of range), revalidate."""
+        if 0 <= index < len(self._partition_operations):
+            removed = self._partition_operations.pop(index)
+            if self._debug:
+                print(f"[Engine] Removed partition op #{index}: {removed.get('type')}")
+            self._revalidate_operations()
+            self.partitionOperationsChanged.emit()
+
+    @Slot()
+    def resetPartitionOperations(self) -> None:
+        """Clear all pending operations and reset validity/error."""
+        if self._partition_operations:
+            self._partition_operations = []
+            self._manual_ops_valid = False
+            self._manual_ops_error = ""
+            if self._debug:
+                print("[Engine] Cleared all partition operations")
+            self.partitionOperationsChanged.emit()
+
+    @Property(list, notify=partitionOperationsChanged)
+    def simulatedSegments(self) -> list[dict[str, Any]]:
+        """
+        Geometry of the selected disk AFTER the pending operations.
+
+        Each segment carries the exact UI contract shape (see
+        :func:`omnis.jobs.partition.simulate_operations`). With no operations,
+        this is the disk's current segment geometry normalized to that shape.
+        """
+        geom = self._selected_disk_geometry()
+        segments = geom.get("segments", []) if geom else []
+        operations = self._parsed_operations()
+        return simulate_operations(segments, operations)
+
+    @Property(list, notify=partitionOperationsChanged)
+    def commandPreview(self) -> list[str]:
+        """
+        Dry-run preview of the commands the plan would run (joined strings).
+
+        Executes the operation path in dry-run mode against an in-memory
+        collector so the UI can show exactly what will happen with no side
+        effects. Returns an empty list when there are no operations.
+        """
+        if not self._partition_operations:
+            return []
+        selected = str(self._selections.get("disk", ""))
+        if not selected:
+            return []
+        collector = _CommandCollector()
+        job = _build_preview_job(selected, self._partition_operations, collector)
+        job()
+        return collector.lines
 
     @Slot()
     def refreshDisks(self) -> None:
@@ -2272,6 +2490,11 @@ class EngineBridge(QObject):
                 for name, entry in self._partition_assignments.items()
                 if entry["mountpoint"] or entry["format"]
             ]
+            # M2 editor: forward the ordered operation list (snake contract).
+            # When present, the partition job drives the operation path instead
+            # of the legacy assignment path.
+            if self._partition_operations:
+                normalized["partition_operations"] = list(self._partition_operations)
 
         # SECURITY: installer-wide guard-rails read by the destructive jobs
         # (partition, nixos). ``dry_run`` comes from the bridge launch flag;

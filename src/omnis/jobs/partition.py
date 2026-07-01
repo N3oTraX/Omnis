@@ -20,6 +20,17 @@ from omnis.utils import disk_detector
 
 logger = logging.getLogger(__name__)
 
+# Disk geometry constants shared with the unified disk detector. Re-exported
+# here so the operation model / validation stay a single source of truth for
+# 1 MiB alignment, GPT tail reservation and sector size.
+_ALIGN = disk_detector._ALIGN  # 2048 sectors (1 MiB) first usable / alignment unit
+_GPT_TAIL = disk_detector._GPT_TAIL  # 34 sectors reserved for the GPT secondary header
+_SECTOR_SIZE = disk_detector._SECTOR_SIZE  # 512 bytes per sector
+_MIN_ESP_BYTES = 512 * 1024 * 1024  # minimum ESP size (512 MiB) for a UEFI plan
+
+# Allowed manual-editor operation types (the strict QML<->Python contract).
+_OPERATION_TYPES = frozenset({"create", "delete", "format", "setflag", "resize"})
+
 
 def part_path(disk: str, n: int) -> str:
     """
@@ -50,6 +61,421 @@ def _detect_ram_mb() -> int:
     except (OSError, ValueError, IndexError):
         logger.debug("RAM detection failed, defaulting to 8192 MB")
     return 8192
+
+
+@dataclass
+class PartitionOperation:
+    """
+    A single manual-editor operation (create/delete/format/setflag/resize).
+
+    This is the serializable QML<->Python contract carried between the UI and
+    the engine. ``params`` is kept as a raw dict validated at parse time; each
+    operation type reads the subset it needs (see the module docstring / the
+    interface contract in the tests).
+    """
+
+    type: str
+    target: str
+    params: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PartitionOperation:
+        """
+        Build a :class:`PartitionOperation` from a contract dict.
+
+        Raises:
+            ValueError: if ``type`` is missing/unknown, ``target`` is missing,
+                or required params for the given type are absent/malformed.
+        """
+        if not isinstance(data, dict):
+            raise ValueError(f"Operation must be a dict, got {type(data).__name__}")
+
+        op_type = data.get("type")
+        if op_type not in _OPERATION_TYPES:
+            raise ValueError(f"Unknown operation type: {op_type!r}")
+
+        target = data.get("target")
+        if not isinstance(target, str) or not target:
+            raise ValueError(f"Operation {op_type!r} requires a non-empty 'target'")
+
+        params = data.get("params", {})
+        if not isinstance(params, dict):
+            raise ValueError(f"Operation {op_type!r} 'params' must be a dict")
+
+        cls._validate_params(op_type, params)
+        return cls(type=op_type, target=target, params=dict(params))
+
+    @staticmethod
+    def _validate_params(op_type: str, params: dict[str, Any]) -> None:
+        """Validate that ``params`` carries the required keys for ``op_type``."""
+        required: dict[str, tuple[str, ...]] = {
+            "create": ("start_sector", "size_sectors", "fstype"),
+            "delete": ("number",),
+            "format": ("path", "fstype"),
+            "setflag": ("number", "flag", "state"),
+            "resize": ("path", "number", "new_size_sectors", "fstype"),
+        }
+        for key in required[op_type]:
+            if key not in params:
+                raise ValueError(f"Operation {op_type!r} missing required param {key!r}")
+
+        # Type spot-checks on numeric fields (bool is a subclass of int, so the
+        # setflag 'state' stays a bool; guard the sector/number fields).
+        int_fields = {
+            "create": ("start_sector", "size_sectors"),
+            "delete": ("number",),
+            "setflag": ("number",),
+            "resize": ("number", "new_size_sectors"),
+            "format": (),
+        }
+        for key in int_fields[op_type]:
+            value = params[key]
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"Operation {op_type!r} param {key!r} must be an int")
+
+
+def _partition_number(name: str) -> int:
+    """Extract the GPT partition index from a device name (sda2->2, nvme0n1p3->3)."""
+    digits = ""
+    for ch in reversed(name):
+        if ch.isdigit():
+            digits = ch + digits
+        else:
+            break
+    return int(digits) if digits else 0
+
+
+def _new_segment(
+    name: str,
+    start: int,
+    size: int,
+    fstype: str,
+    part_type: str,
+    mountpoint: str,
+    kind: str,
+    pending_delete: bool = False,
+) -> dict[str, Any]:
+    """Build a UI-contract segment dict with an explicit, stable shape."""
+    return {
+        "name": name,
+        "startSector": start,
+        "sizeSectors": size,
+        "sizeBytes": size * _SECTOR_SIZE,
+        "fstype": fstype,
+        "partType": part_type,
+        "mountpoint": mountpoint,
+        "kind": kind,
+        "pendingDelete": pending_delete,
+        # Extra fields consumed by the manual editor UI:
+        # - number: GPT index used to target delete/setflag/resize operations.
+        # - minSizeSectors: lower bound for the resize slider (real FS minimum is
+        #   enforced by e2fsck/resize2fs at apply time; 1 MiB floor for existing).
+        # - freeAfterSectors: adjacent trailing free space (grow upper bound);
+        #   filled in by _enrich_adjacency() once the ordered list is known.
+        "number": _partition_number(name) if kind == "existing" else 0,
+        "minSizeSectors": _ALIGN if kind == "existing" else 0,
+        "freeAfterSectors": 0,
+    }
+
+
+def _segment_from_existing(seg: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a disk_detector segment into an editable in-memory segment."""
+    start = int(seg.get("startSector") or 0)
+    size = int(seg.get("sizeSectors") or 0)
+    kind = "free" if seg.get("kind") == "free" else "existing"
+    return _new_segment(
+        name=str(seg.get("name", "")),
+        start=start,
+        size=size,
+        fstype=str(seg.get("fstype", "")),
+        part_type=str(seg.get("partType", "free" if kind == "free" else "")),
+        mountpoint=str(seg.get("mountpoint", "")),
+        kind=kind,
+    )
+
+
+def _recompute_free(disk_sectors: int, parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Rebuild the ordered segment list interleaving partitions and free gaps.
+
+    ``parts`` are the surviving (non-deleted, non-free) partition segments.
+    Free regions smaller than the 1 MiB alignment unit are omitted (padding).
+    Deterministic ordering by ``startSector``.
+    """
+    ordered = sorted(parts, key=lambda p: int(p["startSector"]))
+    usable_end = max(0, disk_sectors - _GPT_TAIL)
+    segments: list[dict[str, Any]] = []
+    cursor = _ALIGN
+
+    def add_free(start: int, end: int) -> None:
+        if end - start + 1 > _ALIGN:
+            segments.append(
+                _new_segment(
+                    name="",
+                    start=start,
+                    size=end - start + 1,
+                    fstype="",
+                    part_type="free",
+                    mountpoint="",
+                    kind="free",
+                )
+            )
+
+    for part in ordered:
+        start = int(part["startSector"])
+        if start > cursor:
+            add_free(cursor, start - 1)
+        segments.append(part)
+        cursor = max(cursor, start + int(part["sizeSectors"]))
+
+    if cursor <= usable_end:
+        add_free(cursor, usable_end)
+
+    return segments
+
+
+def simulate_operations(
+    segments: list[dict[str, Any]], operations: list[PartitionOperation]
+) -> list[dict[str, Any]]:
+    """
+    Apply create/delete/resize/format IN MEMORY over a disk's geometry.
+
+    Pure function: performs NO execution. Feeds both the UI (simulatedSegments)
+    and :func:`validate_operations`. Each output segment carries ``kind``
+    (``"existing"|"new"|"free"``) and ``pendingDelete``. Free regions are
+    recomputed after the operations; ordering is deterministic by startSector.
+
+    Args:
+        segments: disk_detector segment list for the selected disk.
+        operations: parsed operations to apply, in insertion order.
+
+    Returns:
+        A new ordered segment list (input is not mutated).
+    """
+    # Total disk sectors: derive from the widest segment end so free-region
+    # recomputation covers the whole medium even if the input omits the tail.
+    disk_sectors = 0
+    working: list[dict[str, Any]] = []
+    for seg in segments:
+        norm = _segment_from_existing(seg)
+        end = int(norm["startSector"]) + int(norm["sizeSectors"])
+        disk_sectors = max(disk_sectors, end + _GPT_TAIL)
+        working.append(norm)
+
+    def find_by_name(name: str) -> dict[str, Any] | None:
+        return next((s for s in working if s["name"] == name and s["kind"] != "free"), None)
+
+    for op in operations:
+        params = op.params
+        if op.type == "delete":
+            target = _target_partition(working, op)
+            if target is not None:
+                target["pendingDelete"] = True
+        elif op.type == "format":
+            target = find_by_name(op.target.rsplit("/", 1)[-1]) or _target_partition(working, op)
+            if target is not None:
+                target["fstype"] = str(params.get("fstype", target["fstype"]))
+                target["mountpoint"] = str(params.get("mountpoint", target["mountpoint"]))
+        elif op.type == "resize":
+            target = _target_partition(working, op)
+            if target is not None:
+                new_size = int(params["new_size_sectors"])
+                target["sizeSectors"] = new_size
+                target["sizeBytes"] = new_size * _SECTOR_SIZE
+                if params.get("fstype"):
+                    target["fstype"] = str(params["fstype"])
+        elif op.type == "create":
+            start = int(params["start_sector"])
+            size = int(params["size_sectors"])
+            working.append(
+                _new_segment(
+                    name=str(params.get("name", "")),
+                    start=start,
+                    size=size,
+                    fstype=str(params.get("fstype", "")),
+                    part_type=str(params.get("part_type", "linux")),
+                    mountpoint=str(params.get("mountpoint", "")),
+                    kind="new",
+                )
+            )
+
+    survivors = [s for s in working if s["kind"] != "free" and not s["pendingDelete"]]
+    # Deleted partitions are still surfaced (pendingDelete=True) so the UI can
+    # render them struck-through, but they must NOT reserve space; hence they
+    # are excluded from the free-region recomputation below.
+    rebuilt = _recompute_free(disk_sectors, survivors)
+    deleted = [s for s in working if s["kind"] != "free" and s["pendingDelete"]]
+    combined = rebuilt + deleted
+    combined.sort(key=lambda s: (int(s["startSector"]), 0 if not s["pendingDelete"] else 1))
+    _enrich_adjacency(rebuilt)
+    return combined
+
+
+def _enrich_adjacency(ordered: list[dict[str, Any]]) -> None:
+    """Set ``freeAfterSectors`` on each partition = size of the next free region.
+
+    ``ordered`` is the interleaved partition/free list (deleted segments excluded),
+    so a partition immediately followed by a ``free`` segment can grow into it.
+    """
+    for idx, seg in enumerate(ordered):
+        if seg["kind"] == "free":
+            continue
+        nxt = ordered[idx + 1] if idx + 1 < len(ordered) else None
+        seg["freeAfterSectors"] = int(nxt["sizeSectors"]) if nxt and nxt["kind"] == "free" else 0
+
+
+def _target_partition(
+    segments: list[dict[str, Any]], op: PartitionOperation
+) -> dict[str, Any] | None:
+    """Resolve the segment an operation targets by device name (best effort)."""
+    tail = op.target.rsplit("/", 1)[-1]
+    match = next(
+        (s for s in segments if s["name"] == tail and s["kind"] != "free"),
+        None,
+    )
+    if match is not None:
+        return match
+    # Fall back to the partition number carried in params (path-independent).
+    number = op.params.get("number")
+    if isinstance(number, int) and not isinstance(number, bool):
+        return next(
+            (s for s in segments if s["name"].endswith(str(number)) and s["kind"] != "free"),
+            None,
+        )
+    return None
+
+
+def _is_target_busy(target: str) -> bool:
+    """
+    Return True if ``target`` is currently mounted or backs the live root.
+
+    Uses ``findmnt`` to detect a mounted partition and the disk detector's
+    live-source probe to detect the running system's medium. Mocked in tests.
+    """
+    tail = target.rsplit("/", 1)[-1]
+    live = disk_detector._live_source()
+    if live and (live == target or live.rsplit("/", 1)[-1] == tail):
+        return True
+    try:
+        result = subprocess.run(
+            ["findmnt", "-no", "TARGET", target],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, OSError):
+        return False
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def validate_operations(
+    disk_geom: dict[str, Any],
+    operations: list[PartitionOperation],
+    uefi: bool = True,
+) -> tuple[bool, str]:
+    """
+    Validate a manual operation plan against a disk's geometry.
+
+    Checks (in order): device is not the live/mounted target, 1 MiB alignment
+    of every start/size, no overlap between resulting partitions, all boundaries
+    within ``[_ALIGN, disk_sectors - _GPT_TAIL]``, exactly one partition mounted
+    at ``/`` and (when ``uefi``) exactly one ESP (vfat + esp flag + >= 512 MiB).
+
+    Args:
+        disk_geom: dict carrying at least ``sizeSectors`` and ``segments`` for
+            the selected disk (the disk_detector disk contract).
+        operations: parsed operations to validate.
+        uefi: when True, require exactly one conforming ESP.
+
+    Returns:
+        ``(True, "")`` on success or ``(False, "<clear reason>")``.
+    """
+    disk_sectors = int(disk_geom.get("sizeSectors") or 0)
+    usable_end = disk_sectors - _GPT_TAIL
+
+    # Guard-rail: refuse to touch a mounted or live partition.
+    mutating = ("delete", "resize", "format", "setflag")
+    for op in operations:
+        targets_device = op.type in mutating and op.target.startswith("/dev/")
+        if targets_device and _is_target_busy(op.target):
+            return False, f"Target {op.target} is mounted or backs the live system"
+
+    simulated = simulate_operations(disk_geom.get("segments", []), operations)
+    parts = [s for s in simulated if s["kind"] != "free" and not s["pendingDelete"]]
+
+    for seg in parts:
+        start = int(seg["startSector"])
+        size = int(seg["sizeSectors"])
+        if start % _ALIGN != 0:
+            return False, f"Partition start {start} is not 1 MiB aligned"
+        if size % _ALIGN != 0:
+            return False, f"Partition size {size} is not 1 MiB aligned"
+        if start < _ALIGN:
+            return False, f"Partition starts before the first usable sector ({start} < {_ALIGN})"
+        if disk_sectors and start + size > usable_end:
+            return False, "Partition extends past the last usable sector (GPT tail)"
+
+    ordered = sorted(parts, key=lambda s: int(s["startSector"]))
+    for prev, cur in zip(ordered, ordered[1:], strict=False):
+        prev_end = int(prev["startSector"]) + int(prev["sizeSectors"])
+        if prev_end > int(cur["startSector"]):
+            return False, "Partitions overlap"
+
+    # Apply pending setflag operations to a name->flags view for ESP detection.
+    flags = _collect_flags(operations)
+
+    roots = [s for s in parts if s["mountpoint"] == "/"]
+    if len(roots) != 1:
+        return False, "Exactly one partition must be mounted at /"
+
+    if uefi:
+        ok, reason = _validate_esp(parts, flags)
+        if not ok:
+            return False, reason
+
+    return True, ""
+
+
+def _collect_flags(operations: list[PartitionOperation]) -> dict[int, set[str]]:
+    """Fold setflag operations into a {partition_number: {active flags}} view."""
+    flags: dict[int, set[str]] = {}
+    for op in operations:
+        if op.type != "setflag":
+            continue
+        number = op.params.get("number")
+        flag = op.params.get("flag")
+        state = op.params.get("state")
+        if not isinstance(number, int) or isinstance(number, bool):
+            continue
+        bucket = flags.setdefault(number, set())
+        if state and isinstance(flag, str):
+            bucket.add(flag)
+        elif isinstance(flag, str):
+            bucket.discard(flag)
+    return flags
+
+
+def _validate_esp(parts: list[dict[str, Any]], flags: dict[int, set[str]]) -> tuple[bool, str]:
+    """Require exactly one ESP: vfat + esp flag + >= 512 MiB (UEFI plans)."""
+
+    def _number_of(seg: dict[str, Any]) -> int | None:
+        digits = "".join(ch for ch in seg["name"] if ch.isdigit())
+        return int(digits) if digits else None
+
+    esps: list[dict[str, Any]] = []
+    for seg in parts:
+        fs = str(seg["fstype"]).lower()
+        number = _number_of(seg)
+        has_esp_flag = number is not None and "esp" in flags.get(number, set())
+        is_efi_type = str(seg["partType"]).lower() == "efi"
+        if fs in ("vfat", "fat", "fat32") and (has_esp_flag or is_efi_type):
+            esps.append(seg)
+
+    if len(esps) != 1:
+        return False, "A UEFI install requires exactly one ESP (vfat + esp flag)"
+    if int(esps[0]["sizeBytes"]) < _MIN_ESP_BYTES:
+        return False, "The ESP must be at least 512 MiB"
+    return True, ""
 
 
 class PartitionMode(Enum):
@@ -602,6 +1028,12 @@ class PartitionJob(BaseJob):
         """
         logger.info(f"Manual partitioning on {disk} (existing partitions preserved)")
 
+        # M2 operation path takes precedence: when the manual editor produced a
+        # list of operations, drive create/delete/format/setflag/resize. The
+        # legacy M1 assignment path (below) stays intact when absent.
+        if selections.get("partition_operations"):
+            return self._apply_operations(context, disk, selections, dry_run)
+
         assignments = selections.get("partition_assignments", [])
         used = [a for a in assignments if a.get("mountpoint") or a.get("format")]
         if not used:
@@ -634,9 +1066,7 @@ class PartitionJob(BaseJob):
             fstype = str(assignment.get("fstype") or "ext4")
             cmd = self._mkfs_command(fstype, path)
             if cmd is None:
-                return JobResult.fail(
-                    f"Unsupported filesystem for {path}: {fstype}", error_code=51
-                )
+                return JobResult.fail(f"Unsupported filesystem for {path}: {fstype}", error_code=51)
             result = self._run_partitioning_command(
                 cmd, description=f"Formatting {path} ({fstype})", dry_run=dry_run
             )
@@ -645,6 +1075,358 @@ class PartitionJob(BaseJob):
 
         context.report_progress(70, "Mounting assigned filesystems...")
         return self._mount_manual(context, used, dry_run)
+
+    def _apply_operations(
+        self,
+        context: JobContext,
+        disk: str,
+        selections: dict[str, Any],
+        dry_run: bool,
+    ) -> JobResult:
+        """
+        Execute a manual operation plan (GParted-like editor) on ``disk``.
+
+        Operations are parsed from ``selections["partition_operations"]`` and
+        run in a strict global order that respects the partition table's
+        physical constraints::
+
+            delete -> resize-shrink -> resize-grow -> create -> format -> setflag
+
+        ``partprobe`` + ``udevadm settle`` are issued between every group that
+        mutates the table. Shrink operations resize the FILESYSTEM before the
+        partition (else data loss); grow operations resize the partition first.
+
+        Args:
+            context: Execution context (unused mounts happen in the M1 path).
+            disk: Target disk path (e.g. "/dev/sda").
+            selections: Raw user selections; reads ``partition_operations``.
+            dry_run: If True, simulate only (no subprocess is executed).
+
+        Returns:
+            JobResult indicating success or failure.
+        """
+        try:
+            operations = [
+                PartitionOperation.from_dict(op) for op in selections["partition_operations"]
+            ]
+        except ValueError as exc:
+            return JobResult.fail(f"Invalid partition operation: {exc}", error_code=53)
+
+        # Record a coarse layout for the summary (root/ESP if discernible).
+        self._record_operations_layout(operations)
+
+        deletes = [op for op in operations if op.type == "delete"]
+        shrinks, grows = self._split_resizes(operations)
+        creates = [op for op in operations if op.type == "create"]
+        formats = [op for op in operations if op.type == "format"]
+        setflags = [op for op in operations if op.type == "setflag"]
+
+        groups: list[tuple[list[PartitionOperation], bool]] = [
+            (deletes, True),
+            (shrinks, True),
+            (grows, True),
+            (creates, True),
+            (formats, False),
+            (setflags, True),
+        ]
+
+        step = 20
+        for ops, mutates_table in groups:
+            if not ops:
+                continue
+            for op in ops:
+                context.report_progress(step, f"Applying {op.type} on {op.target}")
+                result = self._run_operation(disk, op, dry_run)
+                if not result.success:
+                    return result
+            if mutates_table:
+                result = self._settle_table(disk, dry_run)
+                if not result.success:
+                    return result
+            step = min(90, step + 12)
+
+        return JobResult.ok("Manual operations applied")
+
+    def _record_operations_layout(self, operations: list[PartitionOperation]) -> None:
+        """Populate ``self._layout`` for the run() summary from the operations."""
+        root = ""
+        efi = ""
+        for op in operations:
+            mount = op.params.get("mountpoint", "")
+            if op.type in ("create", "format"):
+                if mount == "/":
+                    root = str(op.params.get("path", op.target))
+                elif mount in ("/boot", "/boot/efi"):
+                    efi = str(op.params.get("path", op.target))
+        self._layout = PartitionLayout(efi_partition=efi, root_partition=root)
+
+    @staticmethod
+    def _split_resizes(
+        operations: list[PartitionOperation],
+    ) -> tuple[list[PartitionOperation], list[PartitionOperation]]:
+        """
+        Partition resize operations into (shrinks, grows).
+
+        A resize is a shrink when the requested new size is strictly smaller
+        than the current partition size; anything else is treated as a grow.
+        The current size is inferred from the difference we cannot know here,
+        so we rely on an explicit ``old_size_sectors`` param when provided and
+        otherwise classify by the presence of a ``shrink`` hint.
+        """
+        shrinks: list[PartitionOperation] = []
+        grows: list[PartitionOperation] = []
+        for op in operations:
+            if op.type != "resize":
+                continue
+            old = op.params.get("old_size_sectors")
+            new = int(op.params["new_size_sectors"])
+            if isinstance(old, int) and not isinstance(old, bool):
+                (shrinks if new < old else grows).append(op)
+            elif op.params.get("shrink"):
+                shrinks.append(op)
+            else:
+                grows.append(op)
+        return shrinks, grows
+
+    def _run_operation(self, disk: str, op: PartitionOperation, dry_run: bool) -> JobResult:
+        """Dispatch a single operation to its command sequence."""
+        if op.type == "delete":
+            return self._op_delete(disk, op, dry_run)
+        if op.type == "create":
+            return self._op_create(disk, op, dry_run)
+        if op.type == "format":
+            return self._op_format(op, dry_run)
+        if op.type == "setflag":
+            return self._op_setflag(disk, op, dry_run)
+        if op.type == "resize":
+            return self._op_resize(disk, op, dry_run)
+        return JobResult.fail(f"Unsupported operation: {op.type}", error_code=53)
+
+    def _settle_table(self, disk: str, dry_run: bool) -> JobResult:
+        """Re-read the partition table (partprobe) and wait for udev to settle."""
+        result = self._run_partitioning_command(
+            ["partprobe", disk], description="Re-reading partition table", dry_run=dry_run
+        )
+        if not result.success:
+            return result
+        return self._run_partitioning_command(
+            ["udevadm", "settle"], description="Waiting for udev to settle", dry_run=dry_run
+        )
+
+    def _op_delete(self, disk: str, op: PartitionOperation, dry_run: bool) -> JobResult:
+        """Delete a partition by number via sgdisk."""
+        number = int(op.params["number"])
+        return self._run_partitioning_command(
+            ["sgdisk", f"--delete={number}", disk],
+            description=f"Deleting partition {number} on {disk}",
+            dry_run=dry_run,
+        )
+
+    def _op_create(self, disk: str, op: PartitionOperation, dry_run: bool) -> JobResult:
+        """Create a partition (parted mkpart), set flags, then mkfs it."""
+        params = op.params
+        start = int(params["start_sector"])
+        size = int(params["size_sectors"])
+        end = start + size - 1
+        fstype = str(params["fstype"])
+        name = str(params.get("name") or "primary")
+
+        result = self._run_partitioning_command(
+            ["parted", "-s", disk, "mkpart", name, fstype, f"{start}s", f"{end}s"],
+            description=f"Creating partition {name} ({start}s-{end}s) on {disk}",
+            dry_run=dry_run,
+        )
+        if not result.success:
+            return result
+
+        # Flags requested at creation time (esp/boot map to parted 'esp').
+        flags = params.get("flags", [])
+        number = self._next_partition_number(disk, op)
+        for flag in flags:
+            parted_flag = "esp" if flag in ("esp", "boot") else str(flag)
+            result = self._run_partitioning_command(
+                ["parted", "-s", disk, "set", str(number), parted_flag, "on"],
+                description=f"Setting {parted_flag} flag on partition {number}",
+                dry_run=dry_run,
+            )
+            if not result.success:
+                return result
+
+        settle = self._settle_table(disk, dry_run)
+        if not settle.success:
+            return settle
+
+        path = str(params.get("path") or part_path(disk, number))
+        mkfs = self._mkfs_command(fstype, path)
+        if mkfs is None:
+            return JobResult.fail(f"Unsupported filesystem for {path}: {fstype}", error_code=51)
+        return self._run_partitioning_command(
+            mkfs, description=f"Formatting {path} ({fstype})", dry_run=dry_run
+        )
+
+    @staticmethod
+    def _next_partition_number(disk: str, op: PartitionOperation) -> int:
+        """Resolve the partition number for a freshly created partition."""
+        number = op.params.get("number")
+        if isinstance(number, int) and not isinstance(number, bool):
+            return number
+        path = str(op.params.get("path") or "")
+        digits = "".join(ch for ch in path.rsplit("/", 1)[-1] if ch.isdigit())
+        base_digits = "".join(ch for ch in disk.rsplit("/", 1)[-1] if ch.isdigit())
+        if digits and base_digits and digits.startswith(base_digits):
+            digits = digits[len(base_digits) :]
+        return int(digits) if digits else 1
+
+    def _op_format(self, op: PartitionOperation, dry_run: bool) -> JobResult:
+        """Format an existing partition (mkfs) without touching the table."""
+        path = str(op.params["path"])
+        fstype = str(op.params["fstype"])
+        mkfs = self._mkfs_command(fstype, path)
+        if mkfs is None:
+            return JobResult.fail(f"Unsupported filesystem for {path}: {fstype}", error_code=51)
+        return self._run_partitioning_command(
+            mkfs, description=f"Formatting {path} ({fstype})", dry_run=dry_run
+        )
+
+    def _op_setflag(self, disk: str, op: PartitionOperation, dry_run: bool) -> JobResult:
+        """Toggle a partition flag (esp/boot/swap) via parted."""
+        number = int(op.params["number"])
+        flag = str(op.params["flag"])
+        state = "on" if op.params.get("state") else "off"
+        parted_flag = "esp" if flag in ("esp", "boot") else flag
+        return self._run_partitioning_command(
+            ["parted", "-s", disk, "set", str(number), parted_flag, state],
+            description=f"Setting {parted_flag} {state} on partition {number}",
+            dry_run=dry_run,
+        )
+
+    def _op_resize(self, disk: str, op: PartitionOperation, dry_run: bool) -> JobResult:
+        """
+        Resize a partition, ordering filesystem vs table ops by direction.
+
+        GROW (table then fs): ``parted resizepart`` -> settle -> grow fs.
+        SHRINK (fs then table): shrink fs (fsck + resize2fs / btrfs) -> sync ->
+        ``parted resizepart``. NTFS is out of scope for M2c and refused cleanly.
+        """
+        params = op.params
+        path = str(params["path"])
+        number = int(params["number"])
+        fstype = str(params["fstype"]).lower()
+        new_size = int(params["new_size_sectors"])
+
+        if fstype == "ntfs":
+            return JobResult.fail("NTFS resize is not supported (out of scope)", error_code=54)
+
+        old = params.get("old_size_sectors")
+        is_shrink = bool(params.get("shrink"))
+        if isinstance(old, int) and not isinstance(old, bool):
+            is_shrink = new_size < old
+
+        start = int(params.get("start_sector", _ALIGN))
+        new_end = start + new_size - 1
+        mount = str(params.get("mountpoint") or "")
+        # btrfs shrink expects a relative "-DELTA" argument; compute it when the
+        # old size is known so the command matches the contract exactly.
+        delta_bytes = 0
+        if isinstance(old, int) and not isinstance(old, bool):
+            delta_bytes = (old - new_size) * _SECTOR_SIZE
+
+        if is_shrink:
+            return self._resize_shrink(
+                disk, path, number, fstype, new_size, new_end, mount, delta_bytes, dry_run
+            )
+        return self._resize_grow(disk, path, number, fstype, new_end, mount, dry_run)
+
+    def _resize_grow(
+        self,
+        disk: str,
+        path: str,
+        number: int,
+        fstype: str,
+        new_end: int,
+        mount: str,
+        dry_run: bool,
+    ) -> JobResult:
+        """Grow: extend the partition table first, then the filesystem."""
+        result = self._run_partitioning_command(
+            ["parted", "-s", disk, "resizepart", str(number), f"{new_end}s"],
+            description=f"Growing partition {number} to {new_end}s",
+            dry_run=dry_run,
+        )
+        if not result.success:
+            return result
+        settle = self._settle_table(disk, dry_run)
+        if not settle.success:
+            return settle
+
+        if fstype == "ext4":
+            return self._run_partitioning_command(
+                ["resize2fs", path],
+                description=f"Growing ext4 filesystem on {path}",
+                dry_run=dry_run,
+            )
+        if fstype == "btrfs":
+            return self._run_partitioning_command(
+                ["btrfs", "filesystem", "resize", "max", mount or path],
+                description=f"Growing btrfs filesystem on {mount or path}",
+                dry_run=dry_run,
+            )
+        return JobResult.fail(f"Unsupported filesystem for resize: {fstype}", error_code=55)
+
+    def _resize_shrink(
+        self,
+        disk: str,
+        path: str,
+        number: int,
+        fstype: str,
+        new_size: int,
+        new_end: int,
+        mount: str,
+        delta_bytes: int,
+        dry_run: bool,
+    ) -> JobResult:
+        """Shrink: shrink the filesystem FIRST, then the partition table."""
+        if fstype == "ext4":
+            check = self._run_partitioning_command(
+                ["e2fsck", "-f", "-y", path],
+                description=f"Checking ext4 filesystem on {path}",
+                dry_run=dry_run,
+            )
+            if not check.success:
+                return check
+            fs_size = f"{new_size * _SECTOR_SIZE // 1024}K"
+            result = self._run_partitioning_command(
+                ["resize2fs", path, fs_size],
+                description=f"Shrinking ext4 filesystem on {path} to {fs_size}",
+                dry_run=dry_run,
+            )
+            if not result.success:
+                return result
+        elif fstype == "btrfs":
+            result = self._run_partitioning_command(
+                ["btrfs", "filesystem", "resize", f"-{delta_bytes}", mount or path],
+                description=f"Shrinking btrfs filesystem on {mount or path}",
+                dry_run=dry_run,
+            )
+            if not result.success:
+                return result
+        else:
+            return JobResult.fail(f"Unsupported filesystem for resize: {fstype}", error_code=55)
+
+        sync = self._run_partitioning_command(
+            ["sync"], description="Flushing filesystem buffers", dry_run=dry_run
+        )
+        if not sync.success:
+            return sync
+
+        result = self._run_partitioning_command(
+            ["parted", "-s", disk, "resizepart", str(number), f"{new_end}s"],
+            description=f"Shrinking partition {number} to {new_end}s",
+            dry_run=dry_run,
+        )
+        if not result.success:
+            return result
+        return self._settle_table(disk, dry_run)
 
     @staticmethod
     def _mkfs_command(fstype: str, path: str) -> list[str] | None:

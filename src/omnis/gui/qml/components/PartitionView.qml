@@ -87,6 +87,86 @@ Item {
         return (v >= 100 ? v.toFixed(0) : v.toFixed(1)) + " " + units[i]
     }
 
+    // --- Manual editor: unit conversions (1 MiB = 2048 sectors of 512 bytes) ---
+    readonly property int sectorsPerMib: 2048
+    function mibToSectors(mib) { return Math.round(mib) * sectorsPerMib }
+    function sectorsToMib(sectors) { return Math.floor((sectors || 0) / sectorsPerMib) }
+    function sectorsToBytes(sectors) { return (sectors || 0) * 512 }
+
+    // Color for a simulated segment (existing/new/free) reusing partitionColor.
+    function segmentColor(seg) {
+        if (!seg) return colorFree
+        if (seg.kind === "free") return colorFree
+        return partitionColor(seg.partType, seg.fstype)
+    }
+
+    // --- Manual editor: defensive readonly mirrors of the (parallel) backend ---
+    // These Property/slots are implemented by the bridge agent. Until then the
+    // `|| []` / fallbacks keep the UI inert but crash-free.
+    readonly property var simulatedSegments: (engine.simulatedSegments || [])
+    readonly property var pendingOperations: (engine.pendingOperations || [])
+    readonly property var commandPreview: (engine.commandPreview || [])
+    readonly property string manualPlanError: (engine.manualPlanError || "")
+
+    // Local UI state for the interactive editor. `selectedSegmentIndex` points
+    // into `simulatedSegments`; the derived object is exposed for the action
+    // panel and forms. Reset whenever the disk or the simulated geometry changes.
+    property int selectedSegmentIndex: -1
+    readonly property var selectedSegment:
+        (selectedSegmentIndex >= 0 && selectedSegmentIndex < simulatedSegments.length)
+            ? simulatedSegments[selectedSegmentIndex]
+            : null
+
+    // Which contextual form is open: "" | "create" | "resize" | "format" | "flags"
+    property string activeForm: ""
+
+    // Clear the selection/forms when the disk or simulated layout changes.
+    onSelectedDiskChanged: { selectedSegmentIndex = -1; activeForm = "" }
+    onSimulatedSegmentsChanged: { selectedSegmentIndex = -1; activeForm = "" }
+
+    // Human-readable description of a pending operation for the file list.
+    function operationLabel(op) {
+        if (!op) return ""
+        var p = op.params || {}
+        switch (op.type) {
+        case "create": {
+            var mib = sectorsToMib(p.size_sectors)
+            var mp = p.mountpoint ? " " + p.mountpoint : ""
+            return qsTr("Create") + mp + " " + (p.fstype || "") + " "
+                + humanSize(sectorsToBytes(p.size_sectors))
+        }
+        case "delete":
+            return qsTr("Delete") + " " + (op.target || "")
+        case "format":
+            return qsTr("Format") + " " + (p.path || op.target || "")
+                + " → " + (p.fstype || "")
+                + (p.mountpoint ? " (" + p.mountpoint + ")" : "")
+        case "setflag":
+            return qsTr("Flag") + " " + (op.target || "") + " " + (p.flag || "")
+                + " " + (p.state ? qsTr("on") : qsTr("off"))
+        case "resize":
+            return qsTr("Resize") + " " + (p.path || op.target || "")
+                + " → " + humanSize(sectorsToBytes(p.new_size_sectors))
+        default:
+            return op.type + " " + (op.target || "")
+        }
+    }
+
+    // Safe wrappers around the (parallel) backend slots. No-op if absent so the
+    // offscreen harness and pre-integration runs never throw.
+    function addOperation(op) {
+        if (engine.addPartitionOperation) engine.addPartitionOperation(op)
+        activeForm = ""
+    }
+    function removeOperation(index) {
+        if (engine.removePartitionOperation) engine.removePartitionOperation(index)
+    }
+    function resetOperations() {
+        if (engine.resetPartitionOperations) engine.resetPartitionOperations()
+        selectedSegmentIndex = -1
+        activeForm = ""
+    }
+
     readonly property bool canProceed:
         selectedDisk !== "" && (
             partitionMode === "auto" ? encryptionPassValid : engine.manualPlanValid
@@ -1151,6 +1231,914 @@ Item {
                                 text: qsTr("512 MB (mounted on /boot)")
                                 font.pixelSize: 14
                                 color: textMutedColor
+                            }
+                        }
+                    }
+                }
+
+                // ============================================================
+                // Manual editor card (GParted-style): interactive histobar,
+                // contextual actions, create/resize forms, pending operations.
+                // Visible only in manual mode with a disk selected.
+                // ============================================================
+                Rectangle {
+                    id: manualEditorCard
+                    objectName: "manualEditorCard"
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.maximumWidth: 900
+                    Layout.preferredHeight: manualEditorColumn.implicitHeight + 40
+                    radius: 16
+                    color: surfaceColor
+                    visible: selectedDisk !== "" && partitionMode === "manual"
+
+                    Column {
+                        id: manualEditorColumn
+                        anchors.top: parent.top
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.margins: 20
+                        spacing: 18
+
+                        Text {
+                            text: qsTr("Partition Editor")
+                            font.pixelSize: 20
+                            font.bold: true
+                            color: textColor
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: qsTr("Click a segment on the bar below, then choose an action. "
+                                + "Changes are queued and applied only after confirmation.")
+                            font.pixelSize: 13
+                            color: textMutedColor
+                            wrapMode: Text.WordWrap
+                        }
+
+                        // ---- Interactive histobar (from simulatedSegments) ----
+                        Item {
+                            id: editorBar
+                            width: parent.width
+                            implicitHeight: 56
+                            height: implicitHeight
+
+                            property var segs: simulatedSegments
+                            property real totalSectors: {
+                                var t = 0
+                                for (var i = 0; i < segs.length; i++)
+                                    t += (segs[i].sizeSectors || 0)
+                                return t
+                            }
+
+                            Rectangle {
+                                id: editorBarBg
+                                anchors.fill: parent
+                                radius: 8
+                                color: colorFree
+                                clip: true
+
+                                Row {
+                                    anchors.fill: parent
+                                    spacing: 0
+
+                                    Repeater {
+                                        model: editorBar.segs
+
+                                        Rectangle {
+                                            id: segRect
+                                            height: editorBarBg.height
+                                            width: editorBar.totalSectors > 0
+                                                ? editorBarBg.width * (modelData.sizeSectors > 0 ? modelData.sizeSectors : 0) / editorBar.totalSectors
+                                                : 0
+                                            color: {
+                                                var base = segmentColor(modelData)
+                                                if (modelData.pendingDelete)
+                                                    return Qt.rgba(errorColor.r, errorColor.g, errorColor.b, 0.35)
+                                                return base
+                                            }
+                                            border.width: (selectedSegmentIndex === index) ? 3 : 1
+                                            border.color: (selectedSegmentIndex === index)
+                                                ? primaryColor
+                                                : (modelData.kind === "free"
+                                                    ? Qt.rgba(textMutedColor.r, textMutedColor.g, textMutedColor.b, 0.3)
+                                                    : Qt.rgba(0, 0, 0, 0.25))
+
+                                            // "new" segments get a primaryColor inner liseré
+                                            Rectangle {
+                                                anchors.fill: parent
+                                                anchors.margins: 2
+                                                radius: 3
+                                                color: "transparent"
+                                                visible: modelData.kind === "new"
+                                                border.color: primaryColor
+                                                border.width: 1
+                                            }
+
+                                            // pendingDelete hatch hint
+                                            Text {
+                                                anchors.centerIn: parent
+                                                visible: modelData.pendingDelete && segRect.width > 24
+                                                text: "✕"
+                                                color: errorColor
+                                                font.pixelSize: 16
+                                            }
+
+                                            // Small in-bar label when wide enough
+                                            Text {
+                                                anchors.centerIn: parent
+                                                visible: !modelData.pendingDelete && segRect.width > 60
+                                                width: parent.width - 8
+                                                horizontalAlignment: Text.AlignHCenter
+                                                elide: Text.ElideRight
+                                                text: modelData.kind === "free"
+                                                    ? qsTr("Free")
+                                                    : (modelData.name || modelData.fstype || "")
+                                                color: textColor
+                                                font.pixelSize: 11
+                                                font.bold: true
+                                            }
+
+                                            ToolTip.visible: editSegHover.hovered && segRect.width > 4
+                                            ToolTip.text: modelData.kind === "free"
+                                                ? qsTr("Free space") + "  " + humanSize(modelData.sizeBytes)
+                                                : (modelData.name || "")
+                                                    + "  " + humanSize(modelData.sizeBytes)
+                                                    + (modelData.fstype ? "  (" + modelData.fstype + ")" : "")
+                                                    + (modelData.mountpoint ? "  → " + modelData.mountpoint : "")
+
+                                            HoverHandler { id: editSegHover }
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    selectedSegmentIndex = index
+                                                    activeForm = ""
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Whole-bar outline
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 8
+                                color: "transparent"
+                                border.color: Qt.rgba(textMutedColor.r, textMutedColor.g, textMutedColor.b, 0.25)
+                                border.width: 1
+                            }
+                        }
+
+                        // Empty-geometry hint (backend not ready or no segments)
+                        Text {
+                            width: parent.width
+                            visible: simulatedSegments.length === 0
+                            text: qsTr("No partition geometry available for this disk yet.")
+                            font.pixelSize: 13
+                            color: textMutedColor
+                            wrapMode: Text.WordWrap
+                        }
+
+                        // ---- Selection summary ----
+                        Rectangle {
+                            width: parent.width
+                            visible: selectedSegment !== null
+                            implicitHeight: selInfoRow.implicitHeight + 20
+                            height: implicitHeight
+                            radius: 10
+                            color: Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.12)
+                            border.color: Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.4)
+                            border.width: 1
+
+                            Row {
+                                id: selInfoRow
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.margins: 12
+                                spacing: 12
+
+                                Rectangle {
+                                    width: 12; height: 12; radius: 3
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: segmentColor(selectedSegment)
+                                }
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: {
+                                        if (!selectedSegment) return ""
+                                        if (selectedSegment.kind === "free")
+                                            return qsTr("Free space") + "  " + humanSize(selectedSegment.sizeBytes)
+                                        return (selectedSegment.name || "")
+                                            + "  " + humanSize(selectedSegment.sizeBytes)
+                                            + (selectedSegment.fstype ? "  " + selectedSegment.fstype : "")
+                                            + (selectedSegment.mountpoint ? "  → " + selectedSegment.mountpoint : "")
+                                    }
+                                    color: textColor
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                }
+                            }
+                        }
+
+                        // ---- Contextual action panel ----
+                        Flow {
+                            width: parent.width
+                            spacing: 10
+                            visible: selectedSegment !== null
+
+                            // Helper: is the selected segment an editable existing partition?
+                            property bool isFree: selectedSegment && selectedSegment.kind === "free"
+                            property bool isExisting: selectedSegment
+                                && (selectedSegment.kind === "existing" || selectedSegment.kind === "new")
+                                && !(selectedSegment.pendingDelete === true)
+
+                            // New partition (free only)
+                            Button {
+                                text: qsTr("+ New partition")
+                                enabled: parent.isFree
+                                onClicked: activeForm = (activeForm === "create" ? "" : "create")
+                            }
+                            // Delete (existing)
+                            Button {
+                                text: qsTr("Delete")
+                                enabled: parent.isExisting && selectedSegment && selectedSegment.kind === "existing"
+                                onClicked: {
+                                    addOperation({
+                                        type: "delete",
+                                        target: selectedSegment.name,
+                                        params: { number: (selectedSegment.number || 0) }
+                                    })
+                                }
+                            }
+                            // Resize (existing)
+                            Button {
+                                text: qsTr("Resize")
+                                enabled: parent.isExisting
+                                onClicked: activeForm = (activeForm === "resize" ? "" : "resize")
+                            }
+                            // Format (existing)
+                            Button {
+                                text: qsTr("Format")
+                                enabled: parent.isExisting
+                                onClicked: activeForm = (activeForm === "format" ? "" : "format")
+                            }
+                            // Flags (existing)
+                            Button {
+                                text: qsTr("Flags")
+                                enabled: parent.isExisting
+                                onClicked: activeForm = (activeForm === "flags" ? "" : "flags")
+                            }
+                        }
+
+                        // ==== FORM: New partition (on selected free segment) ====
+                        Rectangle {
+                            width: parent.width
+                            visible: activeForm === "create" && selectedSegment
+                                && selectedSegment.kind === "free"
+                            implicitHeight: createForm.implicitHeight + 28
+                            height: implicitHeight
+                            radius: 10
+                            color: Qt.rgba(0, 0, 0, 0.18)
+                            border.color: Qt.rgba(textMutedColor.r, textMutedColor.g, textMutedColor.b, 0.25)
+                            border.width: 1
+
+                            // Free size in MiB (bound to the selected free segment).
+                            property int freeMib: selectedSegment
+                                ? sectorsToMib(selectedSegment.sizeSectors) : 0
+
+                            Column {
+                                id: createForm
+                                anchors.top: parent.top
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.margins: 14
+                                spacing: 12
+
+                                Text {
+                                    text: qsTr("New partition")
+                                    font.pixelSize: 15
+                                    font.bold: true
+                                    color: textColor
+                                }
+
+                                // Size (slider + numeric field), bounded by free size
+                                Column {
+                                    width: parent.width
+                                    spacing: 6
+
+                                    Text {
+                                        text: qsTr("Size (MiB)")
+                                        font.pixelSize: 13
+                                        color: textMutedColor
+                                    }
+
+                                    Row {
+                                        width: parent.width
+                                        spacing: 12
+
+                                        Slider {
+                                            id: createSizeSlider
+                                            width: parent.width - createSizeField.width - 12
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            from: 1
+                                            to: Math.max(1, parent.parent.parent.freeMib)
+                                            stepSize: 1
+                                            value: Math.max(1, Math.min(
+                                                parent.parent.parent.freeMib,
+                                                Math.round(parent.parent.parent.freeMib)))
+                                            onMoved: createSizeField.text = Math.round(value).toString()
+                                        }
+
+                                        TextField {
+                                            id: createSizeField
+                                            width: 120
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: Math.round(createSizeSlider.value).toString()
+                                            inputMethodHints: Qt.ImhDigitsOnly
+                                            validator: IntValidator {
+                                                bottom: 1
+                                                top: Math.max(1, createForm.parent.freeMib)
+                                            }
+                                            color: textColor
+                                            onEditingFinished: {
+                                                var v = parseInt(text)
+                                                if (isNaN(v)) v = 1
+                                                v = Math.max(1, Math.min(createForm.parent.freeMib, v))
+                                                createSizeSlider.value = v
+                                                text = v.toString()
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: qsTr("Available") + ": " + createForm.parent.freeMib + " MiB ("
+                                            + humanSize(sectorsToBytes(mibToSectors(createForm.parent.freeMib))) + ")"
+                                        font.pixelSize: 11
+                                        color: textMutedColor
+                                    }
+                                }
+
+                                // Filesystem + mount point + flags
+                                Row {
+                                    width: parent.width
+                                    spacing: 16
+
+                                    Column {
+                                        spacing: 4
+                                        Text {
+                                            text: qsTr("Filesystem")
+                                            font.pixelSize: 12
+                                            color: textMutedColor
+                                        }
+                                        ComboBox {
+                                            id: createFsCombo
+                                            width: 130
+                                            model: ["ext4", "btrfs", "vfat", "swap"]
+                                        }
+                                    }
+
+                                    Column {
+                                        spacing: 4
+                                        Text {
+                                            text: qsTr("Mount point")
+                                            font.pixelSize: 12
+                                            color: textMutedColor
+                                        }
+                                        ComboBox {
+                                            id: createMountCombo
+                                            width: 150
+                                            model: ["(none)", "/", "/home", "/boot", "swap"]
+                                        }
+                                    }
+
+                                    Column {
+                                        spacing: 4
+                                        Text {
+                                            text: qsTr("Flags")
+                                            font.pixelSize: 12
+                                            color: textMutedColor
+                                        }
+                                        Row {
+                                            spacing: 12
+                                            CheckBox {
+                                                id: createEspFlag
+                                                text: "esp"
+                                                contentItem: Text {
+                                                    text: createEspFlag.text
+                                                    color: textColor
+                                                    font.pixelSize: 13
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    leftPadding: createEspFlag.indicator.width + createEspFlag.spacing
+                                                }
+                                            }
+                                            CheckBox {
+                                                id: createBootFlag
+                                                text: "boot"
+                                                contentItem: Text {
+                                                    text: createBootFlag.text
+                                                    color: textColor
+                                                    font.pixelSize: 13
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    leftPadding: createBootFlag.indicator.width + createBootFlag.spacing
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Row {
+                                    spacing: 10
+                                    Button {
+                                        text: qsTr("Add to queue")
+                                        highlighted: true
+                                        onClicked: {
+                                            var mib = Math.max(1, Math.min(
+                                                createForm.parent.freeMib,
+                                                Math.round(createSizeSlider.value)))
+                                            var flags = []
+                                            if (createEspFlag.checked) flags.push("esp")
+                                            if (createBootFlag.checked) flags.push("boot")
+                                            var mp = createMountCombo.currentIndex === 0
+                                                ? "" : createMountCombo.currentText
+                                            addOperation({
+                                                type: "create",
+                                                target: "free:" + selectedSegment.startSector,
+                                                params: {
+                                                    start_sector: selectedSegment.startSector,
+                                                    size_sectors: mibToSectors(mib),
+                                                    fstype: createFsCombo.currentText,
+                                                    mountpoint: mp,
+                                                    flags: flags
+                                                }
+                                            })
+                                        }
+                                    }
+                                    Button {
+                                        text: qsTr("Cancel")
+                                        onClicked: activeForm = ""
+                                    }
+                                }
+                            }
+                        }
+
+                        // ==== FORM: Resize (on selected existing partition) ====
+                        Rectangle {
+                            width: parent.width
+                            visible: activeForm === "resize" && selectedSegment
+                                && selectedSegment.kind !== "free"
+                            implicitHeight: resizeForm.implicitHeight + 28
+                            height: implicitHeight
+                            radius: 10
+                            color: Qt.rgba(0, 0, 0, 0.18)
+                            border.color: Qt.rgba(textMutedColor.r, textMutedColor.g, textMutedColor.b, 0.25)
+                            border.width: 1
+
+                            // Adjacent free space after this partition (if provided by
+                            // the backend as `freeAfterSectors`), else 0. Upper bound is
+                            // current size + adjacent free; lower bound is minFs.
+                            property int curMib: selectedSegment ? sectorsToMib(selectedSegment.sizeSectors) : 0
+                            property int freeAfterMib: selectedSegment
+                                ? sectorsToMib(selectedSegment.freeAfterSectors || 0) : 0
+                            property int minMib: selectedSegment
+                                ? Math.max(1, sectorsToMib(selectedSegment.minSizeSectors || 0)) : 1
+                            property int maxMib: curMib + freeAfterMib
+
+                            Column {
+                                id: resizeForm
+                                anchors.top: parent.top
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.margins: 14
+                                spacing: 12
+
+                                Text {
+                                    text: qsTr("Resize partition")
+                                    font.pixelSize: 15
+                                    font.bold: true
+                                    color: textColor
+                                }
+
+                                Column {
+                                    width: parent.width
+                                    spacing: 6
+
+                                    Text {
+                                        text: qsTr("New size (MiB)")
+                                        font.pixelSize: 13
+                                        color: textMutedColor
+                                    }
+
+                                    Row {
+                                        width: parent.width
+                                        spacing: 12
+
+                                        Slider {
+                                            id: resizeSlider
+                                            width: parent.width - resizeField.width - 12
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            from: resizeForm.parent.minMib
+                                            to: Math.max(resizeForm.parent.minMib, resizeForm.parent.maxMib)
+                                            stepSize: 1
+                                            value: resizeForm.parent.curMib
+                                            onMoved: resizeField.text = Math.round(value).toString()
+                                        }
+
+                                        TextField {
+                                            id: resizeField
+                                            width: 120
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: Math.round(resizeSlider.value).toString()
+                                            inputMethodHints: Qt.ImhDigitsOnly
+                                            validator: IntValidator {
+                                                bottom: resizeForm.parent.minMib
+                                                top: Math.max(resizeForm.parent.minMib, resizeForm.parent.maxMib)
+                                            }
+                                            color: textColor
+                                            onEditingFinished: {
+                                                var v = parseInt(text)
+                                                if (isNaN(v)) v = resizeForm.parent.minMib
+                                                v = Math.max(resizeForm.parent.minMib,
+                                                    Math.min(resizeForm.parent.maxMib, v))
+                                                resizeSlider.value = v
+                                                text = v.toString()
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: qsTr("Range") + ": " + resizeForm.parent.minMib
+                                            + " – " + resizeForm.parent.maxMib + " MiB"
+                                        font.pixelSize: 11
+                                        color: textMutedColor
+                                    }
+                                }
+
+                                Row {
+                                    spacing: 10
+                                    Button {
+                                        text: qsTr("Add to queue")
+                                        highlighted: true
+                                        onClicked: {
+                                            var v = Math.max(resizeForm.parent.minMib,
+                                                Math.min(resizeForm.parent.maxMib,
+                                                    Math.round(resizeSlider.value)))
+                                            addOperation({
+                                                type: "resize",
+                                                target: selectedSegment.name,
+                                                params: {
+                                                    path: selectedSegment.name,
+                                                    number: (selectedSegment.number || 0),
+                                                    new_size_sectors: mibToSectors(v),
+                                                    fstype: (selectedSegment.fstype || "")
+                                                }
+                                            })
+                                        }
+                                    }
+                                    Button {
+                                        text: qsTr("Cancel")
+                                        onClicked: activeForm = ""
+                                    }
+                                }
+                            }
+                        }
+
+                        // ==== FORM: Format (fstype + mount point) ====
+                        Rectangle {
+                            width: parent.width
+                            visible: activeForm === "format" && selectedSegment
+                                && selectedSegment.kind !== "free"
+                            implicitHeight: formatForm.implicitHeight + 28
+                            height: implicitHeight
+                            radius: 10
+                            color: Qt.rgba(0, 0, 0, 0.18)
+                            border.color: Qt.rgba(textMutedColor.r, textMutedColor.g, textMutedColor.b, 0.25)
+                            border.width: 1
+
+                            Column {
+                                id: formatForm
+                                anchors.top: parent.top
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.margins: 14
+                                spacing: 12
+
+                                Text {
+                                    text: qsTr("Format partition")
+                                    font.pixelSize: 15
+                                    font.bold: true
+                                    color: textColor
+                                }
+
+                                Row {
+                                    spacing: 16
+
+                                    Column {
+                                        spacing: 4
+                                        Text {
+                                            text: qsTr("Filesystem")
+                                            font.pixelSize: 12
+                                            color: textMutedColor
+                                        }
+                                        ComboBox {
+                                            id: formatFsCombo
+                                            width: 130
+                                            model: ["ext4", "btrfs", "vfat", "swap"]
+                                        }
+                                    }
+
+                                    Column {
+                                        spacing: 4
+                                        Text {
+                                            text: qsTr("Mount point")
+                                            font.pixelSize: 12
+                                            color: textMutedColor
+                                        }
+                                        ComboBox {
+                                            id: formatMountCombo
+                                            width: 150
+                                            model: ["(none)", "/", "/home", "/boot", "swap"]
+                                        }
+                                    }
+                                }
+
+                                Row {
+                                    spacing: 10
+                                    Button {
+                                        text: qsTr("Add to queue")
+                                        highlighted: true
+                                        onClicked: {
+                                            var mp = formatMountCombo.currentIndex === 0
+                                                ? "" : formatMountCombo.currentText
+                                            addOperation({
+                                                type: "format",
+                                                target: selectedSegment.name,
+                                                params: {
+                                                    path: selectedSegment.name,
+                                                    fstype: formatFsCombo.currentText,
+                                                    mountpoint: mp
+                                                }
+                                            })
+                                        }
+                                    }
+                                    Button {
+                                        text: qsTr("Cancel")
+                                        onClicked: activeForm = ""
+                                    }
+                                }
+                            }
+                        }
+
+                        // ==== FORM: Flags (esp / boot toggles) ====
+                        Rectangle {
+                            width: parent.width
+                            visible: activeForm === "flags" && selectedSegment
+                                && selectedSegment.kind !== "free"
+                            implicitHeight: flagsForm.implicitHeight + 28
+                            height: implicitHeight
+                            radius: 10
+                            color: Qt.rgba(0, 0, 0, 0.18)
+                            border.color: Qt.rgba(textMutedColor.r, textMutedColor.g, textMutedColor.b, 0.25)
+                            border.width: 1
+
+                            Column {
+                                id: flagsForm
+                                anchors.top: parent.top
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.margins: 14
+                                spacing: 12
+
+                                Text {
+                                    text: qsTr("Partition flags")
+                                    font.pixelSize: 15
+                                    font.bold: true
+                                    color: textColor
+                                }
+
+                                Row {
+                                    spacing: 12
+                                    Repeater {
+                                        model: ["esp", "boot"]
+                                        Button {
+                                            required property string modelData
+                                            text: qsTr("Set") + " " + modelData
+                                            onClicked: {
+                                                addOperation({
+                                                    type: "setflag",
+                                                    target: selectedSegment.name,
+                                                    params: {
+                                                        number: (selectedSegment.number || 0),
+                                                        flag: modelData,
+                                                        state: true
+                                                    }
+                                                })
+                                            }
+                                        }
+                                    }
+                                    Repeater {
+                                        model: ["esp", "boot"]
+                                        Button {
+                                            required property string modelData
+                                            text: qsTr("Clear") + " " + modelData
+                                            onClicked: {
+                                                addOperation({
+                                                    type: "setflag",
+                                                    target: selectedSegment.name,
+                                                    params: {
+                                                        number: (selectedSegment.number || 0),
+                                                        flag: modelData,
+                                                        state: false
+                                                    }
+                                                })
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ---- Divider ----
+                        Rectangle {
+                            width: parent.width
+                            height: 1
+                            color: Qt.rgba(textMutedColor.r, textMutedColor.g, textMutedColor.b, 0.25)
+                        }
+
+                        // ---- Pending operations queue ----
+                        Column {
+                            width: parent.width
+                            spacing: 8
+
+                            Row {
+                                width: parent.width
+                                spacing: 8
+
+                                Text {
+                                    text: qsTr("Pending operations")
+                                    font.pixelSize: 15
+                                    font.bold: true
+                                    color: textColor
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                Rectangle {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    height: 20
+                                    width: opCountLabel.width + 14
+                                    radius: 10
+                                    color: Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.3)
+                                    Text {
+                                        id: opCountLabel
+                                        anchors.centerIn: parent
+                                        text: pendingOperations.length.toString()
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        color: textColor
+                                    }
+                                }
+                            }
+
+                            Text {
+                                width: parent.width
+                                visible: pendingOperations.length === 0
+                                text: qsTr("No operation queued.")
+                                font.pixelSize: 13
+                                color: textMutedColor
+                            }
+
+                            Repeater {
+                                model: pendingOperations
+
+                                Rectangle {
+                                    width: parent.width
+                                    implicitHeight: opRow.implicitHeight + 16
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Qt.rgba(0, 0, 0, 0.18)
+
+                                    Row {
+                                        id: opRow
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.margins: 12
+                                        spacing: 10
+
+                                        Text {
+                                            width: parent.width - removeOpBtn.width - 10
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: operationLabel(modelData)
+                                            font.pixelSize: 13
+                                            color: textColor
+                                            wrapMode: Text.WordWrap
+                                        }
+
+                                        Button {
+                                            id: removeOpBtn
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "✕"
+                                            implicitWidth: 32
+                                            onClicked: removeOperation(index)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Row {
+                                spacing: 10
+                                visible: pendingOperations.length > 0
+
+                                Button {
+                                    text: qsTr("Reset")
+                                    onClicked: resetOperations()
+                                }
+
+                                Button {
+                                    text: commandPreviewColumn.expanded
+                                        ? qsTr("Hide command preview")
+                                        : qsTr("Show command preview")
+                                    visible: commandPreview.length > 0
+                                    onClicked: commandPreviewColumn.expanded = !commandPreviewColumn.expanded
+                                }
+                            }
+
+                            // Collapsible command preview
+                            Column {
+                                id: commandPreviewColumn
+                                width: parent.width
+                                spacing: 4
+                                property bool expanded: false
+                                visible: expanded && commandPreview.length > 0
+
+                                Rectangle {
+                                    width: parent.width
+                                    implicitHeight: cmdPreviewInner.implicitHeight + 20
+                                    height: implicitHeight
+                                    radius: 8
+                                    color: Qt.rgba(0, 0, 0, 0.28)
+
+                                    Column {
+                                        id: cmdPreviewInner
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.top: parent.top
+                                        anchors.margins: 12
+                                        spacing: 4
+
+                                        Repeater {
+                                            model: commandPreview
+                                            Text {
+                                                width: parent.width
+                                                text: modelData
+                                                font.pixelSize: 12
+                                                font.family: "monospace"
+                                                color: textMutedColor
+                                                wrapMode: Text.WrapAnywhere
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ---- Validation banner ----
+                        Rectangle {
+                            width: parent.width
+                            visible: !engine.manualPlanValid && manualPlanError !== ""
+                            implicitHeight: manualErrRow.implicitHeight + 20
+                            height: implicitHeight
+                            radius: 8
+                            color: Qt.rgba(warningColor.r, warningColor.g, warningColor.b, 0.15)
+                            border.color: warningColor
+                            border.width: 1
+
+                            Row {
+                                id: manualErrRow
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.margins: 12
+                                spacing: 10
+
+                                Text {
+                                    text: "⚠️"
+                                    font.pixelSize: 16
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                Text {
+                                    width: parent.width - 30
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: manualPlanError
+                                    font.pixelSize: 13
+                                    color: warningColor
+                                    wrapMode: Text.WordWrap
+                                }
                             }
                         }
                     }

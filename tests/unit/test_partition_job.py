@@ -1334,7 +1334,9 @@ class TestManualPartitioning:
         )
 
     @staticmethod
-    def _assign(name: str, mountpoint: str, fmt: bool = False, fstype: str = "") -> dict[str, object]:
+    def _assign(
+        name: str, mountpoint: str, fmt: bool = False, fstype: str = ""
+    ) -> dict[str, object]:
         return {
             "name": name,
             "path": f"/dev/{name}",
@@ -1442,3 +1444,51 @@ class TestManualPartitioning:
             )
             job.run(context)
             assert mock_manual.called
+
+
+class TestManualOperationsIntegration:
+    """Manual mode routing between the legacy M1 assignments and the M2 ops."""
+
+    def test_operations_present_routes_to_apply_operations(self) -> None:
+        """When partition_operations is present, _apply_operations drives it."""
+        job = PartitionJob()
+        with patch.object(job, "_apply_operations") as mock_apply:
+            mock_apply.return_value = JobResult.ok()
+            selections = {
+                "partition_operations": [
+                    {"type": "delete", "target": "/dev/sdb2", "params": {"number": 2}}
+                ]
+            }
+            context = JobContext(selections=selections)
+            result = job._partition_manual(
+                context=context, disk="/dev/sdb", selections=selections, dry_run=True
+            )
+        assert result.success is True
+        assert mock_apply.called
+
+    def test_operations_absent_uses_legacy_assignment_path(self) -> None:
+        """Without partition_operations, the legacy assignment path is used."""
+        job = PartitionJob()
+        with patch.object(job, "_apply_operations") as mock_apply:
+            assignments = [
+                {
+                    "name": "sdb2",
+                    "path": "/dev/sdb2",
+                    "mountpoint": "/",
+                    "format": False,
+                    "fstype": "ext4",
+                }
+            ]
+            selections = {"partition_assignments": assignments}
+            context = JobContext(
+                target_root="/mnt/target",
+                selections=selections,
+            )
+            with patch.object(job, "_run_partitioning_command") as mock_cmd:
+                mock_cmd.return_value = JobResult.ok()
+                result = job._partition_manual(
+                    context=context, disk="/dev/sdb", selections=selections, dry_run=True
+                )
+        assert result.success is True
+        # The M2 path must NOT have been taken.
+        mock_apply.assert_not_called()
