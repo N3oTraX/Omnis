@@ -217,7 +217,7 @@ Item {
                                         verticalAlignment: Text.AlignVCenter
                                     }
 
-                                    onClicked: root.editSection("users")
+                                    onClicked: root.editUsers()
                                 }
                             }
                         }
@@ -349,7 +349,7 @@ Item {
                                         verticalAlignment: Text.AlignVCenter
                                     }
 
-                                    onClicked: root.editSection("locale")
+                                    onClicked: root.editLocale()
                                 }
                             }
                         }
@@ -522,7 +522,7 @@ Item {
                                         verticalAlignment: Text.AlignVCenter
                                     }
 
-                                    onClicked: root.editSection("users")
+                                    onClicked: root.editUsers()
                                 }
                             }
                         }
@@ -767,7 +767,7 @@ Item {
                                         verticalAlignment: Text.AlignVCenter
                                     }
 
-                                    onClicked: root.editSection("partition")
+                                    onClicked: root.editPartition()
                                 }
                             }
                         }
