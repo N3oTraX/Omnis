@@ -86,6 +86,13 @@ def parse_args() -> argparse.Namespace:
         help="Run without forking engine process (for development/testing)",
     )
 
+    parser.add_argument(
+        "--skip-requirements",
+        action="store_true",
+        help="Dev: bypass requirements and per-screen validation "
+        "(navigate all screens freely for design testing)",
+    )
+
     return parser.parse_args()
 
 
@@ -212,6 +219,7 @@ def run_ui_mode(
     debug: bool,
     dry_run: bool,
     no_fork: bool,
+    skip_requirements: bool = False,
 ) -> int:
     """
     Run the UI process.
@@ -282,11 +290,23 @@ def run_ui_mode(
         # Create bridge between QML and Python engine
         # In fork mode, bridge uses IPC; in no-fork mode, uses direct engine
         if no_fork:
-            bridge = EngineBridge(engine, theme_base, debug=debug, dry_run=dry_run)
+            bridge = EngineBridge(
+                engine,
+                theme_base,
+                debug=debug,
+                dry_run=dry_run,
+                skip_requirements=skip_requirements,
+            )
         else:
             # TODO: Create IPC-based bridge for v0.2.0
             # For now, fall back to direct bridge
-            bridge = EngineBridge(engine, theme_base, debug=debug, dry_run=dry_run)
+            bridge = EngineBridge(
+                engine,
+                theme_base,
+                debug=debug,
+                dry_run=dry_run,
+                skip_requirements=skip_requirements,
+            )
 
         # Create translator proxy for live language switching
         translator_proxy = TranslatorProxy(engine=qml_engine)
@@ -372,6 +392,7 @@ def main() -> int:
         debug=args.debug,
         dry_run=args.dry_run,
         no_fork=args.no_fork,
+        skip_requirements=args.skip_requirements,
     )
 
 

@@ -608,6 +608,8 @@ ApplicationWindow {
     }
 
     function canProceedToNext() {
+        if (engine.skipValidation)
+            return true
         switch (currentStep) {
             case 1:  // Locale
                 return engine.selectedLocale !== "" &&
