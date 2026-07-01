@@ -458,7 +458,7 @@ Item {
                                     }
                                 }
 
-                                // Histobar: proportional partition layout of this disk
+                                // Histobar: geometric layout of this disk (partitions + free space)
                                 Item {
                                     id: histoBar
                                     width: parent.width
@@ -467,18 +467,12 @@ Item {
                                     height: implicitHeight
 
                                     // Capture disk-level data so the inner Repeater's modelData
-                                    // (which is a partition) does not shadow it.
+                                    // (a segment) does not shadow it.
                                     property var diskData: modelData
                                     property real diskBytes: (diskData && diskData.sizeBytes > 0) ? diskData.sizeBytes : 0
-                                    property var parts: (diskData && diskData.partitions) ? diskData.partitions : []
-                                    // Sum of partition sizes to compute free space remainder
-                                    property real usedBytes: {
-                                        var s = 0
-                                        for (var i = 0; i < parts.length; i++)
-                                            s += (parts[i].sizeBytes > 0 ? parts[i].sizeBytes : 0)
-                                        return s
-                                    }
-                                    property real freeBytes: Math.max(0, diskBytes - usedBytes)
+                                    // Ordered segments (kind: "partition" | "free") covering the
+                                    // whole disk, positioned as they physically sit on the medium.
+                                    property var segs: (diskData && diskData.segments) ? diskData.segments : []
 
                                     Rectangle {
                                         id: histoBarBg
@@ -491,39 +485,29 @@ Item {
                                             anchors.fill: parent
                                             spacing: 0
 
-                                            // Partition segments
                                             Repeater {
-                                                model: histoBar.parts
+                                                model: histoBar.segs
 
                                                 Rectangle {
                                                     height: histoBarBg.height
                                                     width: histoBar.diskBytes > 0
                                                         ? histoBarBg.width * (modelData.sizeBytes > 0 ? modelData.sizeBytes : 0) / histoBar.diskBytes
                                                         : 0
-                                                    color: partitionColor(modelData.partType, modelData.fstype)
-                                                    border.color: Qt.rgba(0, 0, 0, 0.25)
-                                                    border.width: 1
+                                                    color: modelData.kind === "free"
+                                                        ? colorFree
+                                                        : partitionColor(modelData.partType, modelData.fstype)
+                                                    border.color: modelData.kind === "free" ? "transparent" : Qt.rgba(0, 0, 0, 0.25)
+                                                    border.width: modelData.kind === "free" ? 0 : 1
 
                                                     ToolTip.visible: segHover.hovered && width > 4
-                                                    ToolTip.text: (modelData.name || "")
-                                                        + "  " + humanSize(modelData.sizeBytes)
-                                                        + (modelData.fstype ? "  (" + modelData.fstype + ")" : "")
+                                                    ToolTip.text: modelData.kind === "free"
+                                                        ? qsTr("Free space") + "  " + humanSize(modelData.sizeBytes)
+                                                        : (modelData.name || "")
+                                                            + "  " + humanSize(modelData.sizeBytes)
+                                                            + (modelData.fstype ? "  (" + modelData.fstype + ")" : "")
 
                                                     HoverHandler { id: segHover }
                                                 }
-                                            }
-
-                                            // Free space segment (remainder)
-                                            Rectangle {
-                                                height: histoBarBg.height
-                                                width: histoBar.diskBytes > 0
-                                                    ? histoBarBg.width * histoBar.freeBytes / histoBar.diskBytes
-                                                    : histoBarBg.width
-                                                color: colorFree
-
-                                                ToolTip.visible: freeHover.hovered && width > 4
-                                                ToolTip.text: qsTr("Free space") + "  " + humanSize(histoBar.freeBytes)
-                                                HoverHandler { id: freeHover }
                                             }
                                         }
                                     }

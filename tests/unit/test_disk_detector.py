@@ -172,6 +172,22 @@ class TestListDisks:
         assert [d["name"] for d in disks] == ["sda"]
 
     @patch("omnis.utils.disk_detector.subprocess.run")
+    def test_excludes_virtual_disks_by_name(self, mock_run: MagicMock) -> None:
+        # zram/loop/ram/etc. can be reported by lsblk as type="disk"; they must
+        # never be offered as installation targets.
+        payload = {
+            "blockdevices": [
+                {"name": "zram0", "size": 8 * 1024**3, "type": "disk", "rota": False},
+                {"name": "loop1", "size": 1024, "type": "disk", "rota": False},
+                {"name": "sda", "size": 256 * 1024**3, "type": "disk", "rota": False},
+            ]
+        }
+        mock_run.side_effect = _make_run(payload, "overlay").side_effect
+
+        disks = disk_detector.list_disks()
+        assert [d["name"] for d in disks] == ["sda"]
+
+    @patch("omnis.utils.disk_detector.subprocess.run")
     def test_excludes_live_disk(self, mock_run: MagicMock) -> None:
         payload = {
             "blockdevices": [
@@ -236,9 +252,12 @@ class TestListDisks:
                 "model",
                 "size",
                 "sizeBytes",
+                "sizeSectors",
+                "sectorSize",
                 "type",
                 "removable",
                 "partitions",
+                "segments",
             }
 
     @patch("omnis.utils.disk_detector.subprocess.run")
@@ -254,3 +273,68 @@ class TestListDisks:
 
         disks = disk_detector.list_disks()
         assert len(disks) == 2  # mock fallback
+
+
+class TestComputeSegments:
+    """Tests for free-space interleaving across the whole disk."""
+
+    @staticmethod
+    def _part(name: str, start: int, sectors: int) -> dict[str, object]:
+        return {
+            "name": name,
+            "partType": "linux",
+            "fstype": "ext4",
+            "startSector": start,
+            "sizeSectors": sectors,
+            "endSector": start + sectors - 1,
+            "sizeBytes": sectors * disk_detector._SECTOR_SIZE,
+        }
+
+    def test_empty_disk_is_single_free_segment(self) -> None:
+        disk_sectors = 40 * 1024**3 // disk_detector._SECTOR_SIZE
+        segs = disk_detector._compute_segments(disk_sectors, [])
+        assert [s["kind"] for s in segs] == ["free"]
+        assert segs[0]["startSector"] == disk_detector._ALIGN
+        assert segs[0]["endSector"] == disk_sectors - disk_detector._GPT_TAIL
+
+    def test_free_between_and_after_partitions(self) -> None:
+        disk_sectors = 1_000_000
+        p1 = self._part("p1", disk_detector._ALIGN, 100_000)  # ends 102047
+        p2 = self._part("p2", 300_000, 100_000)  # ends 399999
+        segs = disk_detector._compute_segments(disk_sectors, [p1, p2])
+
+        assert [s["kind"] for s in segs] == ["partition", "free", "partition", "free"]
+        gap = segs[1]
+        assert (gap["startSector"], gap["endSector"]) == (102_048, 299_999)
+        tail = segs[3]
+        assert tail["startSector"] == 400_000
+        assert tail["endSector"] == disk_sectors - disk_detector._GPT_TAIL
+
+    def test_leading_free_before_first_partition(self) -> None:
+        disk_sectors = 1_000_000
+        p1 = self._part("p1", 500_000, 100_000)
+        segs = disk_detector._compute_segments(disk_sectors, [p1])
+
+        assert [s["kind"] for s in segs] == ["free", "partition", "free"]
+        assert segs[0]["startSector"] == disk_detector._ALIGN
+        assert segs[0]["endSector"] == 499_999
+
+    def test_subalignment_gap_is_dropped(self) -> None:
+        disk_sectors = 1_000_000
+        p1 = self._part("p1", disk_detector._ALIGN, 100_000)  # ends 102047
+        # Next partition sits only 100 sectors later: a sub-1MiB gap, unusable.
+        p2 = self._part("p2", 102_148, 100_000)
+        segs = disk_detector._compute_segments(disk_sectors, [p1, p2])
+
+        # The tiny gap between p1 and p2 is omitted; only the trailing free remains.
+        assert [s["kind"] for s in segs] == ["partition", "partition", "free"]
+
+    def test_ordering_is_by_start_sector(self) -> None:
+        disk_sectors = 1_000_000
+        # Provide partitions out of order; segments must come back sorted.
+        p_late = self._part("p2", 400_000, 50_000)
+        p_early = self._part("p1", disk_detector._ALIGN, 50_000)
+        segs = disk_detector._compute_segments(disk_sectors, [p_late, p_early])
+
+        part_names = [s["name"] for s in segs if s["kind"] == "partition"]
+        assert part_names == ["p1", "p2"]
