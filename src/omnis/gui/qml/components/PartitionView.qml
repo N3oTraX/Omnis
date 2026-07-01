@@ -19,11 +19,28 @@ Item {
     // Signals
     signal diskSelected(string disk)
     signal modeSelected(string mode)
+    // Auto-mode option signals (engine slots added in parallel by bridge agent)
+    signal filesystemSelected(string fs)          // "ext4" | "btrfs"
+    signal swapStrategySelected(string strategy)  // "file" | "none" | "hibernate"
+    signal encryptionToggled(bool enabled)
+    signal encryptionPassphraseSet(string passphrase)
+    signal efiSizeChanged(int sizeMb)
 
     // External properties
     property var disksModel: []  // Array of disk objects: {name, size, type, removable, partitions}
     property string selectedDisk: ""
     property string partitionMode: "auto"  // "auto" or "manual"
+
+    // Auto-mode option state (UI-local, pushed up via signals)
+    property string filesystem: "ext4"        // "ext4" | "btrfs"
+    property string swapStrategy: "file"       // "file" | "none" | "hibernate"
+    property bool encryptionEnabled: false
+    readonly property int efiSizeMb: 512       // fixed for MVP
+
+    // Encryption passphrase validity (passphrase is NOT bound downward, security)
+    readonly property bool encryptionPassValid:
+        !encryptionEnabled ||
+        (encPassField.text.length >= 8 && encPassField.text === encPassConfirmField.text)
 
     // Emit signals when selections change
     onSelectedDiskChanged: if (selectedDisk) diskSelected(selectedDisk)
@@ -41,7 +58,39 @@ Item {
     property color warningColor: "#F59E0B"
     property color errorColor: "#EF4444"
 
-    readonly property bool canProceed: selectedDisk !== ""
+    // Histobar partition palette (by partType, with fstype fallback)
+    property color colorEfi: "#5597e6"        // efi / vfat
+    property color colorLinux: "#10B981"      // ext4 / linux
+    property color colorBtrfs: "#F59E0B"      // btrfs
+    property color colorWindows: "#38BDF8"    // ntfs / windows
+    property color colorSwap: "#A78BFA"       // swap
+    property color colorOther: "#9CA3AF"      // other
+    property color colorFree: Qt.rgba(0.196, 0.216, 0.235, 0.6)  // free space (surface, semi-transparent)
+
+    // Map a partition (partType/fstype) to its histobar color
+    function partitionColor(partType, fstype) {
+        var t = (partType || "").toLowerCase()
+        var f = (fstype || "").toLowerCase()
+        if (t === "efi" || f === "vfat") return colorEfi
+        if (t === "swap" || f === "swap") return colorSwap
+        if (t === "windows" || f === "ntfs") return colorWindows
+        if (f === "btrfs") return colorBtrfs
+        if (t === "linux" || f === "ext4" || f === "ext3" || f === "ext2" || f === "xfs") return colorLinux
+        return colorOther
+    }
+
+    // Human-readable byte size for tooltips/legend
+    function humanSize(bytes) {
+        if (!bytes || bytes <= 0) return "0 o"
+        var units = ["o", "Ko", "Mo", "Go", "To"]
+        var i = 0
+        var v = bytes
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+        return (v >= 100 ? v.toFixed(0) : v.toFixed(1)) + " " + units[i]
+    }
+
+    readonly property bool canProceed:
+        selectedDisk !== "" && (partitionMode !== "auto" || encryptionPassValid)
 
     // Content container
     Rectangle {
@@ -197,10 +246,157 @@ Item {
                                         radius: 8
                                         color: Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.2)
 
-                                        Text {
+                                        // Device kind detection: nvme > ssd > hdd
+                                        property string diskKind: {
+                                            var n = (modelData.name || "").toLowerCase()
+                                            if (n.indexOf("nvme") !== -1) return "nvme"
+                                            if ((modelData.type || "").toUpperCase() === "SSD") return "ssd"
+                                            return "hdd"
+                                        }
+
+                                        // QML-drawn vector icons (always render, no missing-glyph squares)
+                                        Item {
                                             anchors.centerIn: parent
-                                            text: modelData.removable ? "\u{1F4BE}" : (modelData.type === "SSD" ? "\u{1F4BD}" : "\u{1F4BF}")
-                                            font.pixelSize: 24
+                                            width: 28
+                                            height: 28
+
+                                            // --- HDD: classic drive body + platter circle ---
+                                            Item {
+                                                anchors.fill: parent
+                                                visible: parent.parent.diskKind === "hdd"
+
+                                                Rectangle {
+                                                    anchors.centerIn: parent
+                                                    width: 26
+                                                    height: 20
+                                                    radius: 3
+                                                    color: "transparent"
+                                                    border.color: textColor
+                                                    border.width: 2
+
+                                                    Rectangle {  // platter
+                                                        anchors.centerIn: parent
+                                                        anchors.horizontalCenterOffset: -3
+                                                        width: 11
+                                                        height: 11
+                                                        radius: 6
+                                                        color: "transparent"
+                                                        border.color: textColor
+                                                        border.width: 2
+
+                                                        Rectangle {  // spindle
+                                                            anchors.centerIn: parent
+                                                            width: 3
+                                                            height: 3
+                                                            radius: 2
+                                                            color: textColor
+                                                        }
+                                                    }
+
+                                                    Rectangle {  // head arm
+                                                        anchors.right: parent.right
+                                                        anchors.rightMargin: 4
+                                                        anchors.bottom: parent.bottom
+                                                        anchors.bottomMargin: 4
+                                                        width: 8
+                                                        height: 2
+                                                        rotation: -35
+                                                        color: textColor
+                                                    }
+                                                }
+                                            }
+
+                                            // --- SSD: 2.5" enclosure with connector pins ---
+                                            Item {
+                                                anchors.fill: parent
+                                                visible: parent.parent.diskKind === "ssd"
+
+                                                Rectangle {
+                                                    anchors.centerIn: parent
+                                                    width: 26
+                                                    height: 18
+                                                    radius: 3
+                                                    color: "transparent"
+                                                    border.color: textColor
+                                                    border.width: 2
+
+                                                    Row {  // chip dots
+                                                        anchors.centerIn: parent
+                                                        spacing: 4
+                                                        Repeater {
+                                                            model: 3
+                                                            Rectangle {
+                                                                width: 4; height: 4; radius: 1
+                                                                color: primaryColor
+                                                            }
+                                                        }
+                                                    }
+
+                                                    Row {  // connector pins (bottom edge)
+                                                        anchors.bottom: parent.bottom
+                                                        anchors.bottomMargin: -3
+                                                        anchors.left: parent.left
+                                                        anchors.leftMargin: 4
+                                                        spacing: 2
+                                                        Repeater {
+                                                            model: 4
+                                                            Rectangle {
+                                                                width: 2; height: 3
+                                                                color: textColor
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            // --- NVMe: M.2 stick (long thin) with notch + chips ---
+                                            Item {
+                                                anchors.fill: parent
+                                                visible: parent.parent.diskKind === "nvme"
+
+                                                Rectangle {
+                                                    anchors.centerIn: parent
+                                                    width: 28
+                                                    height: 11
+                                                    radius: 2
+                                                    color: "transparent"
+                                                    border.color: textColor
+                                                    border.width: 2
+
+                                                    Row {  // chips
+                                                        anchors.centerIn: parent
+                                                        anchors.horizontalCenterOffset: 2
+                                                        spacing: 3
+                                                        Repeater {
+                                                            model: 2
+                                                            Rectangle {
+                                                                width: 6; height: 5; radius: 1
+                                                                color: primaryColor
+                                                            }
+                                                        }
+                                                    }
+
+                                                    Rectangle {  // edge connector pins
+                                                        anchors.left: parent.left
+                                                        anchors.leftMargin: 2
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        width: 4
+                                                        height: 7
+                                                        color: textColor
+                                                    }
+                                                }
+
+                                                Rectangle {  // mounting notch (semicircle hint)
+                                                    anchors.right: parent.right
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 4
+                                                    height: 4
+                                                    radius: 2
+                                                    color: "transparent"
+                                                    border.color: textColor
+                                                    border.width: 1
+                                                }
+                                            }
                                         }
                                     }
 
@@ -259,6 +455,86 @@ Item {
                                             font.pixelSize: 14
                                             color: textMutedColor
                                         }
+                                    }
+                                }
+
+                                // Histobar: proportional partition layout of this disk
+                                Item {
+                                    id: histoBar
+                                    width: parent.width
+                                    // Match the cumulative height of the 2 text lines (name 18 + size 14 + spacing 4)
+                                    implicitHeight: 36
+                                    height: implicitHeight
+
+                                    // Capture disk-level data so the inner Repeater's modelData
+                                    // (which is a partition) does not shadow it.
+                                    property var diskData: modelData
+                                    property real diskBytes: (diskData && diskData.sizeBytes > 0) ? diskData.sizeBytes : 0
+                                    property var parts: (diskData && diskData.partitions) ? diskData.partitions : []
+                                    // Sum of partition sizes to compute free space remainder
+                                    property real usedBytes: {
+                                        var s = 0
+                                        for (var i = 0; i < parts.length; i++)
+                                            s += (parts[i].sizeBytes > 0 ? parts[i].sizeBytes : 0)
+                                        return s
+                                    }
+                                    property real freeBytes: Math.max(0, diskBytes - usedBytes)
+
+                                    Rectangle {
+                                        id: histoBarBg
+                                        anchors.fill: parent
+                                        radius: 6
+                                        color: colorFree
+                                        clip: true
+
+                                        Row {
+                                            anchors.fill: parent
+                                            spacing: 0
+
+                                            // Partition segments
+                                            Repeater {
+                                                model: histoBar.parts
+
+                                                Rectangle {
+                                                    height: histoBarBg.height
+                                                    width: histoBar.diskBytes > 0
+                                                        ? histoBarBg.width * (modelData.sizeBytes > 0 ? modelData.sizeBytes : 0) / histoBar.diskBytes
+                                                        : 0
+                                                    color: partitionColor(modelData.partType, modelData.fstype)
+                                                    border.color: Qt.rgba(0, 0, 0, 0.25)
+                                                    border.width: 1
+
+                                                    ToolTip.visible: segHover.hovered && width > 4
+                                                    ToolTip.text: (modelData.name || "")
+                                                        + "  " + humanSize(modelData.sizeBytes)
+                                                        + (modelData.fstype ? "  (" + modelData.fstype + ")" : "")
+
+                                                    HoverHandler { id: segHover }
+                                                }
+                                            }
+
+                                            // Free space segment (remainder)
+                                            Rectangle {
+                                                height: histoBarBg.height
+                                                width: histoBar.diskBytes > 0
+                                                    ? histoBarBg.width * histoBar.freeBytes / histoBar.diskBytes
+                                                    : histoBarBg.width
+                                                color: colorFree
+
+                                                ToolTip.visible: freeHover.hovered && width > 4
+                                                ToolTip.text: qsTr("Free space") + "  " + humanSize(histoBar.freeBytes)
+                                                HoverHandler { id: freeHover }
+                                            }
+                                        }
+                                    }
+
+                                    // Subtle outline on the whole bar
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: 6
+                                        color: "transparent"
+                                        border.color: Qt.rgba(textMutedColor.r, textMutedColor.g, textMutedColor.b, 0.25)
+                                        border.width: 1
                                     }
                                 }
 
@@ -397,7 +673,7 @@ Item {
                         // Auto mode
                         Rectangle {
                             width: (parent.width - 16) / 2
-                            height: autoModeColumn.height + 32
+                            height: autoModeColumn.implicitHeight + 32
                             radius: 16
                             color: partitionMode === "auto" ? Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.2) : surfaceColor
                             border.color: partitionMode === "auto" ? primaryColor : "transparent"
@@ -415,11 +691,14 @@ Item {
 
                             Column {
                                 id: autoModeColumn
-                                anchors.fill: parent
+                                anchors.top: parent.top
+                                anchors.left: parent.left
+                                anchors.right: parent.right
                                 anchors.margins: 16
                                 spacing: 12
 
                                 Row {
+                                    anchors.horizontalCenter: parent.horizontalCenter
                                     spacing: 8
 
                                     Text {
@@ -443,9 +722,11 @@ Item {
                                     font.pixelSize: 14
                                     color: textMutedColor
                                     wrapMode: Text.WordWrap
+                                    horizontalAlignment: Text.AlignHCenter
                                 }
 
                                 Row {
+                                    anchors.horizontalCenter: parent.horizontalCenter
                                     spacing: 8
                                     visible: partitionMode === "auto"
 
@@ -467,7 +748,7 @@ Item {
                         // Manual mode
                         Rectangle {
                             width: (parent.width - 16) / 2
-                            height: manualModeColumn.height + 32
+                            height: manualModeColumn.implicitHeight + 32
                             radius: 16
                             color: partitionMode === "manual" ? Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.2) : surfaceColor
                             border.color: partitionMode === "manual" ? primaryColor : "transparent"
@@ -485,11 +766,14 @@ Item {
 
                             Column {
                                 id: manualModeColumn
-                                anchors.fill: parent
+                                anchors.top: parent.top
+                                anchors.left: parent.left
+                                anchors.right: parent.right
                                 anchors.margins: 16
                                 spacing: 12
 
                                 Row {
+                                    anchors.horizontalCenter: parent.horizontalCenter
                                     spacing: 8
 
                                     Text {
@@ -513,9 +797,11 @@ Item {
                                     font.pixelSize: 14
                                     color: textMutedColor
                                     wrapMode: Text.WordWrap
+                                    horizontalAlignment: Text.AlignHCenter
                                 }
 
                                 Row {
+                                    anchors.horizontalCenter: parent.horizontalCenter
                                     spacing: 8
                                     visible: partitionMode === "manual"
 
@@ -531,6 +817,336 @@ Item {
                                         color: warningColor
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+
+                // Auto-mode options card (visible only in auto mode + disk selected)
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.maximumWidth: 900
+                    Layout.preferredHeight: optionsColumn.implicitHeight + 40
+                    radius: 16
+                    color: surfaceColor
+                    visible: selectedDisk !== "" && partitionMode === "auto"
+
+                    Column {
+                        id: optionsColumn
+                        anchors.top: parent.top
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.margins: 20
+                        spacing: 18
+
+                        Text {
+                            text: qsTr("Options")
+                            font.pixelSize: 20
+                            font.bold: true
+                            color: textColor
+                        }
+
+                        // --- Filesystem ---
+                        Column {
+                            width: parent.width
+                            spacing: 8
+
+                            Text {
+                                text: qsTr("Filesystem")
+                                font.pixelSize: 15
+                                font.bold: true
+                                color: textColor
+                            }
+
+                            Row {
+                                spacing: 24
+
+                                RadioButton {
+                                    text: qsTr("ext4")
+                                    checked: filesystem === "ext4"
+                                    onClicked: { filesystem = "ext4"; filesystemSelected("ext4") }
+                                    contentItem: Text {
+                                        text: parent.text
+                                        color: textColor
+                                        font.pixelSize: 14
+                                        verticalAlignment: Text.AlignVCenter
+                                        leftPadding: parent.indicator.width + parent.spacing
+                                    }
+                                }
+
+                                RadioButton {
+                                    text: qsTr("btrfs")
+                                    checked: filesystem === "btrfs"
+                                    onClicked: { filesystem = "btrfs"; filesystemSelected("btrfs") }
+                                    contentItem: Text {
+                                        text: parent.text
+                                        color: textColor
+                                        font.pixelSize: 14
+                                        verticalAlignment: Text.AlignVCenter
+                                        leftPadding: parent.indicator.width + parent.spacing
+                                    }
+                                }
+                            }
+                        }
+
+                        // --- Swap ---
+                        Column {
+                            width: parent.width
+                            spacing: 8
+
+                            Text {
+                                text: qsTr("Swap")
+                                font.pixelSize: 15
+                                font.bold: true
+                                color: textColor
+                            }
+
+                            Row {
+                                spacing: 24
+
+                                RadioButton {
+                                    text: qsTr("File (auto)")
+                                    checked: swapStrategy === "file"
+                                    onClicked: { swapStrategy = "file"; swapStrategySelected("file") }
+                                    contentItem: Text {
+                                        text: parent.text
+                                        color: textColor
+                                        font.pixelSize: 14
+                                        verticalAlignment: Text.AlignVCenter
+                                        leftPadding: parent.indicator.width + parent.spacing
+                                    }
+                                }
+
+                                RadioButton {
+                                    text: qsTr("None")
+                                    checked: swapStrategy === "none"
+                                    onClicked: { swapStrategy = "none"; swapStrategySelected("none") }
+                                    contentItem: Text {
+                                        text: parent.text
+                                        color: textColor
+                                        font.pixelSize: 14
+                                        verticalAlignment: Text.AlignVCenter
+                                        leftPadding: parent.indicator.width + parent.spacing
+                                    }
+                                }
+
+                                RadioButton {
+                                    text: qsTr("Hibernation")
+                                    checked: swapStrategy === "hibernate"
+                                    onClicked: { swapStrategy = "hibernate"; swapStrategySelected("hibernate") }
+                                    contentItem: Text {
+                                        text: parent.text
+                                        color: textColor
+                                        font.pixelSize: 14
+                                        verticalAlignment: Text.AlignVCenter
+                                        leftPadding: parent.indicator.width + parent.spacing
+                                    }
+                                }
+                            }
+                        }
+
+                        // --- LUKS encryption ---
+                        Column {
+                            width: parent.width
+                            spacing: 12
+
+                            CheckBox {
+                                id: encryptionCheck
+                                text: qsTr("Enable encryption (LUKS)")
+                                checked: encryptionEnabled
+                                onToggled: {
+                                    encryptionEnabled = checked
+                                    encryptionToggled(checked)
+                                }
+                                contentItem: Text {
+                                    text: encryptionCheck.text
+                                    color: textColor
+                                    font.pixelSize: 15
+                                    font.bold: true
+                                    verticalAlignment: Text.AlignVCenter
+                                    leftPadding: encryptionCheck.indicator.width + encryptionCheck.spacing
+                                }
+                            }
+
+                            // Passphrase fields (collapse when disabled)
+                            ColumnLayout {
+                                width: parent.width
+                                spacing: 8
+                                visible: encryptionEnabled
+                                // collapse: zero height contribution when hidden
+                                height: visible ? implicitHeight : 0
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 10
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        Layout.preferredWidth: 1
+                                        spacing: 8
+
+                                        TextField {
+                                            id: encPassField
+                                            Layout.fillWidth: true
+                                            height: 40
+                                            placeholderText: qsTr("Passphrase (min 8 characters)")
+                                            font.pixelSize: 16
+                                            echoMode: showEncPassCheck.checked ? TextInput.Normal : TextInput.Password
+
+                                            onTextChanged: {
+                                                if (encryptionPassValid && encryptionEnabled)
+                                                    encryptionPassphraseSet(text)
+                                            }
+
+                                            background: Rectangle {
+                                                radius: 8
+                                                color: encPassField.activeFocus ? Qt.darker(backgroundColor, 1.1) : backgroundColor
+                                                border.color: {
+                                                    if (!encPassField.activeFocus) return textMutedColor;
+                                                    if (encPassField.text.length === 0) return primaryColor;
+                                                    return encPassField.text.length >= 8 ? successColor : errorColor;
+                                                }
+                                                border.width: 2
+                                                Behavior on border.color { ColorAnimation { duration: 150 } }
+                                            }
+
+                                            color: textColor
+                                            selectionColor: primaryColor
+                                            selectedTextColor: textColor
+                                            leftPadding: 16
+                                        }
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        Layout.preferredWidth: 1
+                                        spacing: 8
+
+                                        TextField {
+                                            id: encPassConfirmField
+                                            Layout.fillWidth: true
+                                            height: 40
+                                            placeholderText: qsTr("Confirm passphrase")
+                                            font.pixelSize: 16
+                                            echoMode: showEncPassCheck.checked ? TextInput.Normal : TextInput.Password
+
+                                            onTextChanged: {
+                                                if (encryptionPassValid && encryptionEnabled)
+                                                    encryptionPassphraseSet(encPassField.text)
+                                            }
+
+                                            background: Rectangle {
+                                                radius: 8
+                                                color: encPassConfirmField.activeFocus ? Qt.darker(backgroundColor, 1.1) : backgroundColor
+                                                border.color: {
+                                                    if (!encPassConfirmField.activeFocus) return textMutedColor;
+                                                    if (encPassConfirmField.text.length === 0) return primaryColor;
+                                                    return (encPassConfirmField.text === encPassField.text) ? successColor : errorColor;
+                                                }
+                                                border.width: 2
+                                                Behavior on border.color { ColorAnimation { duration: 150 } }
+                                            }
+
+                                            color: textColor
+                                            selectionColor: primaryColor
+                                            selectedTextColor: textColor
+                                            leftPadding: 16
+                                        }
+
+                                        // Match indicator
+                                        Row {
+                                            Layout.fillWidth: true
+                                            spacing: 8
+                                            visible: encPassConfirmField.text.length > 0
+
+                                            Text {
+                                                text: (encPassConfirmField.text === encPassField.text) ? "✓" : "✗"
+                                                font.pixelSize: 13
+                                                color: (encPassConfirmField.text === encPassField.text) ? successColor : errorColor
+                                                anchors.verticalCenter: parent.verticalCenter
+                                            }
+
+                                            Text {
+                                                text: (encPassConfirmField.text === encPassField.text)
+                                                    ? qsTr("Passphrases match")
+                                                    : qsTr("Passphrases do not match")
+                                                font.pixelSize: 11
+                                                color: (encPassConfirmField.text === encPassField.text) ? successColor : errorColor
+                                                anchors.verticalCenter: parent.verticalCenter
+                                            }
+                                        }
+                                    }
+                                }
+
+                                CheckBox {
+                                    id: showEncPassCheck
+                                    text: qsTr("Show passphrase")
+                                    contentItem: Text {
+                                        text: showEncPassCheck.text
+                                        color: textMutedColor
+                                        font.pixelSize: 13
+                                        verticalAlignment: Text.AlignVCenter
+                                        leftPadding: showEncPassCheck.indicator.width + showEncPassCheck.spacing
+                                    }
+                                }
+                            }
+                        }
+
+                        // --- EFI partition (read-only info, MVP) ---
+                        Column {
+                            width: parent.width
+                            spacing: 8
+
+                            Text {
+                                text: qsTr("EFI Partition")
+                                font.pixelSize: 15
+                                font.bold: true
+                                color: textColor
+                            }
+
+                            Text {
+                                text: qsTr("512 MB (mounted on /boot)")
+                                font.pixelSize: 14
+                                color: textMutedColor
+                            }
+                        }
+                    }
+                }
+
+                // Histobar legend (compact)
+                Row {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.maximumWidth: 900
+                    spacing: 16
+                    visible: disksModel.length > 0
+
+                    Repeater {
+                        model: [
+                            { c: colorEfi, label: qsTr("EFI") },
+                            { c: colorLinux, label: qsTr("Linux") },
+                            { c: colorBtrfs, label: qsTr("btrfs") },
+                            { c: colorWindows, label: qsTr("Windows") },
+                            { c: colorSwap, label: qsTr("Swap") },
+                            { c: colorFree, label: qsTr("Free") }
+                        ]
+
+                        Row {
+                            spacing: 6
+
+                            Rectangle {
+                                width: 12
+                                height: 12
+                                radius: 3
+                                color: modelData.c
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            Text {
+                                text: modelData.label
+                                font.pixelSize: 12
+                                color: textMutedColor
+                                anchors.verticalCenter: parent.verticalCenter
                             }
                         }
                     }

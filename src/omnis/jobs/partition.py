@@ -8,7 +8,6 @@ All operations require explicit confirmation and use dry-run mode by default.
 
 from __future__ import annotations
 
-import json
 import logging
 import subprocess
 from dataclasses import dataclass, field
@@ -17,8 +16,40 @@ from pathlib import Path
 from typing import Any
 
 from omnis.jobs.base import BaseJob, JobContext, JobResult
+from omnis.utils import disk_detector
 
 logger = logging.getLogger(__name__)
+
+
+def part_path(disk: str, n: int) -> str:
+    """
+    Build a partition device path, handling the NVMe/eMMC ``p`` separator.
+
+    Block devices whose name ends with a digit (NVMe ``nvme0n1``, eMMC
+    ``mmcblk0``, loop ``loop0``) require a ``p`` before the partition number,
+    e.g. ``/dev/nvme0n1`` -> ``/dev/nvme0n1p1``. SATA/SCSI devices (``sda``) do
+    not, e.g. ``/dev/sda`` -> ``/dev/sda1``.
+    """
+    base = disk.rsplit("/", 1)[-1]
+    sep = "p" if base and base[-1].isdigit() else ""
+    return f"{disk}{sep}{n}"
+
+
+def _detect_ram_mb() -> int:
+    """
+    Detect total RAM in MiB from ``/proc/meminfo``.
+
+    Returns the rounded MiB value, or ``8192`` when detection is unavailable.
+    """
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("MemTotal:"):
+                    kib = int(line.split()[1])
+                    return kib // 1024
+    except (OSError, ValueError, IndexError):
+        logger.debug("RAM detection failed, defaulting to 8192 MB")
+    return 8192
 
 
 class PartitionMode(Enum):
@@ -71,6 +102,15 @@ class PartitionLayout:
     swap_partition: str = ""  # Path to swap partition (if any)
     efi_size_mb: int = 512
     swap_size_mb: int = 0
+    encrypted: bool = False  # True once the root partition is LUKS-wrapped
+    luks_mapper_name: str = "cryptroot"  # /dev/mapper name for the LUKS device
+
+    @property
+    def root_target(self) -> str:
+        """Device to format/mount as root (LUKS mapper if encrypted)."""
+        if self.encrypted:
+            return f"/dev/mapper/{self.luks_mapper_name}"
+        return self.root_partition
 
 
 class PartitionJob(BaseJob):
@@ -122,7 +162,8 @@ class PartitionJob(BaseJob):
         if not disk:
             return JobResult.fail("Disk selection is required", error_code=30)
 
-        mode = selections.get("mode", "auto")
+        # Backward compat: prefer partition_mode, fall back to legacy "mode".
+        mode = selections.get("partition_mode", selections.get("mode", "auto"))
         if mode not in [m.value for m in PartitionMode]:
             return JobResult.fail(f"Invalid partition mode: {mode}", error_code=31)
 
@@ -163,10 +204,25 @@ class PartitionJob(BaseJob):
         if filesystem not in [f.value for f in FilesystemType]:
             return JobResult.fail(f"Invalid filesystem type: {filesystem}", error_code=36)
 
-        # Validate swap size
+        # Validate swap size (legacy swap_size partition path)
         swap_size = selections.get("swap_size", 0)
         if not isinstance(swap_size, (int, float)) or swap_size < 0:
             return JobResult.fail("Invalid swap size", error_code=37)
+
+        # Validate swap strategy (current path)
+        swap_strategy = selections.get("swap_strategy")
+        if swap_strategy is not None and swap_strategy not in ("file", "none", "hibernate"):
+            return JobResult.fail(f"Invalid swap strategy: {swap_strategy}", error_code=47)
+
+        # Validate encryption: a passphrase is mandatory when encryption is on.
+        # SECURITY: never echo the passphrase in the error message.
+        if selections.get("encryption", False):
+            passphrase = selections.get("encryption_passphrase", "")
+            if not passphrase:
+                return JobResult.fail(
+                    "Encryption enabled but no passphrase provided",
+                    error_code=46,
+                )
 
         context.report_progress(50, "Validation complete")
 
@@ -212,126 +268,105 @@ class PartitionJob(BaseJob):
             )
 
         disk = selections["disk"]
-        mode = selections.get("mode", "auto")
+        # Backward compat: prefer partition_mode, fall back to legacy "mode".
+        mode = selections.get("partition_mode", selections.get("mode", "auto"))
         filesystem = selections.get("filesystem", "ext4")
-        swap_size = selections.get("swap_size", 0)
 
-        if dry_run:
-            logger.info("🔒 DRY-RUN MODE: Simulating operations (no actual changes)")
-        else:
-            logger.warning("⚠️  EXECUTING REAL OPERATIONS - THIS WILL MODIFY THE DISK!")
-            logger.warning(f"⚠️  Target disk: {disk}")
-            logger.warning("⚠️  All data will be PERMANENTLY LOST!")
+        # SECURITY: read the passphrase locally so we can wipe it in finally.
+        passphrase = str(selections.get("encryption_passphrase", ""))
+        try:
+            if dry_run:
+                logger.info("🔒 DRY-RUN MODE: Simulating operations (no actual changes)")
+            else:
+                logger.warning("⚠️  EXECUTING REAL OPERATIONS - THIS WILL MODIFY THE DISK!")
+                logger.warning(f"⚠️  Target disk: {disk}")
+                logger.warning("⚠️  All data will be PERMANENTLY LOST!")
 
-        context.report_progress(10, "Planning partition layout...")
+            context.report_progress(10, "Planning partition layout...")
 
-        # Execute based on mode
-        if mode == PartitionMode.AUTO.value:
-            result = self._partition_auto(
-                context=context,
-                disk=disk,
-                filesystem=filesystem,
-                swap_size_gb=swap_size,
-                dry_run=dry_run,
-            )
-        else:
-            # Manual mode not implemented yet
-            return JobResult.fail(
-                "Manual partitioning mode not yet implemented (planned for v0.4.0)",
-                error_code=39,
-            )
+            # Execute based on mode
+            if mode == PartitionMode.AUTO.value:
+                result = self._partition_auto(
+                    context=context,
+                    disk=disk,
+                    filesystem=filesystem,
+                    selections=selections,
+                    passphrase=passphrase,
+                    dry_run=dry_run,
+                )
+            else:
+                # Manual mode not implemented yet
+                return JobResult.fail(
+                    "Manual partitioning mode not yet implemented (planned for v0.4.0)",
+                    error_code=39,
+                )
 
-        if not result.success:
-            return result
+            if not result.success:
+                return result
 
-        context.report_progress(100, "Partitioning complete")
+            context.report_progress(100, "Partitioning complete")
 
-        return JobResult.ok(
-            f"Disk {disk} partitioned successfully",
-            data={
-                "disk": disk,
-                "mode": mode,
-                "filesystem": filesystem,
-                "dry_run": dry_run,
-                "layout": {
-                    "efi": self._layout.efi_partition if self._layout else "",
-                    "root": self._layout.root_partition if self._layout else "",
-                    "swap": self._layout.swap_partition if self._layout else "",
+            return JobResult.ok(
+                f"Disk {disk} partitioned successfully",
+                data={
+                    "disk": disk,
+                    "mode": mode,
+                    "filesystem": filesystem,
+                    "dry_run": dry_run,
+                    "layout": {
+                        "efi": self._layout.efi_partition if self._layout else "",
+                        "root": self._layout.root_partition if self._layout else "",
+                        "swap": self._layout.swap_partition if self._layout else "",
+                    },
                 },
-            },
-        )
+            )
+        finally:
+            # SECURITY: clear the passphrase from memory after use.
+            passphrase = ""
+            del passphrase
 
     def _list_disks(self) -> list[DiskInfo]:
         """
-        List available disks using lsblk.
+        List available disks via the unified :mod:`omnis.utils.disk_detector`.
+
+        Adapts the detector's UI-contract dicts into the ``DiskInfo`` /
+        ``PartitionInfo`` dataclasses used by :meth:`validate`.
 
         Returns:
             List of DiskInfo objects
-
-        Raises:
-            subprocess.CalledProcessError: If lsblk fails
         """
-        # Use lsblk with JSON output for reliable parsing
-        result = subprocess.run(
-            ["lsblk", "-J", "-b", "-o", "NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,MODEL,RM"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-
-        data = json.loads(result.stdout)
         disks: list[DiskInfo] = []
 
-        for device in data.get("blockdevices", []):
-            # Filter out loop devices, CD-ROMs, etc.
-            if device.get("type") != "disk":
-                continue
+        for entry in disk_detector.list_disks():
+            name = entry.get("name", "")
+            size = int(entry.get("sizeBytes", 0))
 
-            # Skip removable devices (USB drives) to prevent accidents
-            is_removable = device.get("rm", False) in (1, "1", True)
-            if is_removable:
-                continue
-
-            name = device.get("name", "")
-            size = int(device.get("size", 0))
-            model = device.get("model", "").strip()
-
-            # Parse partitions
             partitions: list[PartitionInfo] = []
-            has_partitions = False
-
-            for child in device.get("children", []):
-                if child.get("type") == "part":
-                    has_partitions = True
-                    part_name = child.get("name", "")
-                    part_size = int(child.get("size", 0))
-                    fstype = child.get("fstype", "")
-                    mountpoint = child.get("mountpoint", "")
-
-                    # Detect if partition has data (has filesystem)
-                    has_data = bool(fstype)
-
-                    partitions.append(
-                        PartitionInfo(
-                            name=part_name,
-                            path=f"/dev/{part_name}",
-                            size=part_size,
-                            size_human=self._format_size(part_size),
-                            fstype=fstype,
-                            mountpoint=mountpoint,
-                            has_data=has_data,
-                        )
+            for part in entry.get("partitions", []):
+                part_name = part.get("name", "")
+                part_size = int(part.get("sizeBytes", 0))
+                fstype = part.get("fstype", "")
+                partitions.append(
+                    PartitionInfo(
+                        name=part_name,
+                        path=f"/dev/{part_name}",
+                        size=part_size,
+                        size_human=self._format_size(part_size),
+                        fstype=fstype,
+                        mountpoint="",
+                        has_data=bool(fstype),
                     )
+                )
 
             disks.append(
                 DiskInfo(
                     name=name,
                     path=f"/dev/{name}",
                     size=size,
-                    size_human=self._format_size(size),
-                    model=model,
-                    is_removable=is_removable,
-                    has_partitions=has_partitions,
+                    size_human=str(entry.get("size", self._format_size(size))),
+                    model=str(entry.get("model", "")),
+                    is_removable=bool(entry.get("removable", False)),
+                    has_partitions=bool(partitions),
                     partitions=partitions,
                 )
             )
@@ -343,22 +378,31 @@ class PartitionJob(BaseJob):
         context: JobContext,
         disk: str,
         filesystem: str,
-        swap_size_gb: int,
+        selections: dict[str, Any],
+        passphrase: str,
         dry_run: bool,
     ) -> JobResult:
         """
-        Automatic partitioning mode: wipe disk and create GPT layout.
+        Automatic partitioning mode: wipe disk and create a GPT layout.
 
         Layout:
-        - Partition 1: EFI System Partition (512 MB, FAT32)
-        - Partition 2: Root (remaining space minus swap, ext4/btrfs)
-        - Partition 3: Swap (optional, swap_size_gb)
+        - Partition 1: EFI System Partition (``efi_size_mb`` MiB, FAT32)
+        - Partition 2: Root (remaining space, ext4/btrfs, optionally LUKS)
+
+        Swap is handled by ``swap_strategy`` (swapfile under ``target_root``).
+        The legacy ``swap_size`` (GB) still creates a swap PARTITION for
+        backward compatibility when ``swap_strategy`` is absent.
+
+        SECURITY: when ``encryption`` is set, the root partition is wrapped in
+        LUKS2 before formatting. The passphrase is fed via stdin and never
+        logged.
 
         Args:
             context: Execution context
             disk: Disk path (e.g., "/dev/sda")
             filesystem: Root filesystem type
-            swap_size_gb: Swap size in GB (0 = no swap)
+            selections: Raw user selections (snake_case keys)
+            passphrase: LUKS passphrase (empty if encryption disabled)
             dry_run: If True, simulate only
 
         Returns:
@@ -366,19 +410,43 @@ class PartitionJob(BaseJob):
         """
         context.report_progress(20, "Creating partition table...")
 
-        # Calculate partition layout
-        efi_size_mb = 512
-        swap_size_mb = int(swap_size_gb * 1024)
+        efi_size_mb = int(selections.get("efi_size_mb", 512))
+        encryption = bool(selections.get("encryption", False))
+
+        # Determine swap handling. swap_strategy takes precedence over the
+        # legacy swap_size partition path.
+        swap_strategy = selections.get("swap_strategy")
+        legacy_swap_gb = int(selections.get("swap_size", 0) or 0)
+        use_swap_partition = swap_strategy is None and legacy_swap_gb > 0
+        swap_size_mb = legacy_swap_gb * 1024 if use_swap_partition else 0
 
         self._layout = PartitionLayout(
-            efi_partition=f"{disk}1",
-            root_partition=f"{disk}2",
-            swap_partition=f"{disk}3" if swap_size_gb > 0 else "",
+            efi_partition=part_path(disk, 1),
+            root_partition=part_path(disk, 2),
+            swap_partition=part_path(disk, 3) if use_swap_partition else "",
             efi_size_mb=efi_size_mb,
             swap_size_mb=swap_size_mb,
         )
 
-        logger.info(f"Partition layout: EFI={efi_size_mb}MB, Swap={swap_size_mb}MB")
+        logger.info(f"Partition layout: EFI={efi_size_mb}MB, swap_partition={swap_size_mb}MB")
+
+        # Step 0: Wipe any existing signatures/partition tables (idempotent,
+        # avoids parted refusing to relabel a disk with stale metadata).
+        result = self._run_partitioning_command(
+            ["wipefs", "-a", disk],
+            description="Wiping filesystem signatures",
+            dry_run=dry_run,
+        )
+        if not result.success:
+            return result
+
+        result = self._run_partitioning_command(
+            ["sgdisk", "--zap-all", disk],
+            description="Zapping GPT/MBR structures",
+            dry_run=dry_run,
+        )
+        if not result.success:
+            return result
 
         # Step 1: Create GPT partition table
         result = self._run_partitioning_command(
@@ -391,7 +459,7 @@ class PartitionJob(BaseJob):
 
         context.report_progress(30, "Creating EFI partition...")
 
-        # Step 2: Create EFI partition
+        # Step 2: Create EFI partition (1MiB alignment via 1MiB start)
         result = self._run_partitioning_command(
             [
                 "parted",
@@ -439,8 +507,8 @@ class PartitionJob(BaseJob):
         if not result.success:
             return result
 
-        # Step 4: Create swap partition (if requested)
-        if swap_size_mb > 0:
+        # Step 4: Create swap PARTITION (legacy path only)
+        if use_swap_partition:
             context.report_progress(50, "Creating swap partition...")
             result = self._run_partitioning_command(
                 [
@@ -459,21 +527,142 @@ class PartitionJob(BaseJob):
             if not result.success:
                 return result
 
+        # Step 5: Settle udev BEFORE any mkfs to avoid racing on missing nodes.
+        result = self._run_partitioning_command(
+            ["partprobe", disk],
+            description="Re-reading partition table",
+            dry_run=dry_run,
+        )
+        if not result.success:
+            return result
+
+        result = self._run_partitioning_command(
+            ["udevadm", "settle"],
+            description="Waiting for udev to settle",
+            dry_run=dry_run,
+        )
+        if not result.success:
+            return result
+
+        # Step 6: Optionally wrap root in LUKS2 before formatting.
+        if encryption:
+            context.report_progress(55, "Encrypting root partition...")
+            result = self._setup_luks(passphrase, dry_run)
+            if not result.success:
+                return result
+
         context.report_progress(60, "Formatting partitions...")
 
-        # Step 5: Format partitions
+        # Step 7: Format partitions
         result = self._format_partitions(context, filesystem, dry_run)
         if not result.success:
             return result
 
         context.report_progress(80, "Mounting filesystems...")
 
-        # Step 6: Mount partitions
+        # Step 8: Mount partitions
         result = self._mount_partitions(context, dry_run)
         if not result.success:
             return result
 
+        # Step 9: Configure swap via swapfile under target_root.
+        if swap_strategy in ("file", "hibernate"):
+            context.report_progress(90, "Configuring swapfile...")
+            result = self._setup_swapfile(context, swap_strategy, dry_run)
+            if not result.success:
+                return result
+
         return JobResult.ok("Automatic partitioning completed")
+
+    def _setup_luks(self, passphrase: str, dry_run: bool) -> JobResult:
+        """
+        Wrap the root partition in a LUKS2 container.
+
+        SECURITY: the passphrase is fed through stdin and is never logged, nor
+        included in any logged command line.
+
+        # TODO(phase2/nixos job): inject
+        #   boot.initrd.luks.devices."<mapper>".device = <root_part>
+
+        Args:
+            passphrase: LUKS passphrase (must be non-empty in real runs)
+            dry_run: If True, simulate only
+
+        Returns:
+            JobResult indicating success or failure
+        """
+        if not self._layout:
+            return JobResult.fail("Partition layout not initialized", error_code=40)
+
+        root_part = self._layout.root_partition
+        mapper_name = self._layout.luks_mapper_name
+
+        if dry_run:
+            logger.info(f"[DRY-RUN] Would LUKS-format and open {root_part} as {mapper_name}")
+            self._layout.encrypted = True
+            return JobResult.ok("[DRY-RUN] LUKS setup")
+
+        if not passphrase:
+            return JobResult.fail("LUKS passphrase missing", error_code=46)
+
+        fmt = self._run_secret_command(
+            ["cryptsetup", "luksFormat", "--type", "luks2", "--batch-mode", root_part],
+            passphrase=passphrase,
+            description="LUKS formatting root partition",
+        )
+        if not fmt.success:
+            return fmt
+
+        opened = self._run_secret_command(
+            ["cryptsetup", "luksOpen", root_part, mapper_name],
+            passphrase=passphrase,
+            description="Opening LUKS container",
+        )
+        if not opened.success:
+            return opened
+
+        self._layout.encrypted = True
+        return JobResult.ok("LUKS container ready")
+
+    def _setup_swapfile(self, context: JobContext, strategy: str, dry_run: bool) -> JobResult:
+        """
+        Create and activate a swapfile under ``target_root``.
+
+        - ``file``: size = min(RAM, 8192 MB), default 4096 MB if RAM unknown.
+        - ``hibernate``: size >= RAM (so the image fits), default 8192 MB.
+
+        Args:
+            context: Execution context (provides target_root)
+            strategy: "file" or "hibernate"
+            dry_run: If True, simulate only
+
+        Returns:
+            JobResult indicating success or failure
+        """
+        ram_mb = _detect_ram_mb()
+        if strategy == "hibernate":
+            size_mb = max(ram_mb, 8192)
+        else:  # "file"
+            size_mb = min(ram_mb, 8192) if ram_mb else 4096
+
+        swapfile = f"{context.target_root}/swapfile"
+        logger.info(f"Swapfile strategy={strategy}, size={size_mb}MB at {swapfile}")
+
+        steps = [
+            (
+                ["dd", "if=/dev/zero", f"of={swapfile}", "bs=1M", f"count={size_mb}"],
+                "Allocating swapfile",
+            ),
+            (["chmod", "600", swapfile], "Securing swapfile permissions"),
+            (["mkswap", swapfile], "Formatting swapfile"),
+            (["swapon", swapfile], "Activating swapfile"),
+        ]
+        for cmd, description in steps:
+            result = self._run_partitioning_command(cmd, description=description, dry_run=dry_run)
+            if not result.success:
+                return result
+
+        return JobResult.ok("Swapfile configured")
 
     def _format_partitions(self, _context: JobContext, filesystem: str, dry_run: bool) -> JobResult:
         """
@@ -499,17 +688,20 @@ class PartitionJob(BaseJob):
         if not result.success:
             return result
 
-        # Format root partition
+        # Format root target (the LUKS mapper when encryption is enabled).
+        root_target = self._layout.root_target
         if filesystem == FilesystemType.EXT4.value:
-            cmd = ["mkfs.ext4", "-F", self._layout.root_partition]
+            cmd = ["mkfs.ext4", "-F", root_target]
         elif filesystem == FilesystemType.BTRFS.value:
-            cmd = ["mkfs.btrfs", "-f", self._layout.root_partition]
+            # btrfs is created "flat" (single subvolume).
+            # TODO(v0.5): btrfs subvolumes (@/@home/@nix, compress=zstd, noatime)
+            cmd = ["mkfs.btrfs", "-f", root_target]
         else:
             return JobResult.fail(f"Unsupported filesystem: {filesystem}", error_code=41)
 
         result = self._run_partitioning_command(
             cmd,
-            description=f"Formatting root partition ({self._layout.root_partition})",
+            description=f"Formatting root partition ({root_target})",
             dry_run=dry_run,
         )
         if not result.success:
@@ -532,8 +724,8 @@ class PartitionJob(BaseJob):
         Mount partitions to target root.
 
         Hierarchy:
-        - /mnt (target_root) ← root partition
-        - /mnt/boot/efi ← EFI partition
+        - /mnt (target_root) ← root partition (or LUKS mapper)
+        - /mnt/boot ← EFI partition (NixOS systemd-boot expects the ESP on /boot)
 
         Args:
             context: Execution context
@@ -547,17 +739,17 @@ class PartitionJob(BaseJob):
 
         target_root = context.target_root
 
-        # Mount root partition
+        # Mount root target (LUKS mapper when encrypted)
         result = self._run_partitioning_command(
-            ["mount", self._layout.root_partition, target_root],
+            ["mount", self._layout.root_target, target_root],
             description=f"Mounting root partition to {target_root}",
             dry_run=dry_run,
         )
         if not result.success:
             return result
 
-        # Create EFI mount point
-        efi_mount = Path(target_root) / "boot" / "efi"
+        # Create EFI mount point: ESP lives on /boot for NixOS systemd-boot.
+        efi_mount = Path(target_root) / "boot"
         if not dry_run:
             try:
                 efi_mount.mkdir(parents=True, exist_ok=True)
@@ -634,6 +826,43 @@ class PartitionJob(BaseJob):
             logger.error(f"Command not found: {cmd[0]}")
             return JobResult.fail(f"Required tool not found: {cmd[0]}", error_code=45)
 
+    def _run_secret_command(self, cmd: list[str], passphrase: str, description: str) -> JobResult:
+        """
+        Run a command that consumes a secret via stdin.
+
+        SECURITY: neither the passphrase nor the full command line is logged.
+        Only the human-readable description is emitted. This is used for
+        ``cryptsetup luksFormat`` / ``luksOpen`` where the passphrase is piped
+        in rather than passed as an argument.
+
+        Args:
+            cmd: Command to execute (must NOT contain the passphrase)
+            passphrase: Secret fed to the process stdin
+            description: Human-readable description for logging
+
+        Returns:
+            JobResult indicating success or failure
+        """
+        logger.info(f"Executing: {description}")
+
+        try:
+            subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                input=passphrase,
+            )
+            logger.info(f"✓ {description} completed successfully")
+            return JobResult.ok(description)
+        except subprocess.CalledProcessError as e:
+            # SECURITY: log stderr only; cryptsetup does not echo the passphrase.
+            logger.error(f"✗ {description} failed: {e.stderr}")
+            return JobResult.fail(f"{description} failed", error_code=44)
+        except FileNotFoundError:
+            logger.error(f"Command not found: {cmd[0]}")
+            return JobResult.fail(f"Required tool not found: {cmd[0]}", error_code=45)
+
     def cleanup(self, context: JobContext) -> None:
         """
         Clean up after partitioning failure.
@@ -649,8 +878,8 @@ class PartitionJob(BaseJob):
         target_root = context.target_root
         logger.info("Cleaning up mounted filesystems...")
 
-        # Unmount in reverse order
-        efi_mount = Path(target_root) / "boot" / "efi"
+        # Unmount in reverse order (ESP is mounted on /boot)
+        efi_mount = Path(target_root) / "boot"
 
         # Try to unmount EFI
         try:
@@ -674,7 +903,7 @@ class PartitionJob(BaseJob):
         except Exception as e:
             logger.debug(f"Failed to unmount {target_root}: {e}")
 
-        # Try to deactivate swap
+        # Try to deactivate swap partition (legacy path)
         if self._layout.swap_partition:
             try:
                 subprocess.run(
@@ -685,6 +914,18 @@ class PartitionJob(BaseJob):
                 logger.info(f"Deactivated swap {self._layout.swap_partition}")
             except Exception as e:
                 logger.debug(f"Failed to deactivate swap: {e}")
+
+        # Try to close the LUKS mapper if it was opened
+        if self._layout.encrypted:
+            try:
+                subprocess.run(
+                    ["cryptsetup", "luksClose", self._layout.luks_mapper_name],
+                    check=False,
+                    capture_output=True,
+                )
+                logger.info(f"Closed LUKS mapper {self._layout.luks_mapper_name}")
+            except Exception as e:
+                logger.debug(f"Failed to close LUKS mapper: {e}")
 
     def estimate_duration(self) -> int:
         """

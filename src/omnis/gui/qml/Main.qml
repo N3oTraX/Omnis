@@ -367,6 +367,21 @@ ApplicationWindow {
                 onModeSelected: function(mode) {
                     engine.setPartitionMode(mode)
                 }
+                onFilesystemSelected: function(fs) {
+                    engine.setFilesystem(fs)
+                }
+                onSwapStrategySelected: function(strategy) {
+                    engine.setSwapStrategy(strategy)
+                }
+                onEncryptionToggled: function(enabled) {
+                    engine.setEncryption(enabled)
+                }
+                onEncryptionPassphraseSet: function(passphrase) {
+                    engine.setEncryptionPassphrase(passphrase)
+                }
+                onEfiSizeChanged: function(sizeMb) {
+                    engine.setEfiSizeMb(sizeMb)
+                }
 
                 Behavior on opacity {
                     NumberAnimation { duration: 300 }

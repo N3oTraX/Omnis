@@ -15,6 +15,7 @@ from PySide6.QtCore import Property, QObject, QThread, QUrl, Signal, Slot
 from omnis.i18n.translator import get_translator
 from omnis.jobs.locale import LocaleJob
 from omnis.jobs.requirements import SystemRequirementsChecker
+from omnis.utils import disk_detector
 from omnis.utils.locale_detector import LocaleDetectionResult, LocaleDetector
 from omnis.utils.network_helper import NetworkHelper
 
@@ -1071,6 +1072,11 @@ class EngineBridge(QObject):
             "isAdmin": True,
             "disk": "",
             "partitionMode": "auto",
+            "filesystem": "ext4",
+            "swapStrategy": "file",
+            "encryption": False,
+            "encryptionPassphrase": "",
+            "efiSizeMb": 512,
         }
 
         # Disk data
@@ -1730,106 +1736,91 @@ class EngineBridge(QObject):
                 print(f"[Engine] Partition mode set to: {mode}")
             self.selectionsChanged.emit()
 
+    @Property(str, notify=selectionsChanged)
+    def filesystem(self) -> str:
+        """Get selected root filesystem (ext4/btrfs)."""
+        return str(self._selections.get("filesystem", "ext4"))
+
+    @Slot(str)
+    def setFilesystem(self, filesystem: str) -> None:
+        """Set root filesystem type."""
+        if self._selections.get("filesystem") != filesystem:
+            self._selections["filesystem"] = filesystem
+            if self._debug:
+                print(f"[Engine] Filesystem set to: {filesystem}")
+            self.selectionsChanged.emit()
+
+    @Property(str, notify=selectionsChanged)
+    def swapStrategy(self) -> str:
+        """Get swap strategy (file/none/hibernate)."""
+        return str(self._selections.get("swapStrategy", "file"))
+
+    @Slot(str)
+    def setSwapStrategy(self, strategy: str) -> None:
+        """Set swap strategy."""
+        if self._selections.get("swapStrategy") != strategy:
+            self._selections["swapStrategy"] = strategy
+            if self._debug:
+                print(f"[Engine] Swap strategy set to: {strategy}")
+            self.selectionsChanged.emit()
+
+    @Property(bool, notify=selectionsChanged)
+    def encryption(self) -> bool:
+        """Get whether root encryption (LUKS2) is enabled."""
+        return bool(self._selections.get("encryption", False))
+
+    @Slot(bool)
+    def setEncryption(self, enabled: bool) -> None:
+        """Set whether root encryption is enabled."""
+        if self._selections.get("encryption") != enabled:
+            self._selections["encryption"] = enabled
+            if self._debug:
+                print(f"[Engine] Encryption set to: {enabled}")
+            self.selectionsChanged.emit()
+
+    @Property(str, notify=selectionsChanged)
+    def encryptionPassphrase(self) -> str:
+        """Get LUKS passphrase (for internal use, never displayed)."""
+        return str(self._selections.get("encryptionPassphrase", ""))
+
+    @Slot(str)
+    def setEncryptionPassphrase(self, passphrase: str) -> None:
+        """Set LUKS passphrase (SECURITY: never logged, same posture as password)."""
+        if self._selections.get("encryptionPassphrase") != passphrase:
+            self._selections["encryptionPassphrase"] = passphrase
+            if self._debug:
+                print("[Engine] Encryption passphrase set (hidden)")
+            self.selectionsChanged.emit()
+
+    @Property(int, notify=selectionsChanged)
+    def efiSizeMb(self) -> int:
+        """Get EFI System Partition size in MiB."""
+        return int(self._selections.get("efiSizeMb", 512))
+
+    @Slot(int)
+    def setEfiSizeMb(self, size: int) -> None:
+        """Set EFI System Partition size in MiB."""
+        if self._selections.get("efiSizeMb") != size:
+            self._selections["efiSizeMb"] = size
+            if self._debug:
+                print(f"[Engine] EFI size set to: {size} MB")
+            self.selectionsChanged.emit()
+
     @Slot()
     def refreshDisks(self) -> None:
-        """Scan and refresh available disks."""
+        """Scan and refresh available disks via the unified disk detector."""
         if self._debug:
             print("[Engine] Scanning disks...")
 
-        self._disks_model = []
-
         try:
-            # Use lsblk to get disk information
-            result = subprocess.run(
-                [
-                    "lsblk",
-                    "-J",
-                    "-o",
-                    "NAME,SIZE,TYPE,MOUNTPOINT,MODEL,HOTPLUG,TRAN,ROTA",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-
-            if result.returncode == 0:
-                import json
-
-                data = json.loads(result.stdout)
-
-                for device in data.get("blockdevices", []):
-                    if device.get("type") == "disk":
-                        # Skip mounted system disks
-                        has_mounted_partition = False
-                        partitions = []
-
-                        for child in device.get("children", []):
-                            if child.get("mountpoint"):
-                                has_mounted_partition = True
-                            partitions.append(
-                                {
-                                    "name": child.get("name", ""),
-                                    "size": child.get("size", ""),
-                                    "fstype": child.get("fstype", ""),
-                                    "mountpoint": child.get("mountpoint", ""),
-                                }
-                            )
-
-                        # Determine disk type
-                        is_removable = device.get("hotplug") == "1" or device.get("hotplug")
-                        is_ssd = not device.get("rota", True)
-
-                        if is_removable:
-                            disk_type = "removable"
-                        elif is_ssd:
-                            disk_type = "ssd"
-                        else:
-                            disk_type = "hdd"
-
-                        disk_info = {
-                            "name": device.get("name", ""),
-                            "size": device.get("size", ""),
-                            "model": device.get("model", "").strip() if device.get("model") else "",
-                            "type": disk_type,
-                            "removable": is_removable,
-                            "partitions": partitions,
-                            "hasMounted": has_mounted_partition,
-                        }
-                        self._disks_model.append(disk_info)
-
-        except subprocess.TimeoutExpired:
-            if self._debug:
-                print("[Engine] Disk scan timeout")
-        except FileNotFoundError:
-            if self._debug:
-                print("[Engine] lsblk not found, using mock data")
-            # Mock data for testing
-            self._disks_model = [
-                {
-                    "name": "sda",
-                    "size": "500G",
-                    "model": "Samsung SSD 860",
-                    "type": "ssd",
-                    "removable": False,
-                    "partitions": [
-                        {"name": "sda1", "size": "512M", "fstype": "vfat", "mountpoint": ""},
-                        {"name": "sda2", "size": "499.5G", "fstype": "ext4", "mountpoint": ""},
-                    ],
-                    "hasMounted": False,
-                },
-                {
-                    "name": "nvme0n1",
-                    "size": "1T",
-                    "model": "WD Black SN850",
-                    "type": "ssd",
-                    "removable": False,
-                    "partitions": [],
-                    "hasMounted": False,
-                },
-            ]
-        except Exception as e:
+            # disk_detector.list_disks() already returns the histobar contract
+            # (name, model, size, sizeBytes, type, removable, partitions[...])
+            # and has its own lsblk-failure fallback.
+            self._disks_model = disk_detector.list_disks()
+        except Exception as e:  # noqa: BLE001 - defensive: never crash the UI
             if self._debug:
                 print(f"[Engine] Disk scan error: {e}")
+            self._disks_model = []
 
         if self._debug:
             print(f"[Engine] Found {len(self._disks_model)} disks")
@@ -1949,8 +1940,8 @@ class EngineBridge(QObject):
         """Apply user selections to the engine context before installation."""
         if self._debug:
             print("[Engine] Applying selections to context...")
-            # SECURITY: never log password material (user or root).
-            secret_keys = {"password", "rootPassword"}
+            # SECURITY: never log password material (user, root or LUKS).
+            secret_keys = {"password", "rootPassword", "encryptionPassphrase"}
             for key, value in self._selections.items():
                 if key not in secret_keys:
                     print(f"[Engine]   {key}: {value}")
@@ -1976,6 +1967,16 @@ class EngineBridge(QObject):
             normalized["root_password"] = normalized.pop("rootPassword")
         if "rootSameAsUser" in normalized:
             normalized["root_same_as_user"] = normalized.pop("rootSameAsUser")
+        # Disk/partition camelCase -> snake_case (partition.py reads snake_case).
+        if "partitionMode" in normalized:
+            normalized["partition_mode"] = normalized.pop("partitionMode")
+        if "swapStrategy" in normalized:
+            normalized["swap_strategy"] = normalized.pop("swapStrategy")
+        if "encryptionPassphrase" in normalized:
+            normalized["encryption_passphrase"] = normalized.pop("encryptionPassphrase")
+        if "efiSizeMb" in normalized:
+            normalized["efi_size_mb"] = normalized.pop("efiSizeMb")
+        # filesystem and encryption keys are already snake-compatible.
 
         self._engine.set_selections(normalized)
 
