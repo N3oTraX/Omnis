@@ -253,10 +253,9 @@ ApplicationWindow {
                 timezonesModel: engine.timezonesModel
                 keymapsModel: engine.keymapsModel
                 keyboardVariantsModel: engine.keyboardVariantsModel
-                selectedLocale: engine.selectedLocale
-                selectedTimezone: engine.selectedTimezone
-                selectedKeymap: engine.selectedKeymap
-                selectedKeyboardVariant: engine.selectedKeyboardVariant
+                // Les sélections (selectedLocale/Timezone/Keymap/Variant) sont
+                // désormais lues directement depuis engine par la vue (miroirs
+                // readonly), plus besoin de les passer ici.
 
                 primaryColor: root.primaryColor
                 backgroundColor: root.backgroundColor
@@ -312,11 +311,12 @@ ApplicationWindow {
                 opacity: visible ? 1 : 0
 
                 branding: branding
-                username: engine.username
-                fullName: engine.fullName
-                hostname: engine.hostname
-                autoLogin: engine.autoLogin
-                isAdmin: engine.isAdmin
+
+                // Source de vérité unique : la vue lit/écrit directement via
+                // `engine.*` (setUsername/setFullName/…). Plus de propriétés
+                // miroir ni de handlers onXChanged ici, qui cassaient le binding
+                // descendant dès la première saisie. Les mots de passe restent
+                // write-only côté vue (aucun binding descendant depuis engine).
 
                 primaryColor: root.primaryColor
                 backgroundColor: root.backgroundColor
@@ -326,15 +326,6 @@ ApplicationWindow {
                 accentColor: root.accentColor
                 errorColor: root.errorColor
                 successColor: root.successColor
-
-                onUsernameChanged: engine.setUsername(username)
-                onFullNameChanged: engine.setFullName(fullName)
-                onHostnameChanged: engine.setHostname(hostname)
-                onPasswordChanged: engine.setPassword(password)
-                onRootPasswordChanged: engine.setRootPassword(rootPassword)
-                onRootSameAsUserChanged: engine.setRootSameAsUser(rootSameAsUser)
-                onAutoLoginChanged: engine.setAutoLogin(autoLogin)
-                onIsAdminChanged: engine.setIsAdmin(isAdmin)
 
                 Behavior on opacity {
                     NumberAnimation { duration: 300 }
@@ -349,8 +340,9 @@ ApplicationWindow {
                 opacity: visible ? 1 : 0
 
                 disksModel: engine.disksModel
-                selectedDisk: engine.selectedDisk
-                partitionMode: engine.partitionMode
+                // selectedDisk / partitionMode / filesystem / swapStrategy /
+                // encryption sont lus directement depuis engine par la vue
+                // (miroirs readonly), plus besoin de les passer ici.
 
                 primaryColor: root.primaryColor
                 backgroundColor: root.backgroundColor

@@ -28,23 +28,21 @@ Item {
 
     // External properties
     property var disksModel: []  // Array of disk objects: {name, size, type, removable, partitions}
-    property string selectedDisk: ""
-    property string partitionMode: "auto"  // "auto" or "manual"
-
-    // Auto-mode option state (UI-local, pushed up via signals)
-    property string filesystem: "ext4"        // "ext4" | "btrfs"
-    property string swapStrategy: "file"       // "file" | "none" | "hibernate"
-    property bool encryptionEnabled: false
+    // Sélections : miroirs descendants (lecture seule) de la source de vérité
+    // `engine`. Jamais réassignés impérativement (les clics émettent des signaux
+    // relayés par Main.qml vers engine.setX), donc ces bindings restent vivants
+    // et reflètent toujours l'état courant après un retour arrière / le résumé.
+    readonly property string selectedDisk: engine.selectedDisk
+    readonly property string partitionMode: engine.partitionMode  // "auto" | "manual"
+    readonly property string filesystem: engine.filesystem        // "ext4" | "btrfs"
+    readonly property string swapStrategy: engine.swapStrategy     // "file" | "none" | "hibernate"
+    readonly property bool encryptionEnabled: engine.encryption
     readonly property int efiSizeMb: 512       // fixed for MVP
 
     // Encryption passphrase validity (passphrase is NOT bound downward, security)
     readonly property bool encryptionPassValid:
         !encryptionEnabled ||
         (encPassField.text.length >= 8 && encPassField.text === encPassConfirmField.text)
-
-    // Emit signals when selections change
-    onSelectedDiskChanged: if (selectedDisk) diskSelected(selectedDisk)
-    onPartitionModeChanged: if (partitionMode) modeSelected(partitionMode)
 
     // Theme colors
     property color primaryColor: "#5597e6"
@@ -228,7 +226,7 @@ Item {
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: selectedDisk = modelData.name
+                                onClicked: diskSelected(modelData.name)
                             }
 
                             Column {
@@ -733,7 +731,7 @@ Item {
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: partitionMode = "auto"
+                                onClicked: modeSelected("auto")
                             }
 
                             Column {
@@ -808,7 +806,7 @@ Item {
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: partitionMode = "manual"
+                                onClicked: modeSelected("manual")
                             }
 
                             Column {
@@ -912,7 +910,7 @@ Item {
                                 RadioButton {
                                     text: qsTr("ext4")
                                     checked: filesystem === "ext4"
-                                    onClicked: { filesystem = "ext4"; filesystemSelected("ext4") }
+                                    onClicked: filesystemSelected("ext4")
                                     contentItem: Text {
                                         text: parent.text
                                         color: textColor
@@ -925,7 +923,7 @@ Item {
                                 RadioButton {
                                     text: qsTr("btrfs")
                                     checked: filesystem === "btrfs"
-                                    onClicked: { filesystem = "btrfs"; filesystemSelected("btrfs") }
+                                    onClicked: filesystemSelected("btrfs")
                                     contentItem: Text {
                                         text: parent.text
                                         color: textColor
@@ -955,7 +953,7 @@ Item {
                                 RadioButton {
                                     text: qsTr("File (auto)")
                                     checked: swapStrategy === "file"
-                                    onClicked: { swapStrategy = "file"; swapStrategySelected("file") }
+                                    onClicked: swapStrategySelected("file")
                                     contentItem: Text {
                                         text: parent.text
                                         color: textColor
@@ -968,7 +966,7 @@ Item {
                                 RadioButton {
                                     text: qsTr("None")
                                     checked: swapStrategy === "none"
-                                    onClicked: { swapStrategy = "none"; swapStrategySelected("none") }
+                                    onClicked: swapStrategySelected("none")
                                     contentItem: Text {
                                         text: parent.text
                                         color: textColor
@@ -981,7 +979,7 @@ Item {
                                 RadioButton {
                                     text: qsTr("Hibernation")
                                     checked: swapStrategy === "hibernate"
-                                    onClicked: { swapStrategy = "hibernate"; swapStrategySelected("hibernate") }
+                                    onClicked: swapStrategySelected("hibernate")
                                     contentItem: Text {
                                         text: parent.text
                                         color: textColor
@@ -1002,10 +1000,7 @@ Item {
                                 id: encryptionCheck
                                 text: qsTr("Enable encryption (LUKS)")
                                 checked: encryptionEnabled
-                                onToggled: {
-                                    encryptionEnabled = checked
-                                    encryptionToggled(checked)
-                                }
+                                onToggled: encryptionToggled(checked)
                                 contentItem: Text {
                                     text: encryptionCheck.text
                                     color: textColor

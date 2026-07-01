@@ -21,19 +21,22 @@ Item {
     // Required property for branding access (icons)
     required property var branding
 
-    // External properties (for data binding with engine)
-    property string username: ""
-    property string fullName: ""
-    property string hostname: ""
-    property string password: ""
-    property string passwordConfirm: ""
-    property bool autoLogin: false
-    property bool isAdmin: true
+    // Miroirs descendants (lecture seule) de la source de vérité `engine`.
+    // Ils ne sont JAMAIS réassignés impérativement : les champs écrivent
+    // directement via engine.setX(), donc ces bindings ne se cassent pas et
+    // reflètent toujours l'état courant (résout la non-persistance des vues).
+    readonly property string username: engine.username
+    readonly property string fullName: engine.fullName
+    readonly property string hostname: engine.hostname
+    readonly property bool autoLogin: engine.autoLogin
+    readonly property bool isAdmin: engine.isAdmin
     // Mot de passe root : par défaut identique au compte utilisateur. Les
     // champs root ne sont révélés que si rootSameAsUser est décoché.
-    property string rootPassword: ""
+    readonly property bool rootSameAsUser: engine.rootSameAsUser
+    // Confirmations : purement locales (jamais envoyées à engine), servent aux
+    // indicateurs de correspondance. Les mots de passe eux-mêmes sont write-only.
+    property string passwordConfirm: ""
     property string rootPasswordConfirm: ""
-    property bool rootSameAsUser: true
 
     // Theme colors
     property color primaryColor: "#5597e6"
@@ -268,8 +271,11 @@ Item {
                                 placeholderText: qsTr("username (lowercase, no spaces)")
                                 font.pixelSize: 16
 
-                                text: root.username
-                                onTextChanged: root.username = text
+                                // Source de vérité unique : lecture/écriture
+                                // directes vers engine (pas de miroir local
+                                // réassigné qui casserait le binding descendant).
+                                text: engine.username
+                                onTextChanged: engine.setUsername(text)
 
                                 background: Rectangle {
                                     radius: 8
@@ -344,8 +350,8 @@ Item {
                                 placeholderText: qsTr("Your full name")
                                 font.pixelSize: 16
 
-                                text: root.fullName
-                                onTextChanged: root.fullName = text
+                                text: engine.fullName
+                                onTextChanged: engine.setFullName(text)
 
                                 background: Rectangle {
                                     radius: 8
@@ -421,8 +427,8 @@ Item {
                                 placeholderText: qsTr("hostname (lowercase, no spaces)")
                                 font.pixelSize: 16
 
-                                text: root.hostname
-                                onTextChanged: root.hostname = text
+                                text: engine.hostname
+                                onTextChanged: engine.setHostname(text)
 
                                 background: Rectangle {
                                     radius: 8
@@ -516,8 +522,11 @@ Item {
                                 font.pixelSize: 16
                                 echoMode: showPasswordCheck.checked ? TextInput.Normal : TextInput.Password
 
-                                text: root.password
-                                onTextChanged: root.password = text
+                                // SÉCURITÉ : mot de passe write-only. On écrit
+                                // vers engine mais on ne binde JAMAIS la valeur en
+                                // descendant (pas de text: engine.password). Le
+                                // champ garde sa propre valeur locale de saisie.
+                                onTextChanged: engine.setPassword(text)
 
                                 background: Rectangle {
                                     radius: 8
@@ -747,8 +756,8 @@ Item {
                             // par défaut (coché). Décocher révèle deux champs root.
                             CheckBox {
                                 id: rootSameAsUserCheck
-                                checked: root.rootSameAsUser
-                                onCheckedChanged: root.rootSameAsUser = checked
+                                checked: engine.rootSameAsUser
+                                onCheckedChanged: engine.setRootSameAsUser(checked)
 
                                 text: qsTr("Use the same password for the root account")
                                 font.pixelSize: 14
@@ -819,8 +828,8 @@ Item {
                                         font.pixelSize: 16
                                         echoMode: showPasswordCheck.checked ? TextInput.Normal : TextInput.Password
 
-                                        text: root.rootPassword
-                                        onTextChanged: root.rootPassword = text
+                                        // SÉCURITÉ : write-only (cf. password).
+                                        onTextChanged: engine.setRootPassword(text)
 
                                         background: Rectangle {
                                             radius: 8
@@ -951,8 +960,8 @@ Item {
 
                             CheckBox {
                                 id: autoLoginCheck
-                                checked: root.autoLogin
-                                onCheckedChanged: root.autoLogin = checked
+                                checked: engine.autoLogin
+                                onCheckedChanged: engine.setAutoLogin(checked)
 
                                 text: qsTr("Log in automatically without asking for password")
                                 font.pixelSize: 14
@@ -1004,8 +1013,8 @@ Item {
 
                             CheckBox {
                                 id: adminCheck
-                                checked: root.isAdmin
-                                onCheckedChanged: root.isAdmin = checked
+                                checked: engine.isAdmin
+                                onCheckedChanged: engine.setIsAdmin(checked)
 
                                 text: qsTr("Use administrator privileges (sudo access)")
                                 font.pixelSize: 14

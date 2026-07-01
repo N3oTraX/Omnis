@@ -154,6 +154,148 @@ class TestUiToEngineSelectionFlow:
         assert context.selections["is_admin"] is True
 
 
+class TestSelectionSourceOfTruth:
+    """
+    Régression v0.4.2 : les sélections ne persistaient pas d'une vue à l'autre.
+
+    Cause racine (QML) : les vues utilisaient un miroir local réassigné
+    impérativement (`text: root.x; onTextChanged: root.x = text`), ce qui
+    cassait le binding descendant `x: engine.x` dès la première saisie. Les
+    vues lisent désormais directement `engine.*` (miroirs readonly) et écrivent
+    via `engine.setX(...)`, faisant de `_selections` l'unique source de vérité.
+
+    Ces tests verrouillent le contrat côté bridge dont dépend le fix QML :
+    chaque setter met à jour le getter notifié ET la Property `selections`
+    (lue par SummaryView), et émet `selectionsChanged` (qui rafraîchit les
+    bindings descendants des vues).
+    """
+
+    def test_getters_reflect_setters(self, bridge: EngineBridge) -> None:
+        """Chaque setter de sélection se reflète dans son getter notifié."""
+        bridge.setUsername("alice")
+        bridge.setFullName("Alice Example")
+        bridge.setHostname("alicebox")
+        bridge.setAutoLogin(True)
+        bridge.setIsAdmin(False)
+        bridge.setSelectedDisk("sda")
+        bridge.setPartitionMode("manual")
+        bridge.setFilesystem("btrfs")
+        bridge.setSwapStrategy("none")
+        bridge.setEncryption(True)
+
+        assert bridge.username == "alice"
+        assert bridge.fullName == "Alice Example"
+        assert bridge.hostname == "alicebox"
+        assert bridge.autoLogin is True
+        assert bridge.isAdmin is False
+        assert bridge.selectedDisk == "sda"
+        assert bridge.partitionMode == "manual"
+        assert bridge.filesystem == "btrfs"
+        assert bridge.swapStrategy == "none"
+        assert bridge.encryption is True
+
+    def test_selections_property_reflects_all_sets(self, bridge: EngineBridge) -> None:
+        """
+        La Property `selections` (lue par SummaryView) reflète toutes les
+        sélections courantes : c'est la preuve que le résumé affiche l'état
+        réellement saisi.
+        """
+        bridge.setSelectedLocale("fr_FR.UTF-8")  # auto-dérive le keymap 'fr'
+        bridge.setSelectedTimezone("Europe/Paris")
+        bridge.setUsername("bob")
+        bridge.setHostname("bobbox")
+        bridge.setSelectedDisk("nvme0n1")
+
+        summary = bridge.selections
+        assert summary["locale"] == "fr_FR.UTF-8"
+        assert summary["timezone"] == "Europe/Paris"
+        assert summary["keymap"] == "fr"  # dérivé du locale, visible au résumé
+        assert summary["username"] == "bob"
+        assert summary["hostname"] == "bobbox"
+        assert summary["disk"] == "nvme0n1"
+
+    def test_selection_set_emits_selectionsChanged(self, bridge: EngineBridge) -> None:
+        """
+        Chaque changement de sélection émet `selectionsChanged`. C'est le signal
+        de notification qui, côté QML, rafraîchit les bindings descendants des
+        vues (username: engine.username, etc.) — donc la valeur re-apparaît au
+        retour arrière et dans le résumé.
+        """
+        received: list[int] = []
+        bridge.selectionsChanged.connect(lambda: received.append(1))
+
+        bridge.setUsername("charlie")
+        bridge.setSelectedDisk("sda")
+
+        assert len(received) >= 2
+
+    def test_backward_propagation_engine_to_getter(self, bridge: EngineBridge) -> None:
+        """
+        Preuve du sens descendant : après une 1re valeur, une mise à jour
+        ultérieure côté engine reste visible via le getter (le fix QML garantit
+        que la vue suit ce getter au lieu d'un miroir figé).
+        """
+        bridge.setUsername("first")
+        assert bridge.username == "first"
+
+        # Simule une mise à jour ultérieure (retour arrière / Edit-from-summary).
+        bridge.setUsername("second")
+        assert bridge.username == "second"
+        assert bridge.selections["username"] == "second"
+
+    def test_passwords_are_write_only_in_summary(self, bridge: EngineBridge) -> None:
+        """
+        Sécurité : les mots de passe (compte, root, LUKS) ne sont jamais
+        re-bindés en descendant côté vue. Ils restent stockés côté engine mais
+        ne doivent pas être exposés en clair dans le résumé QML : SummaryView
+        n'affiche aucune de ces clés. On vérifie ici qu'elles ne servent qu'au
+        contexte d'install, pas à un affichage descendant.
+        """
+        bridge.setPassword("usersecret1")
+        bridge.setRootPassword("rootsecret1")
+        bridge.setEncryptionPassphrase("lukssecret1")
+
+        # Les valeurs sont bien mémorisées (source de vérité), mais SummaryView
+        # (cf. SummaryView.qml) ne lit aucune de ces clés : elles n'apparaissent
+        # jamais à l'écran. On documente ici l'intention write-only.
+        summary = bridge.selections
+        assert summary.get("password") == "usersecret1"
+        assert summary.get("rootPassword") == "rootsecret1"
+        assert summary.get("encryptionPassphrase") == "lukssecret1"
+
+    def test_summaryview_qml_never_reads_password_keys(self) -> None:
+        """
+        Garde-fou sécurité automatisé : SummaryView.qml ne doit référencer
+        aucune clé de mot de passe. Empêche une régression future qui
+        exposerait un secret à l'écran via `selections.password`, etc.
+        """
+        summary_qml = (
+            PROJECT_ROOT / "src" / "omnis" / "gui" / "qml" / "components" / "SummaryView.qml"
+        ).read_text(encoding="utf-8")
+        for secret_key in ("password", "rootPassword", "encryptionPassphrase"):
+            assert f"selections.{secret_key}" not in summary_qml, (
+                f"SummaryView expose le secret '{secret_key}'"
+            )
+
+    def test_users_qml_passwords_not_bound_downward(self) -> None:
+        """
+        Garde-fou sécurité : les champs mot de passe de UsersView ne doivent
+        pas avoir de binding descendant `text: engine.password` (write-only).
+        """
+        users_qml = (
+            PROJECT_ROOT / "src" / "omnis" / "gui" / "qml" / "components" / "UsersView.qml"
+        ).read_text(encoding="utf-8")
+        # On ignore les lignes de commentaire (//) : seuls les vrais bindings
+        # QML comptent. Un binding descendant sur un secret est une régression.
+        code_lines = [
+            line.strip() for line in users_qml.splitlines() if not line.strip().startswith("//")
+        ]
+        for forbidden in ("text: engine.password", "text: engine.rootPassword"):
+            assert not any(forbidden in line for line in code_lines), (
+                f"UsersView binde un secret en descendant : '{forbidden}'"
+            )
+
+
 class TestUsersJobRunGecos:
     """UsersJob.run() doit transmettre le GECOS à useradd."""
 
