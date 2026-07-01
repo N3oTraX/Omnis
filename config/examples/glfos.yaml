@@ -341,13 +341,6 @@ jobs:
           description: "L'edition Studio avec la version Pro de DaVinci Resolve (DaVinci Resolve Studio)."
           icon: "editions/studio-pro.png"
 
-  # Installation du systeme (NixOS)
-  - name: install
-    config:
-      source: "/iso/nixos"
-      method: nixos-install
-      preserve_permissions: true
-
   # Configuration utilisateur
   - name: users
     config:
@@ -360,12 +353,25 @@ jobs:
         - storage
         - input  # Pour les manettes gaming
 
-  # Bootloader
-  - name: bootloader
+  # Installation du systeme (NixOS)
+  #
+  # Le job `nixos` REMPLACE l'ancien couple `install` (rsync generique) +
+  # `bootloader` (arch-chroot bootctl), inadaptes a NixOS : sur NixOS le
+  # bootloader est declare dans la configuration Nix et pose par nixos-install.
+  # Ce job, calque sur le module Calamares GLF, genere configuration.nix +
+  # hardware-configuration.nix, copie le flake GLF, injecte les devices LUKS
+  # et lance `nixos-install --flake <cible>/etc/nixos#GLF-OS`.
+  #
+  # Prerequis : le job `partition` a partitionne ET monte la cible sur
+  # `target_root`. Les fichiers install.py / bootloader.py restent presents
+  # dans le code mais ne sont plus invoques pour GLF OS.
+  - name: nixos
     config:
-      type: systemd-boot
-      install_path: auto
-      enable_os_prober: false  # NixOS gere son propre boot
+      # Repertoire source du flake GLF present sur l'ISO (flake.nix,
+      # flake.lock, customConfig).
+      flake_source: "/iso/nixos"
+      # Attribut nixosConfigurations a installer.
+      flake_attr: "GLF-OS"
 
   # Finalization
   - name: finished

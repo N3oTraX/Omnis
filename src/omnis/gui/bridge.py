@@ -1086,6 +1086,11 @@ class EngineBridge(QObject):
             # nixos job consumes these as glf.environment.type / .edition.
             "desktopEnvironment": "gnome",
             "edition": "standard",
+            # SECURITY: final confirmation gate. Destructive jobs (partition,
+            # nixos) refuse to run for real unless this is armed to True at the
+            # summary step. Defaults to False so an accidental start stays in a
+            # non-destructive posture.
+            "confirmed": False,
         }
 
         # Disk data
@@ -1836,6 +1841,31 @@ class EngineBridge(QObject):
             self.selectionsChanged.emit()
 
     # =========================================================================
+    # Final installation confirmation (security gate)
+    # =========================================================================
+
+    @Property(bool, notify=selectionsChanged)
+    def confirmed(self) -> bool:
+        """Whether the user armed the final, destructive installation."""
+        return bool(self._selections.get("confirmed", False))
+
+    @Slot(bool)
+    def setConfirmed(self, confirmed: bool) -> None:
+        """
+        Arm/disarm the final installation gate.
+
+        SECURITY: the partition and nixos jobs refuse to perform any real,
+        destructive operation unless this flag is True (see their run() guards).
+        SummaryView is expected to expose a confirmation checkbox bound to this
+        slot before enabling the "Install" action.
+        """
+        if self._selections.get("confirmed") != confirmed:
+            self._selections["confirmed"] = confirmed
+            if self._debug:
+                print(f"[Engine] Installation confirmed set to: {confirmed}")
+            self.selectionsChanged.emit()
+
+    # =========================================================================
     # Manual partitioning plan (assign existing partitions)
     # =========================================================================
 
@@ -2208,6 +2238,8 @@ class EngineBridge(QObject):
             normalized["encryption_passphrase"] = normalized.pop("encryptionPassphrase")
         if "efiSizeMb" in normalized:
             normalized["efi_size_mb"] = normalized.pop("efiSizeMb")
+        if "keyboardVariant" in normalized:
+            normalized["keyboard_variant"] = normalized.pop("keyboardVariant")
         # DE/edition camelCase -> snake_case. The nixos job (Phase 2) will read
         # desktop_environment -> glf.environment.type and edition ->
         # glf.environment.edition. See PackagesJob for the current storage point.
@@ -2230,6 +2262,13 @@ class EngineBridge(QObject):
                 for name, entry in self._partition_assignments.items()
                 if entry["mountpoint"] or entry["format"]
             ]
+
+        # SECURITY: installer-wide guard-rails read by the destructive jobs
+        # (partition, nixos). ``dry_run`` comes from the bridge launch flag;
+        # ``confirmed`` is armed by the summary confirmation gate (setConfirmed).
+        # Without confirmed=True a real (non-dry-run) install is refused.
+        normalized["dry_run"] = self._dry_run
+        normalized["confirmed"] = bool(self._selections.get("confirmed", False))
 
         self._engine.set_selections(normalized)
 
