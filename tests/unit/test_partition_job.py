@@ -1346,3 +1346,124 @@ class TestRunEncryptionValidation:
         assert result.error_code == 46
         # SECURITY: message must not leak any passphrase (there is none here).
         assert "passphrase" in result.message.lower()
+
+
+class TestManualPartitioning:
+    """Tests for manual mode (_partition_manual): assign existing partitions."""
+
+    @staticmethod
+    def _ctx(assignments: list[dict[str, object]]) -> JobContext:
+        return JobContext(
+            target_root="/mnt/target",
+            selections={"partition_assignments": assignments},
+        )
+
+    @staticmethod
+    def _assign(name: str, mountpoint: str, fmt: bool = False, fstype: str = "") -> dict[str, object]:
+        return {
+            "name": name,
+            "path": f"/dev/{name}",
+            "mountpoint": mountpoint,
+            "format": fmt,
+            "fstype": fstype,
+        }
+
+    def test_requires_at_least_one_assignment(self) -> None:
+        job = PartitionJob()
+        result = job._partition_manual(
+            context=self._ctx([]), disk="/dev/sdb", selections={}, dry_run=True
+        )
+        assert result.success is False
+        assert result.error_code == 48
+
+    def test_requires_exactly_one_root(self) -> None:
+        job = PartitionJob()
+        assignments = [self._assign("sdb1", "/boot")]
+        result = job._partition_manual(
+            context=self._ctx(assignments),
+            disk="/dev/sdb",
+            selections={"partition_assignments": assignments},
+            dry_run=True,
+        )
+        assert result.success is False
+        assert result.error_code == 49
+
+    def test_rejects_duplicate_mount_point(self) -> None:
+        job = PartitionJob()
+        assignments = [
+            self._assign("sdb1", "/"),
+            self._assign("sdb2", "/home"),
+            self._assign("sdb3", "/home"),
+        ]
+        result = job._partition_manual(
+            context=self._ctx(assignments),
+            disk="/dev/sdb",
+            selections={"partition_assignments": assignments},
+            dry_run=True,
+        )
+        assert result.success is False
+        assert result.error_code == 50
+
+    def test_formats_and_mounts_dry_run(self) -> None:
+        job = PartitionJob()
+        assignments = [
+            self._assign("sdb1", "/boot", fmt=True, fstype="vfat"),
+            self._assign("sdb2", "/", fmt=True, fstype="ext4"),
+        ]
+        with patch.object(job, "_run_partitioning_command") as mock_cmd:
+            mock_cmd.return_value = JobResult.ok()
+            result = job._partition_manual(
+                context=self._ctx(assignments),
+                disk="/dev/sdb",
+                selections={"partition_assignments": assignments},
+                dry_run=True,
+            )
+
+        assert result.success is True
+        assert job._layout is not None
+        assert job._layout.root_partition == "/dev/sdb2"
+        assert job._layout.efi_partition == "/dev/sdb1"
+
+        commands = [call.args[0] for call in mock_cmd.call_args_list]
+        assert ["mkfs.fat", "-F32", "/dev/sdb1"] in commands
+        assert ["mkfs.ext4", "-F", "/dev/sdb2"] in commands
+        # Root must mount before /boot (shallowest path first).
+        mount_cmds = [c for c in commands if c[0] == "mount"]
+        assert mount_cmds[0] == ["mount", "/dev/sdb2", "/mnt/target"]
+        assert mount_cmds[1] == ["mount", "/dev/sdb1", "/mnt/target/boot"]
+
+    def test_does_not_format_when_flag_absent(self) -> None:
+        job = PartitionJob()
+        assignments = [self._assign("sdb2", "/", fmt=False, fstype="ext4")]
+        with patch.object(job, "_run_partitioning_command") as mock_cmd:
+            mock_cmd.return_value = JobResult.ok()
+            result = job._partition_manual(
+                context=self._ctx(assignments),
+                disk="/dev/sdb",
+                selections={"partition_assignments": assignments},
+                dry_run=True,
+            )
+        assert result.success is True
+        commands = [call.args[0] for call in mock_cmd.call_args_list]
+        assert not any(c[0].startswith("mkfs") or c[0] == "mkswap" for c in commands)
+
+    def test_mkfs_command_mapping(self) -> None:
+        assert PartitionJob._mkfs_command("ext4", "/dev/x") == ["mkfs.ext4", "-F", "/dev/x"]
+        assert PartitionJob._mkfs_command("btrfs", "/dev/x") == ["mkfs.btrfs", "-f", "/dev/x"]
+        assert PartitionJob._mkfs_command("vfat", "/dev/x") == ["mkfs.fat", "-F32", "/dev/x"]
+        assert PartitionJob._mkfs_command("swap", "/dev/x") == ["mkswap", "/dev/x"]
+        assert PartitionJob._mkfs_command("reiserfs", "/dev/x") is None
+
+    def test_run_routes_manual_mode(self) -> None:
+        job = PartitionJob()
+        with (
+            patch.object(job, "validate") as mock_validate,
+            patch.object(job, "_partition_manual") as mock_manual,
+        ):
+            mock_validate.return_value = JobResult.ok()
+            mock_manual.return_value = JobResult.ok()
+            context = JobContext(
+                selections={"disk": "/dev/sdb", "partition_mode": "manual", "dry_run": True}
+            )
+            job.run(context)
+            assert mock_manual.called

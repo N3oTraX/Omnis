@@ -294,12 +294,15 @@ class PartitionJob(BaseJob):
                     passphrase=passphrase,
                     dry_run=dry_run,
                 )
-            else:
-                # Manual mode not implemented yet
-                return JobResult.fail(
-                    "Manual partitioning mode not yet implemented (planned for v0.4.0)",
-                    error_code=39,
+            elif mode == PartitionMode.MANUAL.value:
+                result = self._partition_manual(
+                    context=context,
+                    disk=disk,
+                    selections=selections,
+                    dry_run=dry_run,
                 )
+            else:
+                return JobResult.fail(f"Unknown partition mode: {mode}", error_code=39)
 
             if not result.success:
                 return result
@@ -573,6 +576,134 @@ class PartitionJob(BaseJob):
                 return result
 
         return JobResult.ok("Automatic partitioning completed")
+
+    def _partition_manual(
+        self,
+        context: JobContext,
+        disk: str,
+        selections: dict[str, Any],
+        dry_run: bool,
+    ) -> JobResult:
+        """
+        Manual partitioning: assign existing partitions (mount point + format).
+
+        Does NOT create, delete or resize partitions; it optionally reformats
+        the partitions the user flagged and mounts them under ``target_root``.
+        Exactly one partition must be mounted at ``/``.
+
+        Args:
+            context: Execution context
+            disk: Target disk path (informational; not wiped in this mode)
+            selections: Raw user selections; reads ``partition_assignments``
+            dry_run: If True, simulate only
+
+        Returns:
+            JobResult indicating success or failure
+        """
+        logger.info(f"Manual partitioning on {disk} (existing partitions preserved)")
+
+        assignments = selections.get("partition_assignments", [])
+        used = [a for a in assignments if a.get("mountpoint") or a.get("format")]
+        if not used:
+            return JobResult.fail("No partition assignment provided", error_code=48)
+
+        roots = [a for a in used if a.get("mountpoint") == "/"]
+        if len(roots) != 1:
+            return JobResult.fail(
+                "Manual mode requires exactly one partition mounted at /",
+                error_code=49,
+            )
+
+        mounts = [a["mountpoint"] for a in used if a.get("mountpoint")]
+        if len(mounts) != len(set(mounts)):
+            return JobResult.fail("Duplicate mount point in manual plan", error_code=50)
+
+        # Record layout for the summary; the EFI slot is whatever lands on /boot*.
+        efi = next((a for a in used if a.get("mountpoint") in ("/boot", "/boot/efi")), None)
+        self._layout = PartitionLayout(
+            efi_partition=str(efi["path"]) if efi else "",
+            root_partition=str(roots[0]["path"]),
+        )
+
+        context.report_progress(30, "Formatting assigned partitions...")
+
+        for assignment in used:
+            if not assignment.get("format"):
+                continue
+            path = str(assignment["path"])
+            fstype = str(assignment.get("fstype") or "ext4")
+            cmd = self._mkfs_command(fstype, path)
+            if cmd is None:
+                return JobResult.fail(
+                    f"Unsupported filesystem for {path}: {fstype}", error_code=51
+                )
+            result = self._run_partitioning_command(
+                cmd, description=f"Formatting {path} ({fstype})", dry_run=dry_run
+            )
+            if not result.success:
+                return result
+
+        context.report_progress(70, "Mounting assigned filesystems...")
+        return self._mount_manual(context, used, dry_run)
+
+    @staticmethod
+    def _mkfs_command(fstype: str, path: str) -> list[str] | None:
+        """Return the mkfs command for a filesystem, or None if unsupported."""
+        fs = fstype.lower()
+        if fs == "ext4":
+            return ["mkfs.ext4", "-F", path]
+        if fs == "btrfs":
+            return ["mkfs.btrfs", "-f", path]
+        if fs in ("vfat", "fat", "fat32"):
+            return ["mkfs.fat", "-F32", path]
+        if fs == "swap":
+            return ["mkswap", path]
+        return None
+
+    def _mount_manual(
+        self,
+        context: JobContext,
+        assignments: list[dict[str, Any]],
+        dry_run: bool,
+    ) -> JobResult:
+        """Mount manually-assigned filesystems under target_root (parents first)."""
+        target_root = context.target_root
+
+        fs_mounts = [a for a in assignments if a.get("mountpoint") and a["mountpoint"] != "swap"]
+        # Shallowest path first so a parent mount exists before its children.
+        fs_mounts.sort(key=lambda a: 0 if a["mountpoint"] == "/" else a["mountpoint"].count("/"))
+
+        for assignment in fs_mounts:
+            mountpoint = assignment["mountpoint"]
+            dest = Path(target_root)
+            if mountpoint != "/":
+                dest = dest / mountpoint.lstrip("/")
+            if not dry_run:
+                try:
+                    dest.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    return JobResult.fail(f"Failed to create {dest}: {e}", error_code=52)
+            else:
+                logger.info(f"[DRY-RUN] Would create directory: {dest}")
+            result = self._run_partitioning_command(
+                ["mount", str(assignment["path"]), str(dest)],
+                description=f"Mounting {assignment['path']} at {dest}",
+                dry_run=dry_run,
+            )
+            if not result.success:
+                return result
+
+        for assignment in assignments:
+            if assignment.get("mountpoint") == "swap":
+                result = self._run_partitioning_command(
+                    ["swapon", str(assignment["path"])],
+                    description=f"Enabling swap on {assignment['path']}",
+                    dry_run=dry_run,
+                )
+                if not result.success:
+                    logger.warning(f"Failed to activate swap: {result.message}")
+
+        return JobResult.ok("Manual partitions mounted")
 
     def _setup_luks(self, passphrase: str, dry_run: bool) -> JobResult:
         """

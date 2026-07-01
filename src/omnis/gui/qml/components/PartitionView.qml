@@ -90,7 +90,9 @@ Item {
     }
 
     readonly property bool canProceed:
-        selectedDisk !== "" && (partitionMode !== "auto" || encryptionPassValid)
+        selectedDisk !== "" && (
+            partitionMode === "auto" ? encryptionPassValid : engine.manualPlanValid
+        )
 
     // Content container
     Rectangle {
@@ -522,7 +524,7 @@ Item {
                                     }
                                 }
 
-                                // Partitions (if manual mode and disk selected)
+                                // Manual mode: assign existing partitions (mount + format)
                                 Column {
                                     width: parent.width
                                     spacing: 8
@@ -536,7 +538,7 @@ Item {
                                     }
 
                                     Text {
-                                        text: qsTr("Current Partitions:")
+                                        text: qsTr("Assign existing partitions")
                                         font.pixelSize: 14
                                         font.bold: true
                                         color: textColor
@@ -545,25 +547,86 @@ Item {
                                     Repeater {
                                         model: modelData.partitions || []
 
-                                        Row {
-                                            spacing: 12
+                                        RowLayout {
                                             width: parent.width
+                                            spacing: 10
 
                                             Rectangle {
-                                                width: 8
-                                                height: 8
-                                                radius: 4
-                                                color: accentColor
-                                                anchors.verticalCenter: parent.verticalCenter
+                                                Layout.preferredWidth: 10
+                                                Layout.preferredHeight: 10
+                                                radius: 5
+                                                color: partitionColor(modelData.partType, modelData.fstype)
                                             }
 
                                             Text {
-                                                text: modelData.name + " - " + modelData.size + " (" + modelData.fstype + ")"
+                                                Layout.preferredWidth: 160
+                                                text: modelData.name + "  " + humanSize(modelData.sizeBytes)
+                                                    + (modelData.fstype ? "  " + modelData.fstype : "")
                                                 font.pixelSize: 13
-                                                color: textMutedColor
-                                                anchors.verticalCenter: parent.verticalCenter
+                                                color: textColor
+                                                elide: Text.ElideRight
+                                            }
+
+                                            // Mount point
+                                            ComboBox {
+                                                id: mpCombo
+                                                Layout.preferredWidth: 130
+                                                property string pname: modelData.name
+                                                model: ["—", "/", "/boot", "/boot/efi", "/home", "swap"]
+                                                Component.onCompleted: {
+                                                    var mp = engine.partitionMount(pname)
+                                                    var idx = mp === "" ? 0 : model.indexOf(mp)
+                                                    currentIndex = idx < 0 ? 0 : idx
+                                                }
+                                                onActivated: engine.setPartitionMount(
+                                                    pname, currentIndex === 0 ? "" : model[currentIndex])
+                                            }
+
+                                            // Format toggle
+                                            CheckBox {
+                                                id: fmtCheck
+                                                text: qsTr("Format")
+                                                property string pname: modelData.name
+                                                Component.onCompleted: checked = engine.partitionFormat(pname)
+                                                onToggled: engine.setPartitionFormat(pname, checked)
+                                            }
+
+                                            // Target filesystem (only relevant when formatting)
+                                            ComboBox {
+                                                Layout.preferredWidth: 100
+                                                enabled: fmtCheck.checked
+                                                opacity: enabled ? 1.0 : 0.4
+                                                property string pname: modelData.name
+                                                model: ["ext4", "btrfs", "vfat", "swap"]
+                                                Component.onCompleted: {
+                                                    var fs = engine.partitionFsType(pname) || modelData.fstype || "ext4"
+                                                    var idx = model.indexOf(fs)
+                                                    currentIndex = idx < 0 ? 0 : idx
+                                                    if (engine.partitionFsType(pname) === "")
+                                                        engine.setPartitionFsType(pname, model[currentIndex])
+                                                }
+                                                onActivated: engine.setPartitionFsType(pname, model[currentIndex])
+                                            }
+
+                                            Item { Layout.fillWidth: true }
+                                        }
+                                    }
+
+                                    // Validation hint
+                                    Text {
+                                        width: parent.width
+                                        visible: !engine.manualPlanValid
+                                        text: {
+                                            switch (engine.manualPlanState) {
+                                            case "no_root": return qsTr("Assign a partition to / (root) to continue")
+                                            case "multi_root": return qsTr("Only one partition can be mounted at /")
+                                            case "dupe": return qsTr("Two partitions share the same mount point")
+                                            default: return ""
                                             }
                                         }
+                                        color: "#E0A83C"
+                                        font.pixelSize: 12
+                                        wrapMode: Text.WordWrap
                                     }
                                 }
 

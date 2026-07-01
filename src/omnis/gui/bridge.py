@@ -453,6 +453,7 @@ class EngineBridge(QObject):
     localeDataChanged = Signal()  # emitted when locale data is loaded
     keyboardVariantsChanged = Signal()  # emitted when keyboard variants change
     disksChanged = Signal()  # emitted when disks are scanned
+    partitionPlanChanged = Signal()  # emitted when a manual partition assignment changes
     progressChanged = Signal()  # emitted when progress updates
     systemFontChanged = Signal()  # emitted when system font family changes
 
@@ -520,12 +521,14 @@ class EngineBridge(QObject):
         theme_base: Path,
         debug: bool = False,
         dry_run: bool = False,
+        skip_requirements: bool = False,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._engine = engine
         self._debug = debug
         self._dry_run = dry_run
+        self._skip_requirements = skip_requirements
         self._branding_proxy = BrandingProxy(engine, theme_base, self, debug=debug)
         self._theme_base = theme_base
 
@@ -1082,6 +1085,10 @@ class EngineBridge(QObject):
         # Disk data
         self._disks_model: list[dict[str, Any]] = []
 
+        # Manual partitioning: per-partition assignment keyed by partition name.
+        # Each value: {"path": str, "mountpoint": str, "format": bool, "fstype": str}
+        self._partition_assignments: dict[str, dict[str, Any]] = {}
+
         # Progress tracking
         self._overall_progress: int = 0
         self._current_job_progress: int = 0
@@ -1223,7 +1230,14 @@ class EngineBridge(QObject):
     @Property(bool, notify=requirementsChanged)
     def canProceed(self) -> bool:
         """Whether installation can proceed based on requirements."""
+        if self._skip_requirements:
+            return True
         return self._can_proceed
+
+    @Property(bool, constant=True)
+    def skipValidation(self) -> bool:
+        """Dev flag: bypass all per-screen validation gating (design testing)."""
+        return self._skip_requirements
 
     @Property(bool, notify=requirementsChanged)
     def isCheckingRequirements(self) -> bool:
@@ -1806,6 +1820,88 @@ class EngineBridge(QObject):
                 print(f"[Engine] EFI size set to: {size} MB")
             self.selectionsChanged.emit()
 
+    # =========================================================================
+    # Manual partitioning plan (assign existing partitions)
+    # =========================================================================
+
+    def _assignment(self, name: str) -> dict[str, Any]:
+        """Return (creating if needed) the assignment record for a partition."""
+        return self._partition_assignments.setdefault(
+            name,
+            {"path": f"/dev/{name}", "mountpoint": "", "format": False, "fstype": ""},
+        )
+
+    @Slot(str, str)
+    def setPartitionMount(self, name: str, mountpoint: str) -> None:
+        """Assign (or clear, with "") the mount point of an existing partition."""
+        entry = self._assignment(name)
+        if entry["mountpoint"] != mountpoint:
+            entry["mountpoint"] = mountpoint
+            if self._debug:
+                print(f"[Engine] Partition {name} mount -> {mountpoint or '(unused)'}")
+            self.partitionPlanChanged.emit()
+
+    @Slot(str, bool)
+    def setPartitionFormat(self, name: str, do_format: bool) -> None:
+        """Toggle whether an existing partition is reformatted."""
+        entry = self._assignment(name)
+        if entry["format"] != do_format:
+            entry["format"] = do_format
+            if self._debug:
+                print(f"[Engine] Partition {name} format -> {do_format}")
+            self.partitionPlanChanged.emit()
+
+    @Slot(str, str)
+    def setPartitionFsType(self, name: str, fstype: str) -> None:
+        """Set the target filesystem used when a partition is reformatted."""
+        entry = self._assignment(name)
+        if entry["fstype"] != fstype:
+            entry["fstype"] = fstype
+            if self._debug:
+                print(f"[Engine] Partition {name} fstype -> {fstype}")
+            self.partitionPlanChanged.emit()
+
+    @Slot(str, result=str)
+    def partitionMount(self, name: str) -> str:
+        """Current mount point assigned to a partition (empty if unused)."""
+        return str(self._partition_assignments.get(name, {}).get("mountpoint", ""))
+
+    @Slot(str, result=bool)
+    def partitionFormat(self, name: str) -> bool:
+        """Whether a partition is flagged for reformatting."""
+        return bool(self._partition_assignments.get(name, {}).get("format", False))
+
+    @Slot(str, result=str)
+    def partitionFsType(self, name: str) -> str:
+        """Target filesystem for a partition (empty means keep current)."""
+        return str(self._partition_assignments.get(name, {}).get("fstype", ""))
+
+    def _manual_mounts(self) -> list[str]:
+        """Non-empty mount points currently assigned across all partitions."""
+        return [e["mountpoint"] for e in self._partition_assignments.values() if e["mountpoint"]]
+
+    @Property(str, notify=partitionPlanChanged)
+    def manualPlanState(self) -> str:
+        """
+        Coarse state of the manual plan for the UI to map to a message.
+
+        One of ``"ok"``, ``"no_root"``, ``"multi_root"`` or ``"dupe"``.
+        """
+        mounts = self._manual_mounts()
+        roots = mounts.count("/")
+        if roots == 0:
+            return "no_root"
+        if roots > 1:
+            return "multi_root"
+        if len(mounts) != len(set(mounts)):
+            return "dupe"
+        return "ok"
+
+    @Property(bool, notify=partitionPlanChanged)
+    def manualPlanValid(self) -> bool:
+        """A manual plan is valid once exactly one partition is mounted at '/'."""
+        return self.manualPlanState == "ok"
+
     @Slot()
     def refreshDisks(self) -> None:
         """Scan and refresh available disks via the unified disk detector."""
@@ -1977,6 +2073,21 @@ class EngineBridge(QObject):
         if "efiSizeMb" in normalized:
             normalized["efi_size_mb"] = normalized.pop("efiSizeMb")
         # filesystem and encryption keys are already snake-compatible.
+
+        # Manual partitioning: forward the per-partition assignment plan, keeping
+        # only entries the user actually touched (a mount point and/or a format).
+        if normalized.get("partition_mode") == "manual":
+            normalized["partition_assignments"] = [
+                {
+                    "name": name,
+                    "path": entry["path"],
+                    "mountpoint": entry["mountpoint"],
+                    "format": entry["format"],
+                    "fstype": entry["fstype"],
+                }
+                for name, entry in self._partition_assignments.items()
+                if entry["mountpoint"] or entry["format"]
+            ]
 
         self._engine.set_selections(normalized)
 
