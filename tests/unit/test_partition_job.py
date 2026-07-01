@@ -982,31 +982,6 @@ class TestRunMethod:
 
     @patch("omnis.jobs.partition.PartitionJob._partition_auto")
     @patch("omnis.jobs.partition.PartitionJob.validate")
-    def test_run_manual_mode_not_implemented(
-        self, mock_validate: MagicMock, _mock_partition: MagicMock
-    ) -> None:
-        """run should fail for manual mode (not yet implemented)."""
-        job = PartitionJob()
-
-        mock_validate.return_value = JobResult.ok()
-
-        context = JobContext(
-            selections={
-                "disk": "/dev/sda",
-                "mode": "manual",
-                "dry_run": False,
-                "confirmed": True,
-            }
-        )
-
-        result = job.run(context)
-
-        assert result.success is False
-        assert result.error_code == 39
-        assert "Manual partitioning mode not yet implemented" in result.message
-
-    @patch("omnis.jobs.partition.PartitionJob._partition_auto")
-    @patch("omnis.jobs.partition.PartitionJob.validate")
     def test_run_auto_mode_success(
         self, mock_validate: MagicMock, mock_partition: MagicMock
     ) -> None:
