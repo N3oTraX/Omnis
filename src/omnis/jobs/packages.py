@@ -72,6 +72,30 @@ class PackagesJob(BaseJob):
         super().__init__(config)
         self._packages_installed: list[str] = []
         self._packages_failed: list[str] = []
+        # Desktop environment (DE) + edition/flavor chosen by the user in the
+        # EnvironmentView. Stored here for the summary/result payload. The real
+        # NixOS wiring (see run()) is handled by the Phase 2 nixos job.
+        self._desktop_environment: str = ""
+        self._edition: str = ""
+
+    def _get_desktop_environment(self, context: JobContext) -> str:
+        """
+        Read the selected desktop environment id from the context.
+
+        Values mirror the Calamares GLF OS model (``gnome``/``plasma``) and map
+        to ``glf.environment.type`` in the generated NixOS configuration.
+        """
+        return str(context.selections.get("desktop_environment", ""))
+
+    def _get_edition(self, context: JobContext) -> str:
+        """
+        Read the selected edition/flavor id from the context.
+
+        Values mirror the Calamares GLF OS model (``standard``/``mini``/
+        ``streamers``/``studio``/``studio-pro``) and map to
+        ``glf.environment.edition`` in the generated NixOS configuration.
+        """
+        return str(context.selections.get("edition", ""))
 
     def _get_package_manager(self, context: JobContext) -> str:
         """
@@ -512,6 +536,23 @@ class PackagesJob(BaseJob):
         """
         context.report_progress(0, "Starting package installation...")
 
+        # Capture the desktop-environment / edition selection. On GLF OS (NixOS)
+        # these drive the generated configuration rather than a package manager.
+        #
+        # TODO(Phase 2 / nixos job): consume these values in the NixOS install
+        # step, mirroring the Calamares nixos module which writes:
+        #     glf.environment.type    = "<desktop_environment>";  # gnome | plasma
+        #     glf.environment.edition = "<edition>";              # standard | mini | ...
+        # (ref: glf-os patches/calamares-nixos-extensions/modules/nixos/main.py).
+        self._desktop_environment = self._get_desktop_environment(context)
+        self._edition = self._get_edition(context)
+        if self._desktop_environment or self._edition:
+            logger.info(
+                "Selected desktop environment=%r, edition=%r",
+                self._desktop_environment,
+                self._edition,
+            )
+
         # Validate first
         validation = self.validate(context)
         if not validation.success:
@@ -550,6 +591,8 @@ class PackagesJob(BaseJob):
                 "packages_installed": self._packages_installed,
                 "packages_failed": self._packages_failed,
                 "total_packages": len(self._packages_installed),
+                "desktop_environment": self._desktop_environment,
+                "edition": self._edition,
             },
         )
 

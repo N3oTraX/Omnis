@@ -297,36 +297,49 @@ jobs:
       efi_partition_size_mb: 512
       swap_strategy: auto
 
-  # Selection de la saveur (DE/Edition)
+  # Selection de l'environnement de bureau (DE) et de l'edition/saveur
+  # Modele aligne sur Calamares GLF OS (packagechooser@environment +
+  # packagechooser@edition). Le job nixos consomme ensuite :
+  #   glf.environment.type    = <desktop_environment>  (gnome | plasma)
+  #   glf.environment.edition = <edition>              (standard | mini | ...)
   - name: packages
     config:
-      # Saveurs disponibles pour GLF OS
-      flavors:
+      # Environnements de bureau disponibles (dimension "environment")
+      # id doit correspondre a glf.environment.type cote NixOS.
+      desktop_environments:
         - id: gnome
-          name: "GLF OS GNOME"
-          description: "Edition GNOME - Interface moderne et epuree"
-          icon: "flavors/gnome.png"
+          name: "GNOME"
+          description: "Interface moderne et epuree, orientee productivite. Choix populaire de la communaute GLF-OS."
+          icon: "environments/gnome.png"
           default: true
-        - id: kde
-          name: "GLF OS KDE"
-          description: "Edition KDE Plasma - Personnalisation maximale"
-          icon: "flavors/kde.png"
-        - id: minimal
-          name: "GLF OS Minimal"
-          description: "Base minimale sans environnement de bureau"
-          icon: "flavors/minimal.png"
-      # Groupes de paquets optionnels
-      optional_groups:
-        - id: gaming
-          name: "Gaming"
-          description: "Steam, Lutris, Wine, Proton-GE, MangoHud"
+        - id: plasma
+          name: "KDE Plasma"
+          description: "Environnement personnalisable, moderne et riche en fonctionnalites."
+          icon: "environments/plasma.png"
+      # Editions / saveurs disponibles (dimension "edition")
+      # id doit correspondre a glf.environment.edition cote NixOS.
+      editions:
+        - id: standard
+          name: "Standard"
+          description: "Une suite logicielle complete, particulierement adaptee pour le Gaming."
+          icon: "editions/standard.png"
           default: true
-        - id: streaming
-          name: "Streaming"
-          description: "OBS Studio, plugins streaming"
-        - id: emulation
-          name: "Emulation"
-          description: "RetroArch, Dolphin, PCSX2, RPCS3"
+        - id: mini
+          name: "Mini"
+          description: "Une suite logicielle minimale, a completer selon vos souhaits."
+          icon: "editions/mini.png"
+        - id: streamers
+          name: "Streamers"
+          description: "Pense pour les PC dedies au streaming, capturez leger !"
+          icon: "editions/streamers.png"
+        - id: studio
+          name: "Studio"
+          description: "Complete la suite standard avec des outils de creation artistique (DaVinci Resolve, OBS, Blender, Kdenlive, GIMP, Audacity)."
+          icon: "editions/studio.png"
+        - id: studio-pro
+          name: "Studio | DaVinci Resolve Pro"
+          description: "L'edition Studio avec la version Pro de DaVinci Resolve (DaVinci Resolve Studio)."
+          icon: "editions/studio-pro.png"
 
   # Installation du systeme (NixOS)
   - name: install

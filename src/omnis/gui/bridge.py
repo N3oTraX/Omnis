@@ -454,6 +454,7 @@ class EngineBridge(QObject):
     keyboardVariantsChanged = Signal()  # emitted when keyboard variants change
     disksChanged = Signal()  # emitted when disks are scanned
     partitionPlanChanged = Signal()  # emitted when a manual partition assignment changes
+    environmentDataChanged = Signal()  # emitted when DE/edition catalogs are loaded
     progressChanged = Signal()  # emitted when progress updates
     systemFontChanged = Signal()  # emitted when system font family changes
 
@@ -1080,10 +1081,21 @@ class EngineBridge(QObject):
             "encryption": False,
             "encryptionPassphrase": "",
             "efiSizeMb": 512,
+            # Desktop environment (DE) + edition/flavor selection. Aligned on the
+            # Calamares GLF OS model (packagechooser@environment/@edition). The
+            # nixos job consumes these as glf.environment.type / .edition.
+            "desktopEnvironment": "gnome",
+            "edition": "standard",
         }
 
         # Disk data
         self._disks_model: list[dict[str, Any]] = []
+
+        # Desktop-environment / edition catalogs, loaded from the ``packages``
+        # job config (see _load_environment_data). Each item is a dict with
+        # keys: id, name, description, icon (resolved file:// URL), default.
+        self._desktop_environments_model: list[dict[str, Any]] = []
+        self._editions_model: list[dict[str, Any]] = []
 
         # Manual partitioning: per-partition assignment keyed by partition name.
         # Each value: {"path": str, "mountpoint": str, "format": bool, "fstype": str}
@@ -1106,6 +1118,9 @@ class EngineBridge(QObject):
 
         # Initialize requirements checker with config
         self._init_requirements_checker()
+
+        # Load desktop-environment / edition catalogs from the packages job.
+        self._load_environment_data()
 
     @property
     def branding_proxy(self) -> BrandingProxy:
@@ -1924,6 +1939,127 @@ class EngineBridge(QObject):
         self.disksChanged.emit()
 
     # =========================================================================
+    # Desktop Environment (DE) & Edition Properties
+    # =========================================================================
+
+    def _resolve_environment_icon(self, relative_path: str) -> str:
+        """Resolve a DE/edition icon to an absolute file:// URL (empty if absent)."""
+        if not relative_path:
+            return ""
+        full_path = self._theme_base / relative_path
+        if full_path.exists():
+            return QUrl.fromLocalFile(str(full_path.resolve())).toString()
+        return ""
+
+    def _build_environment_items(self, raw_items: list[Any]) -> list[dict[str, Any]]:
+        """Normalize raw DE/edition config entries into QML-ready dicts."""
+        items: list[dict[str, Any]] = []
+        for entry in raw_items:
+            if not isinstance(entry, dict):
+                continue
+            item_id = str(entry.get("id", ""))
+            if not item_id:
+                continue
+            items.append(
+                {
+                    "id": item_id,
+                    "name": str(entry.get("name", item_id)),
+                    "description": str(entry.get("description", "")),
+                    "iconUrl": self._resolve_environment_icon(str(entry.get("icon", ""))),
+                    "default": bool(entry.get("default", False)),
+                }
+            )
+        return items
+
+    def _load_environment_data(self) -> None:
+        """
+        Load desktop-environment and edition catalogs from the ``packages`` job.
+
+        Mirrors the Calamares GLF OS model (packagechooser@environment/@edition).
+        The default selection is derived from the item flagged ``default: true``
+        (falling back to the first item, then to the hard-coded default already
+        present in ``_selections``). Gracefully handles a config-less ``packages``
+        job (e.g. minimal.yaml) by leaving the catalogs empty.
+        """
+        packages_config: dict[str, Any] = {}
+        for job_def in self._engine.config.normalize_jobs():
+            if job_def.name == "packages":
+                packages_config = job_def.config or {}
+                break
+
+        self._desktop_environments_model = self._build_environment_items(
+            packages_config.get("desktop_environments", [])
+        )
+        self._editions_model = self._build_environment_items(packages_config.get("editions", []))
+
+        # Apply config-declared defaults so the summary/first render match the
+        # highlighted card even before any user interaction.
+        default_de = self._default_item_id(self._desktop_environments_model)
+        if default_de:
+            self._selections["desktopEnvironment"] = default_de
+        default_edition = self._default_item_id(self._editions_model)
+        if default_edition:
+            self._selections["edition"] = default_edition
+
+        if self._debug:
+            print(
+                f"[Engine] Loaded {len(self._desktop_environments_model)} DEs, "
+                f"{len(self._editions_model)} editions "
+                f"(default DE={self._selections['desktopEnvironment']}, "
+                f"edition={self._selections['edition']})"
+            )
+
+        self.environmentDataChanged.emit()
+
+    @staticmethod
+    def _default_item_id(items: list[dict[str, Any]]) -> str:
+        """Return the id of the default item (first flagged, else first, else "")."""
+        for item in items:
+            if item.get("default"):
+                return str(item["id"])
+        if items:
+            return str(items[0]["id"])
+        return ""
+
+    @Property(list, notify=environmentDataChanged)
+    def desktopEnvironmentsModel(self) -> list[dict[str, Any]]:
+        """Get available desktop environments (DE) for QML."""
+        return self._desktop_environments_model
+
+    @Property(list, notify=environmentDataChanged)
+    def editionsModel(self) -> list[dict[str, Any]]:
+        """Get available editions/flavors for QML."""
+        return self._editions_model
+
+    @Property(str, notify=selectionsChanged)
+    def desktopEnvironment(self) -> str:
+        """Get selected desktop environment id (e.g. gnome, plasma)."""
+        return str(self._selections.get("desktopEnvironment", "gnome"))
+
+    @Slot(str)
+    def setDesktopEnvironment(self, desktop_environment: str) -> None:
+        """Set selected desktop environment id."""
+        if self._selections.get("desktopEnvironment") != desktop_environment:
+            self._selections["desktopEnvironment"] = desktop_environment
+            if self._debug:
+                print(f"[Engine] Desktop environment set to: {desktop_environment}")
+            self.selectionsChanged.emit()
+
+    @Property(str, notify=selectionsChanged)
+    def edition(self) -> str:
+        """Get selected edition id (e.g. standard, mini, studio)."""
+        return str(self._selections.get("edition", "standard"))
+
+    @Slot(str)
+    def setEdition(self, edition: str) -> None:
+        """Set selected edition id."""
+        if self._selections.get("edition") != edition:
+            self._selections["edition"] = edition
+            if self._debug:
+                print(f"[Engine] Edition set to: {edition}")
+            self.selectionsChanged.emit()
+
+    # =========================================================================
     # Progress Properties
     # =========================================================================
 
@@ -2072,6 +2208,12 @@ class EngineBridge(QObject):
             normalized["encryption_passphrase"] = normalized.pop("encryptionPassphrase")
         if "efiSizeMb" in normalized:
             normalized["efi_size_mb"] = normalized.pop("efiSizeMb")
+        # DE/edition camelCase -> snake_case. The nixos job (Phase 2) will read
+        # desktop_environment -> glf.environment.type and edition ->
+        # glf.environment.edition. See PackagesJob for the current storage point.
+        if "desktopEnvironment" in normalized:
+            normalized["desktop_environment"] = normalized.pop("desktopEnvironment")
+        # ``edition`` is already snake-compatible (single word); kept as-is.
         # filesystem and encryption keys are already snake-compatible.
 
         # Manual partitioning: forward the per-partition assignment plan, keeping

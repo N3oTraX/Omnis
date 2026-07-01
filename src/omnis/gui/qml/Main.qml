@@ -8,10 +8,11 @@
  * 0 - Welcome (requirements check)
  * 1 - Locale (language, timezone, keyboard)
  * 2 - Users (username, password, options)
- * 3 - Partition (disk selection)
- * 4 - Summary (review selections)
- * 5 - Progress (installation)
- * 6 - Finished (reboot/shutdown)
+ * 3 - Environment (desktop environment + edition/flavor)
+ * 4 - Partition (disk selection)
+ * 5 - Summary (review selections)
+ * 6 - Progress (installation)
+ * 7 - Finished (reboot/shutdown)
  */
 
 import QtQuick
@@ -66,8 +67,8 @@ ApplicationWindow {
 
     // Wizard state
     property int currentStep: 0
-    readonly property int totalSteps: 7  // 0-6
-    readonly property var stepNames: ["Welcome", "Locale", "Users", "Partition", "Summary", "Installing", "Finished"]
+    readonly property int totalSteps: 8  // 0-7
+    readonly property var stepNames: ["Welcome", "Locale", "Users", "Desktop", "Partition", "Summary", "Installing", "Finished"]
 
     // Installation state
     property bool isInstalling: false
@@ -111,7 +112,7 @@ ApplicationWindow {
         RowLayout {
             Layout.fillWidth: true
             spacing: 16
-            visible: currentStep > 0 && currentStep < 6
+            visible: currentStep > 0 && currentStep < 6  // hidden on Welcome, Progress(6), Finished(7)
 
             // Logo
             Item {
@@ -161,13 +162,13 @@ ApplicationWindow {
                 }
             }
 
-            // Step indicator (steps 1-4 only)
+            // Step indicator (steps 1-5 only)
             Row {
                 spacing: 8
-                visible: currentStep >= 1 && currentStep <= 4
+                visible: currentStep >= 1 && currentStep <= 5
 
                 Repeater {
-                    model: 4  // Steps 1-4
+                    model: 5  // Steps 1-5
 
                     Rectangle {
                         width: 40
@@ -332,11 +333,42 @@ ApplicationWindow {
                 }
             }
 
-            // Step 3: Partition
+            // Step 3: Environment (desktop environment + edition/flavor)
+            EnvironmentView {
+                id: environmentView
+                anchors.fill: parent
+                visible: currentStep === 3
+                opacity: visible ? 1 : 0
+
+                desktopEnvironmentsModel: engine.desktopEnvironmentsModel
+                editionsModel: engine.editionsModel
+                // selectedDesktopEnvironment / selectedEdition are read directly
+                // from engine by the view (readonly mirrors).
+
+                primaryColor: root.primaryColor
+                backgroundColor: root.backgroundColor
+                surfaceColor: root.surfaceColor
+                textColor: root.textColor
+                textMutedColor: root.textMutedColor
+                accentColor: root.accentColor
+
+                onDesktopEnvironmentSelected: function(environmentId) {
+                    engine.setDesktopEnvironment(environmentId)
+                }
+                onEditionSelected: function(editionId) {
+                    engine.setEdition(editionId)
+                }
+
+                Behavior on opacity {
+                    NumberAnimation { duration: 300 }
+                }
+            }
+
+            // Step 4: Partition
             PartitionView {
                 id: partitionView
                 anchors.fill: parent
-                visible: currentStep === 3
+                visible: currentStep === 4
                 opacity: visible ? 1 : 0
 
                 disksModel: engine.disksModel
@@ -380,11 +412,11 @@ ApplicationWindow {
                 }
             }
 
-            // Step 4: Summary
+            // Step 5: Summary
             SummaryView {
                 id: summaryView
                 anchors.fill: parent
-                visible: currentStep === 4
+                visible: currentStep === 5
                 opacity: visible ? 1 : 0
 
                 selections: engine.selections
@@ -402,18 +434,19 @@ ApplicationWindow {
 
                 onEditLocale: currentStep = 1
                 onEditUsers: currentStep = 2
-                onEditPartition: currentStep = 3
+                onEditEnvironment: currentStep = 3
+                onEditPartition: currentStep = 4
 
                 Behavior on opacity {
                     NumberAnimation { duration: 300 }
                 }
             }
 
-            // Step 5: Progress
+            // Step 6: Progress
             ProgressView {
                 id: progressView
                 anchors.fill: parent
-                visible: currentStep === 5
+                visible: currentStep === 6
                 opacity: visible ? 1 : 0
 
                 overallProgress: engine.overallProgress
@@ -441,11 +474,11 @@ ApplicationWindow {
                 }
             }
 
-            // Step 6: Finished
+            // Step 7: Finished
             FinishedView {
                 id: finishedView
                 anchors.fill: parent
-                visible: currentStep === 6
+                visible: currentStep === 7
                 opacity: visible ? 1 : 0
 
                 success: installationSuccess
@@ -480,7 +513,7 @@ ApplicationWindow {
         RowLayout {
             Layout.fillWidth: true
             spacing: 16
-            visible: currentStep >= 1 && currentStep <= 4
+            visible: currentStep >= 1 && currentStep <= 5
 
             Text {
                 text: qsTr("Powered by Omnis Installer")
@@ -516,7 +549,7 @@ ApplicationWindow {
 
             // Next/Install button
             Button {
-                text: currentStep === 4 ? qsTr("Install") : qsTr("Next")
+                text: currentStep === 5 ? qsTr("Install") : qsTr("Next")
                 enabled: canProceedToNext()
 
                 background: Rectangle {
@@ -577,7 +610,7 @@ ApplicationWindow {
 
     // Navigation functions
     function navigateBack() {
-        if (currentStep > 0 && currentStep <= 4) {
+        if (currentStep > 0 && currentStep <= 5) {
             if (currentStep === 1) {
                 currentStep = 0  // Back to Welcome
             } else {
@@ -587,13 +620,13 @@ ApplicationWindow {
     }
 
     function navigateNext() {
-        if (currentStep === 4) {
+        if (currentStep === 5) {
             // Start installation
             startInstallation()
-        } else if (currentStep < 4) {
+        } else if (currentStep < 5) {
             // Load data for next step if needed
-            if (currentStep === 2) {
-                engine.refreshDisks()  // Load disks before partition step
+            if (currentStep === 3) {
+                engine.refreshDisks()  // Load disks before partition step (step 4)
             }
             currentStep++
         }
@@ -609,9 +642,12 @@ ApplicationWindow {
                        engine.selectedKeymap !== ""
             case 2:  // Users
                 return usersView.isValid
-            case 3:  // Partition
+            case 3:  // Environment (DE + edition) — defaults always set
+                return engine.desktopEnvironment !== "" &&
+                       engine.edition !== ""
+            case 4:  // Partition
                 return engine.selectedDisk !== ""
-            case 4:  // Summary
+            case 5:  // Summary
                 return true  // Always can install from summary
             default:
                 return true
@@ -620,7 +656,7 @@ ApplicationWindow {
 
     function startInstallation() {
         engine.applySelectionsToContext()
-        currentStep = 5
+        currentStep = 6  // Progress view
         isInstalling = true
         engine.startInstallation()
     }
@@ -641,7 +677,7 @@ ApplicationWindow {
         function onInstallationFinished(success) {
             isInstalling = false
             installationSuccess = success
-            currentStep = 6  // Go to Finished view
+            currentStep = 7  // Go to Finished view
         }
 
         function onJobProgress(jobName, percent, message) {
@@ -672,13 +708,13 @@ ApplicationWindow {
     // Keyboard shortcuts
     Shortcut {
         sequence: "Escape"
-        enabled: currentStep > 0 && currentStep <= 4
+        enabled: currentStep > 0 && currentStep <= 5
         onActivated: navigateBack()
     }
 
     Shortcut {
         sequence: "Return"
-        enabled: currentStep >= 1 && currentStep <= 4 && canProceedToNext()
+        enabled: currentStep >= 1 && currentStep <= 5 && canProceedToNext()
         onActivated: navigateNext()
     }
 

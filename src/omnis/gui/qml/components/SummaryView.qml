@@ -19,6 +19,7 @@ Item {
     signal editSection(string section)
     signal editLocale()
     signal editUsers()
+    signal editEnvironment()
     signal editPartition()
 
     // External properties - selections from previous steps
@@ -31,6 +32,8 @@ Item {
         "hostname": "",
         "autoLogin": false,
         "isAdmin": true,
+        "desktopEnvironment": "gnome",
+        "edition": "standard",
         "disk": "",
         "diskSize": "",
         "partitionMode": "auto"
@@ -504,6 +507,118 @@ Item {
                                     }
 
                                     onClicked: root.editSection("users")
+                                }
+                            }
+                        }
+                    }
+
+                    // Desktop environment & edition section
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: environmentColumn.implicitHeight + 48
+                        radius: 16
+                        color: surfaceColor
+
+                        Column {
+                            id: environmentColumn
+                            anchors.fill: parent
+                            anchors.margins: 24
+                            spacing: 16
+
+                            Row {
+                                width: parent.width
+                                spacing: 12
+
+                                Column {
+                                    width: parent.width - editEnvironmentButton.width - 12
+                                    spacing: 12
+
+                                    Row {
+                                        spacing: 12
+
+                                        Text {
+                                            text: "\u{1F5A5}\u{FE0F}"
+                                            font.pixelSize: 24
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+
+                                        Text {
+                                            text: qsTr("Desktop & Edition")
+                                            font.pixelSize: 20
+                                            font.bold: true
+                                            color: textColor
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+                                    }
+
+                                    // Desktop environment
+                                    Row {
+                                        spacing: 12
+                                        width: parent.width
+
+                                        Text {
+                                            text: qsTr("Desktop Environment:")
+                                            font.pixelSize: 14
+                                            color: textMutedColor
+                                            width: 160
+                                        }
+
+                                        Text {
+                                            text: selections.desktopEnvironment || qsTr("Not set")
+                                            font.pixelSize: 14
+                                            font.bold: true
+                                            color: textColor
+                                        }
+                                    }
+
+                                    // Edition
+                                    Row {
+                                        spacing: 12
+                                        width: parent.width
+
+                                        Text {
+                                            text: qsTr("Edition:")
+                                            font.pixelSize: 14
+                                            color: textMutedColor
+                                            width: 160
+                                        }
+
+                                        Text {
+                                            text: selections.edition || qsTr("Not set")
+                                            font.pixelSize: 14
+                                            font.bold: true
+                                            color: textColor
+                                        }
+                                    }
+                                }
+
+                                Button {
+                                    id: editEnvironmentButton
+                                    text: qsTr("Edit")
+                                    width: 80
+                                    height: 36
+                                    anchors.verticalCenter: parent.verticalCenter
+
+                                    background: Rectangle {
+                                        radius: 8
+                                        color: parent.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
+                                        border.color: accentColor
+                                        border.width: 1
+
+                                        Behavior on color {
+                                            ColorAnimation { duration: 150 }
+                                        }
+                                    }
+
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.pixelSize: 13
+                                        color: textColor
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+
+                                    onClicked: root.editEnvironment()
                                 }
                             }
                         }
