@@ -5,6 +5,7 @@ Handles configuration loading, job management, and execution pipeline.
 Runs in root context, separated from UI process.
 """
 
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,6 +15,8 @@ import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from omnis.jobs.base import BaseJob, JobContext, JobResult, JobStatus
+
+logger = logging.getLogger(__name__)
 
 
 class BrandingColors(BaseModel):
@@ -200,6 +203,74 @@ class Engine:
         """
         self._selections = selections.copy()
 
+    @staticmethod
+    def _apply_theme_overlay(config_dir: Path, raw_config: dict[str, Any]) -> None:
+        """
+        Overlay ``<theme_dir>/theme.yaml`` onto the inline ``branding`` config.
+
+        The theme file is the source of truth for the visual identity: its
+        ``colors`` / ``fonts`` / ``strings`` sections and ``metadata`` override
+        the matching values from the inline ``branding:`` block, which remains
+        the fallback for anything the theme does not define. A missing, empty or
+        invalid theme file is ignored (inline branding is used as-is).
+
+        Note: keys unknown to the branding models (e.g. ``colors.success``) are
+        accepted here but dropped at validation time, since those models only
+        expose a subset of fields.
+        """
+        theme_rel = raw_config.get("theme")
+        if not theme_rel:
+            return
+
+        theme_file = (config_dir / str(theme_rel) / "theme.yaml").resolve()
+        if not theme_file.exists():
+            logger.debug("No theme.yaml at %s; using inline branding only", theme_file)
+            return
+
+        try:
+            with theme_file.open("r", encoding="utf-8") as f:
+                theme = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            logger.warning("Ignoring invalid theme.yaml (%s): %s", theme_file, e)
+            return
+
+        if not isinstance(theme, dict):
+            return
+
+        branding = raw_config.get("branding")
+        if not isinstance(branding, dict):
+            branding = {}
+            raw_config["branding"] = branding
+
+        # Sub-sections whose keys map 1:1 onto the branding sub-models.
+        for section in ("colors", "fonts", "strings"):
+            values = theme.get(section)
+            if isinstance(values, dict):
+                target = branding.get(section)
+                if not isinstance(target, dict):
+                    target = {}
+                    branding[section] = target
+                target.update(values)  # theme overrides, inline branding fills gaps
+
+        # Theme metadata maps onto the top-level branding identity fields.
+        meta = theme.get("metadata")
+        if isinstance(meta, dict):
+            for meta_key, brand_key in (
+                ("name", "name"),
+                ("version", "version"),
+                ("codename", "edition"),
+            ):
+                if meta.get(meta_key):
+                    branding[brand_key] = meta[meta_key]
+            if meta.get("website"):
+                links = branding.get("links")
+                if not isinstance(links, dict):
+                    links = {}
+                    branding["links"] = links
+                links["website"] = meta["website"]
+
+        logger.info("Applied theme overlay from %s", theme_file)
+
     @classmethod
     def from_config_file(cls, path: str | Path) -> "Engine":
         """
@@ -227,6 +298,8 @@ class Engine:
 
         if raw_config is None:
             raise ConfigurationError("Configuration file is empty")
+
+        cls._apply_theme_overlay(config_path.parent, raw_config)
 
         try:
             config = OmnisConfig.model_validate(raw_config)
