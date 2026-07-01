@@ -1757,6 +1757,16 @@ class EngineBridge(QObject):
             self.selectionsChanged.emit()
 
     @Property(str, notify=selectionsChanged)
+    def selectedDiskSize(self) -> str:
+        """Get the human-readable size of the selected disk (empty if unknown).
+
+        Derived from the scanned disks model on the fly so the summary can
+        display the target disk capacity. Notified via ``selectionsChanged`` so
+        QML re-evaluates it whenever the disk selection changes.
+        """
+        return self._get_disk_size(str(self._selections.get("disk", "")))
+
+    @Property(str, notify=selectionsChanged)
     def partitionMode(self) -> str:
         """Get partition mode (auto/manual)."""
         return str(self._selections.get("partitionMode", "auto"))

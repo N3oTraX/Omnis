@@ -113,17 +113,22 @@ class UsersJob(BaseJob):
         shell = context.selections.get("shell", "/bin/bash")
         target_root = context.target_root
 
-        # TODO(v0.5): appliquer le mot de passe root.
-        # Les clés `root_password` et `root_same_as_user` sont désormais
-        # disponibles dans context.selections (normalisées depuis l'UI via
-        # EngineBridge.applySelectionsToContext). Elles ne sont PAS encore
-        # consommées ici : le câblage backend est volontairement reporté tant
-        # que la décision n'est pas tranchée entre
-        #   - NixOS déclaratif (users.users.root.hashedPassword), et
-        #   - chpasswd impératif (arch-chroot ... chpasswd pour root).
-        # Si root_same_as_user est True, root doit hériter du mot de passe
-        # utilisateur ; sinon utiliser root_password. SÉCURITÉ : ne jamais
-        # logger root_password (même posture que `password`).
+        # Mot de passe root : la décision est désormais tranchée.
+        #
+        # Sur la cible GLF OS (NixOS), les mots de passe utilisateur ET root
+        # sont posés DÉCLARATIVEMENT par le job `nixos`
+        # (users.users.<name>.hashedPassword, hash SHA-512 via mkpasswd/openssl).
+        # C'est l'unique source de vérité pour NixOS : `chpasswd`/`arch-chroot`
+        # y sont inadaptés (arch-chroot n'existe pas, et l'état système est
+        # reconstruit depuis la configuration Nix à chaque activation).
+        #
+        # Ce job `users` reste la voie IMPÉRATIVE pour les cibles non-NixOS
+        # (Arch, Debian, …) : useradd + chpasswd via arch-chroot. Il n'exploite
+        # donc volontairement PAS `root_password` / `root_same_as_user` — ces
+        # clés (normalisées par EngineBridge.applySelectionsToContext) sont
+        # consommées côté NixOS uniquement. SÉCURITÉ : si un futur backend
+        # impératif gère root ici, ne jamais logger `root_password` (même
+        # posture que `password`).
 
         try:
             # Step 1: Create user account

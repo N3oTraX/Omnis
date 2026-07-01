@@ -20,6 +20,7 @@ try:
     from omnis.jobs.base import JobContext, JobResult, JobStatus
     from omnis.jobs.nixos import (
         DEFAULT_USER_GROUPS,
+        ERR_HASH_FAILED,
         ERR_NOT_CONFIRMED,
         NixosJob,
     )
@@ -203,6 +204,157 @@ class TestLuksInjection:
 
 
 # =============================================================================
+# Declarative password hashing (hashedPassword)
+# =============================================================================
+
+
+def _fake_hash(password: str) -> str:
+    """Deterministic fake SHA-512 crypt hash keyed on the plaintext length."""
+    # Distinct per plaintext so user/root hashes are distinguishable, and the
+    # plaintext is never embedded (mirrors the real no-leak guarantee).
+    return f"$6$abc${'d' * len(password)}"
+
+
+class TestPasswordHashing:
+    """Tests for declarative user/root ``hashedPassword`` injection."""
+
+    def test_user_hashed_password_present_when_password_provided(self) -> None:
+        job = NixosJob()
+        with patch.object(job, "_hash_password", side_effect=_fake_hash) as m:
+            hashes = job._compute_password_hashes(_context(password="userpw"))
+        cfg = job._build_configuration(_context(username="gamer"), hashes)
+        assert 'hashedPassword = "$6$abc$dddddd";' in cfg
+        # The user block owns the hash line.
+        assert "users.users.gamer = {" in cfg
+        m.assert_called_once_with("userpw")
+
+    def test_no_user_hashed_password_when_absent(self) -> None:
+        job = NixosJob()
+        hashes = job._compute_password_hashes(_context(password=""))
+        cfg = job._build_configuration(_context(username="gamer"), hashes)
+        assert "users.users.gamer = {" in cfg
+        assert "hashedPassword" not in cfg
+
+    def test_root_hashed_password_block_present(self) -> None:
+        job = NixosJob()
+        with patch.object(job, "_hash_password", side_effect=_fake_hash):
+            hashes = job._compute_password_hashes(
+                _context(password="userpw", root_password="rootpw")
+            )
+        cfg = job._build_configuration(_context(username="gamer"), hashes)
+        assert "users.users.root.hashedPassword = " in cfg
+
+    def test_root_same_as_user_reuses_user_hash_single_call(self) -> None:
+        """root_same_as_user=True → root shares the user hash, hashed once."""
+        job = NixosJob()
+        with patch.object(job, "_hash_password", side_effect=_fake_hash) as m:
+            hashes = job._compute_password_hashes(
+                _context(password="userpw", root_same_as_user=True, root_password="")
+            )
+        # Same hash for both accounts.
+        assert hashes.user == hashes.root == "$6$abc$dddddd"
+        # Hashed exactly once (no re-hash for root).
+        m.assert_called_once_with("userpw")
+
+    def test_root_distinct_password_distinct_hash(self) -> None:
+        """root_same_as_user=False with a distinct root password → distinct hash."""
+        job = NixosJob()
+        with patch.object(job, "_hash_password", side_effect=_fake_hash) as m:
+            hashes = job._compute_password_hashes(
+                _context(
+                    password="userpw",  # len 6
+                    root_password="rootpassword",  # len 12
+                    root_same_as_user=False,
+                )
+            )
+        assert hashes.user == "$6$abc$dddddd"  # 6 d's
+        assert hashes.root == "$6$abc$dddddddddddd"  # 12 d's
+        assert hashes.user != hashes.root
+        assert m.call_count == 2
+
+    def test_full_config_has_both_hashes(self) -> None:
+        job = NixosJob()
+        with patch.object(job, "_hash_password", side_effect=_fake_hash):
+            hashes = job._compute_password_hashes(
+                _context(password="userpw", root_same_as_user=True)
+            )
+        cfg = job._build_configuration(_context(username="gamer"), hashes)
+        assert 'hashedPassword = "$6$abc$dddddd";' in cfg
+        assert 'users.users.root.hashedPassword = "$6$abc$dddddd";' in cfg
+
+    def test_build_configuration_without_hashes_is_safe(self) -> None:
+        """_build_configuration must not crash / hash when hashes omitted."""
+        job = NixosJob()
+        # No hashing tool is invoked; no hashedPassword line emitted.
+        cfg = job._build_configuration(_context(username="gamer", password="x"))
+        assert "hashedPassword" not in cfg
+
+
+class TestHashPasswordTool:
+    """Tests for the low-level ``_hash_password`` subprocess wrapper."""
+
+    def test_hash_password_uses_mkpasswd_via_stdin(self) -> None:
+        job = NixosJob()
+        captured: dict[str, Any] = {}
+
+        def fake_run(cmd: list[str], **kwargs: Any) -> MagicMock:
+            captured["cmd"] = cmd
+            captured["kwargs"] = kwargs
+            return MagicMock(returncode=0, stdout="$6$salt$hashed\n", stderr="")
+
+        with (
+            patch("omnis.jobs.nixos.shutil.which", side_effect=lambda t: t == "mkpasswd"),
+            patch("omnis.jobs.nixos.subprocess.run", side_effect=fake_run),
+        ):
+            digest = job._hash_password("plaintextpw")
+
+        assert digest == "$6$salt$hashed"
+        assert captured["cmd"][0] == "mkpasswd"
+        # SECURITY: plaintext passed via STDIN, never in argv.
+        assert captured["kwargs"].get("input") == "plaintextpw"
+        assert "plaintextpw" not in " ".join(captured["cmd"])
+
+    def test_hash_password_falls_back_to_openssl(self) -> None:
+        job = NixosJob()
+
+        def fake_run(_cmd: list[str], **_kwargs: Any) -> MagicMock:
+            return MagicMock(returncode=0, stdout="$6$s$openssl\n", stderr="")
+
+        # Only openssl available.
+        with (
+            patch("omnis.jobs.nixos.shutil.which", side_effect=lambda t: t == "openssl"),
+            patch("omnis.jobs.nixos.subprocess.run", side_effect=fake_run),
+        ):
+            digest = job._hash_password("pw")
+
+        assert digest == "$6$s$openssl"
+
+    def test_hash_password_raises_when_no_tool(self) -> None:
+        job = NixosJob()
+        with (
+            patch("omnis.jobs.nixos.shutil.which", return_value=None),
+            pytest.raises(RuntimeError),
+        ):
+            job._hash_password("pw")
+
+    def test_run_returns_hash_failed_when_hashing_fails(self) -> None:
+        """A hashing failure surfaces as a clean JobResult (ERR_HASH_FAILED)."""
+        job = NixosJob()
+        with (
+            patch.object(job, "_detect_state_version", return_value="25.11"),
+            patch.object(
+                job, "_hash_password", side_effect=RuntimeError("no tool")
+            ),
+            patch("omnis.jobs.nixos.subprocess.run") as mock_run,
+        ):
+            result = job.run(_context(dry_run=True, password="userpw"))
+        assert result.success is False
+        assert result.error_code == ERR_HASH_FAILED
+        # No install command ran.
+        mock_run.assert_not_called()
+
+
+# =============================================================================
 # Command sequence (all subprocess mocked)
 # =============================================================================
 
@@ -342,13 +494,21 @@ class TestSecurityGuards:
         assert mock_run.called
 
     def test_secrets_never_logged(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Passwords / passphrases must never appear in logs."""
+        """Passwords / passphrases (and derived hashes) must never appear in logs."""
         job = NixosJob()
         secret_pass = "S3cr3tUserPass!"
         secret_root = "R00tPass!"
         secret_luks = "LuksPhrase123!"
+        # Deterministic fake hashes so we can assert they never leak either.
+        fake_user_hash = "$6$salt$USERHASHVALUE"
+        fake_root_hash = "$6$salt$ROOTHASHVALUE"
+
+        def fake_hash(pw: str) -> str:
+            return fake_user_hash if pw == secret_pass else fake_root_hash
+
         with (
             caplog.at_level(logging.DEBUG),
+            patch.object(job, "_hash_password", side_effect=fake_hash),
             patch("omnis.jobs.nixos.subprocess.run") as mock_run,
         ):
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -366,6 +526,9 @@ class TestSecurityGuards:
         assert secret_pass not in blob
         assert secret_root not in blob
         assert secret_luks not in blob
+        # SECURITY: the derived crypt hashes must not leak into logs either.
+        assert fake_user_hash not in blob
+        assert fake_root_hash not in blob
 
     def test_secrets_never_in_configuration(self) -> None:
         """The generated configuration.nix must not embed any secret."""

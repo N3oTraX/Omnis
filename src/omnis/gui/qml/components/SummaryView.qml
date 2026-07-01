@@ -22,22 +22,38 @@ Item {
     signal editEnvironment()
     signal editPartition()
 
-    // External properties - selections from previous steps
-    property var selections: ({
-        "locale": "en_US.UTF-8",
-        "timezone": "UTC",
-        "keymap": "us",
-        "username": "",
-        "fullName": "",
-        "hostname": "",
-        "autoLogin": false,
-        "isAdmin": true,
-        "desktopEnvironment": "gnome",
-        "edition": "standard",
-        "disk": "",
-        "diskSize": "",
-        "partitionMode": "auto"
-    })
+    // Final confirmation gate (ITEM 2): emitted when the user (dis)arms the
+    // destructive installation via the confirmation checkbox. Main.qml wires
+    // this to engine.setConfirmed() and only enables "Install" when checked.
+    signal confirmedToggled(bool confirmed)
+
+    // Two-way reflectable state of the confirmation checkbox. Bound in Main.qml
+    // to engine.confirmed so the gate survives navigation back/forth.
+    property bool confirmed: false
+
+    // External properties - selections from previous steps.
+    //
+    // NOTE (fix persistance résumé): ces valeurs sont exposées comme des
+    // propriétés SCALAIRES individuelles et bindées dans Main.qml directement
+    // aux getters notifiés du bridge (engine.username, engine.hostname, ...).
+    // On N'utilise PLUS un unique `property var selections` (dict) : un
+    // @Property(object) renvoie une nouvelle copie de dict à chaque lecture, si
+    // bien que les bindings `text: selections.X` ne se ré-évaluaient jamais sur
+    // selectionsChanged (les sous-propriétés d'un objet JS ne sont pas suivies
+    // par QML). Des propriétés scalaires notifiées se propagent de façon fiable.
+    property string localeValue: "en_US.UTF-8"
+    property string timezoneValue: "UTC"
+    property string keymapValue: "us"
+    property string usernameValue: ""
+    property string fullNameValue: ""
+    property string hostnameValue: ""
+    property bool autoLoginValue: false
+    property bool isAdminValue: true
+    property string desktopEnvironmentValue: "gnome"
+    property string editionValue: "standard"
+    property string diskValue: ""
+    property string diskSizeValue: ""
+    property string partitionModeValue: "auto"
 
     // Distro info
     property string distroName: ""
@@ -167,7 +183,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.hostname || qsTr("Not set")
+                                            text: hostnameValue || qsTr("Not set")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -259,7 +275,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.locale || qsTr("Not set")
+                                            text: localeValue || qsTr("Not set")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -279,7 +295,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.timezone || qsTr("Not set")
+                                            text: timezoneValue || qsTr("Not set")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -299,7 +315,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.keymap || qsTr("Not set")
+                                            text: keymapValue || qsTr("Not set")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -391,7 +407,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.username || qsTr("Not set")
+                                            text: usernameValue || qsTr("Not set")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -402,7 +418,7 @@ Item {
                                     Row {
                                         spacing: 12
                                         width: parent.width
-                                        visible: (selections.fullName || "").length > 0
+                                        visible: (fullNameValue || "").length > 0
 
                                         Text {
                                             text: qsTr("Full Name:")
@@ -412,7 +428,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.fullName || ""
+                                            text: fullNameValue || ""
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -435,13 +451,13 @@ Item {
                                             spacing: 6
 
                                             Text {
-                                                text: selections.isAdmin ? "\u2713" : "\u2717"
+                                                text: isAdminValue ? "\u2713" : "\u2717"
                                                 font.pixelSize: 14
-                                                color: selections.isAdmin ? successColor : textMutedColor
+                                                color: isAdminValue ? successColor : textMutedColor
                                             }
 
                                             Text {
-                                                text: selections.isAdmin ? qsTr("Yes") : qsTr("No")
+                                                text: isAdminValue ? qsTr("Yes") : qsTr("No")
                                                 font.pixelSize: 14
                                                 font.bold: true
                                                 color: textColor
@@ -465,13 +481,13 @@ Item {
                                             spacing: 6
 
                                             Text {
-                                                text: selections.autoLogin ? "\u2713" : "\u2717"
+                                                text: autoLoginValue ? "\u2713" : "\u2717"
                                                 font.pixelSize: 14
-                                                color: selections.autoLogin ? successColor : textMutedColor
+                                                color: autoLoginValue ? successColor : textMutedColor
                                             }
 
                                             Text {
-                                                text: selections.autoLogin ? qsTr("Enabled") : qsTr("Disabled")
+                                                text: autoLoginValue ? qsTr("Enabled") : qsTr("Disabled")
                                                 font.pixelSize: 14
                                                 font.bold: true
                                                 color: textColor
@@ -564,7 +580,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.desktopEnvironment || qsTr("Not set")
+                                            text: desktopEnvironmentValue || qsTr("Not set")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -584,7 +600,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.edition || qsTr("Not set")
+                                            text: editionValue || qsTr("Not set")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -676,7 +692,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.disk || qsTr("Not set")
+                                            text: diskValue || qsTr("Not set")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -687,7 +703,7 @@ Item {
                                     Row {
                                         spacing: 12
                                         width: parent.width
-                                        visible: (selections.diskSize || "").length > 0
+                                        visible: (diskSizeValue || "").length > 0
 
                                         Text {
                                             text: qsTr("Size:")
@@ -697,7 +713,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.diskSize || qsTr("Unknown")
+                                            text: diskSizeValue || qsTr("Unknown")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -717,7 +733,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.partitionMode === "auto" ? qsTr("Automatic") : qsTr("Manual")
+                                            text: partitionModeValue === "auto" ? qsTr("Automatic") : qsTr("Manual")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -799,6 +815,27 @@ Item {
                             color: textColor
                             wrapMode: Text.WordWrap
                             width: parent.width
+                        }
+
+                        // ITEM 2: mandatory confirmation checkbox. The "Install"
+                        // action stays disabled until this is checked.
+                        CheckBox {
+                            id: confirmCheckBox
+                            width: parent.width
+                            checked: root.confirmed
+                            onToggled: root.confirmedToggled(checked)
+
+                            contentItem: Text {
+                                text: qsTr("I understand that the selected disk (%1) will be modified and erased.")
+                                    .arg(diskValue || qsTr("target disk"))
+                                font.pixelSize: 14
+                                font.bold: true
+                                color: textColor
+                                wrapMode: Text.WordWrap
+                                leftPadding: confirmCheckBox.indicator.width + 8
+                                verticalAlignment: Text.AlignVCenter
+                                width: parent.width
+                            }
                         }
                     }
                 }

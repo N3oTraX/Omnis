@@ -419,7 +419,28 @@ ApplicationWindow {
                 visible: currentStep === 5
                 opacity: visible ? 1 : 0
 
-                selections: engine.selections
+                // Bind chaque champ du résumé aux getters SCALAIRES notifiés du
+                // bridge (propagation fiable sur selectionsChanged) plutôt qu'au
+                // dict engine.selections dont les sous-propriétés ne se
+                // ré-évaluaient pas dans QML (fix persistance du résumé).
+                localeValue: engine.selectedLocale
+                timezoneValue: engine.selectedTimezone
+                keymapValue: engine.selectedKeymap
+                usernameValue: engine.username
+                fullNameValue: engine.fullName
+                hostnameValue: engine.hostname
+                autoLoginValue: engine.autoLogin
+                isAdminValue: engine.isAdmin
+                desktopEnvironmentValue: engine.desktopEnvironment
+                editionValue: engine.edition
+                diskValue: engine.selectedDisk
+                diskSizeValue: engine.selectedDiskSize
+                partitionModeValue: engine.partitionMode
+
+                // ITEM 2: reflète et arme la confirmation finale.
+                confirmed: engine.confirmed
+                onConfirmedToggled: function(value) { engine.setConfirmed(value) }
+
                 distroName: branding.name
                 distroVersion: branding.version
                 distroLogo: branding.logoSmallUrl
@@ -549,6 +570,7 @@ ApplicationWindow {
 
             // Next/Install button
             Button {
+                objectName: "nextInstallButton"
                 text: currentStep === 5 ? qsTr("Install") : qsTr("Next")
                 enabled: canProceedToNext()
 
@@ -648,7 +670,9 @@ ApplicationWindow {
             case 4:  // Partition
                 return engine.selectedDisk !== ""
             case 5:  // Summary
-                return true  // Always can install from summary
+                // ITEM 2: n'arme l'installation que si l'utilisateur a coché la
+                // case de confirmation (garde-fou destructif côté backend aussi).
+                return engine.confirmed
             default:
                 return true
         }

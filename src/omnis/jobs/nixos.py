@@ -9,7 +9,10 @@ High-level sequence (executed on an already-mounted ``target_root``):
 
 1. Assemble ``configuration.nix`` from templates (head, bootloader, network,
    locale, keymap, users, autologin, tail) plus the GLF-specific
-   ``glf.environment.type`` / ``glf.environment.edition`` options.
+   ``glf.environment.type`` / ``glf.environment.edition`` options. User and
+   root passwords are set DECLARATIVELY via ``users.users.<name>.hashedPassword``
+   (SHA-512 crypt, computed with ``mkpasswd``/``openssl`` — never chpasswd,
+   which is unsuited to NixOS).
 2. Run ``nixos-generate-config --root <target>`` to produce
    ``hardware-configuration.nix``.
 3. Write ``configuration.nix`` and copy the GLF flake files
@@ -33,7 +36,9 @@ mounted target). It honours the same guard-rails as the partition job:
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -108,8 +113,21 @@ CFG_USERS = """  # Define a user account.
   users.users.{username} = {{
     isNormalUser = true;
     description = "{fullname}";
-    extraGroups = [ {groups} ];
+    extraGroups = [ {groups} ];{hashed_password}
   }};
+
+"""
+
+# Injected inside CFG_USERS when a user password is provided. The leading
+# newline + indentation keep the generated Nix readable. SECURITY: the value
+# is a SHA-512 crypt hash (``$6$...``), never a plaintext password.
+CFG_USER_HASHED_PASSWORD = """
+    hashedPassword = "{hash}";"""
+
+# Emitted as a standalone block for the root account when a root password
+# (or ``root_same_as_user``) is provided.
+CFG_ROOT_HASHED_PASSWORD = """  # Root account password (declarative, NixOS way).
+  users.users.root.hashedPassword = "{hash}";
 
 """
 
@@ -149,6 +167,21 @@ ERR_COPY_FLAKE = 66
 ERR_INSTALL = 67
 ERR_COMMAND_FAILED = 68
 ERR_TOOL_NOT_FOUND = 69
+ERR_HASH_FAILED = 70
+
+
+@dataclass(frozen=True)
+class PasswordHashes:
+    """
+    Pre-computed SHA-512 crypt hashes for the declarative NixOS config.
+
+    Both fields hold ``$6$...`` crypt strings (or empty when no password is
+    provided for that account). They are NEVER plaintext and are wiped by
+    :meth:`NixosJob.run` after the configuration has been rendered.
+    """
+
+    user: str = ""
+    root: str = ""
 
 
 class NixosJob(BaseJob):
@@ -232,7 +265,9 @@ class NixosJob(BaseJob):
             return f"{parts[0]}.{parts[1]}"[:5]
         return DEFAULT_STATE_VERSION
 
-    def _build_configuration(self, context: JobContext) -> str:
+    def _build_configuration(
+        self, context: JobContext, hashes: PasswordHashes | None = None
+    ) -> str:
         """
         Assemble the ``configuration.nix`` contents from user selections.
 
@@ -241,13 +276,24 @@ class NixosJob(BaseJob):
         users → autologin → tail. LUKS device injection is appended separately
         by :meth:`_luks_config` (before the tail) when encryption is enabled.
 
+        Password hashes are computed upstream (in :meth:`run`) and passed in via
+        ``hashes`` so this method NEVER hashes (and never crashes on a missing
+        hashing tool). When ``hashes`` is ``None`` (e.g. unit tests exercising
+        the pure template assembly), no ``hashedPassword`` line is emitted.
+
+        SECURITY: the injected values are SHA-512 crypt hashes (``$6$...``),
+        never plaintext passwords. See :meth:`_hash_password` for the escaping
+        rationale in a double-quoted Nix string.
+
         Args:
             context: Execution context (reads ``selections``)
+            hashes: Pre-computed user/root password hashes (optional)
 
         Returns:
             The full ``configuration.nix`` text.
         """
         s = context.selections
+        hashes = hashes or PasswordHashes()
         cfg = CFG_HEAD
 
         # GLF environment/edition (the defining GLF-OS options).
@@ -295,9 +341,25 @@ class NixosJob(BaseJob):
         if username:
             fullname = str(s.get("fullname", "") or "")
             groups = " ".join(f'"{g}"' for g in DEFAULT_USER_GROUPS)
-            cfg += CFG_USERS.format(username=username, fullname=fullname, groups=groups)
+            # Inject ``hashedPassword`` inside the user block only when a hash
+            # was computed for the user account (i.e. a password was provided).
+            hashed = (
+                CFG_USER_HASHED_PASSWORD.format(hash=hashes.user) if hashes.user else ""
+            )
+            cfg += CFG_USERS.format(
+                username=username,
+                fullname=fullname,
+                groups=groups,
+                hashed_password=hashed,
+            )
             if bool(s.get("auto_login", False)):
                 cfg += CFG_AUTOLOGIN.format(username=username)
+
+        # Root account password (declarative). Emitted whenever a root hash was
+        # computed (root_password provided, or root_same_as_user reusing the
+        # user hash). On NixOS this is the ONLY place the root password is set.
+        if hashes.root:
+            cfg += CFG_ROOT_HASHED_PASSWORD.format(hash=hashes.root)
 
         # Tail (stateVersion).
         cfg += CFG_TAIL.format(nixos_version=self._detect_state_version())
@@ -327,6 +389,117 @@ class NixosJob(BaseJob):
         root_part = str(s.get("root_partition", "") or "")
         device = root_part or f"/dev/mapper/{mapper}"
         return f'  boot.initrd.luks.devices."{mapper}".device = "{device}";\n\n'
+
+    # -------------------------------------------------------------------------
+    # Password hashing (declarative NixOS approach)
+    # -------------------------------------------------------------------------
+
+    def _hash_password(self, password: str) -> str:
+        """
+        Hash ``password`` into a SHA-512 crypt string (``$6$salt$hash``).
+
+        SECURITY:
+        - The plaintext is fed via STDIN, NEVER as an argv element (argv is
+          world-readable via ``/proc/<pid>/cmdline``) and NEVER logged.
+        - Prefers ``mkpasswd -m sha-512`` (from the ``whois``/``mkpasswd``
+          package, standard on NixOS ISOs); falls back to
+          ``openssl passwd -6 -stdin`` when ``mkpasswd`` is absent.
+
+        Nix-escaping rationale:
+        The returned value is embedded verbatim in a double-quoted Nix string
+        (``hashedPassword = "<hash>";``). Nix only interpolates ``${...}`` — the
+        ``$`` in a crypt hash is always followed by a digit (``$6$``) or a
+        salt/hash character, NEVER by ``{``, so no escaping is required. The
+        salt/hash alphabet is ``[A-Za-z0-9./]`` plus ``$`` separators, none of
+        which are Nix string metacharacters. We still assert the ``$6$`` prefix
+        as a robustness check.
+
+        Args:
+            password: Plaintext password (NEVER LOGGED)
+
+        Returns:
+            The SHA-512 crypt hash.
+
+        Raises:
+            RuntimeError: If neither hashing tool is available or both fail.
+        """
+        # (command, needs the "-6"/"sha-512" already baked in) candidates.
+        candidates: list[list[str]] = []
+        if shutil.which("mkpasswd"):
+            candidates.append(["mkpasswd", "-m", "sha-512", "--stdin"])
+        if shutil.which("openssl"):
+            candidates.append(["openssl", "passwd", "-6", "-stdin"])
+
+        if not candidates:
+            raise RuntimeError(
+                "No password hashing tool found (need 'mkpasswd' or 'openssl')"
+            )
+
+        last_error = ""
+        for cmd in candidates:
+            try:
+                # SECURITY: plaintext via STDIN only, output captured, never
+                # echoed to logs. ``check=True`` surfaces non-zero exits.
+                completed = subprocess.run(
+                    cmd,
+                    input=password,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+            except (subprocess.CalledProcessError, OSError):
+                # SECURITY: log only the tool name, never stderr (which could
+                # conceivably echo input) and never the password.
+                last_error = f"{cmd[0]} failed"
+                logger.warning("Password hashing tool '%s' failed", cmd[0])
+                continue
+
+            digest = completed.stdout.strip()
+            if digest.startswith("$6$"):
+                return digest
+            # An unexpected format is treated as a failure (never logged).
+            last_error = f"{cmd[0]} returned an unexpected hash format"
+            logger.warning("Password hashing tool '%s' returned unexpected output", cmd[0])
+
+        raise RuntimeError(f"Password hashing failed: {last_error}")
+
+    def _compute_password_hashes(self, context: JobContext) -> PasswordHashes:
+        """
+        Compute the user/root SHA-512 crypt hashes from the selections.
+
+        Rules (keys are snake_case, normalised by the GUI bridge):
+        - ``password``            → user account hash (empty ⇒ no user hash).
+        - ``root_same_as_user``   → root REUSES the user hash (no re-hash).
+        - ``root_password``       → root hash when root differs from the user.
+        - No user password + no root password ⇒ both hashes empty.
+
+        The hash for a given plaintext is computed EXACTLY ONCE (root sharing
+        the user password does not trigger a second ``mkpasswd`` call).
+
+        Args:
+            context: Execution context (reads ``selections``)
+
+        Returns:
+            A :class:`PasswordHashes` with the computed values.
+
+        Raises:
+            RuntimeError: Propagated from :meth:`_hash_password` on tool failure.
+        """
+        s = context.selections
+        user_password = str(s.get("password", "") or "")
+        root_password = str(s.get("root_password", "") or "")
+        root_same = bool(s.get("root_same_as_user", False))
+
+        user_hash = self._hash_password(user_password) if user_password else ""
+
+        if root_same or not root_password:
+            # Root mirrors the user account: reuse the already-computed hash
+            # (single hashing operation). When neither is set, root stays empty.
+            root_hash = user_hash if root_same else ""
+        else:
+            root_hash = self._hash_password(root_password)
+
+        return PasswordHashes(user=user_hash, root=root_hash)
 
     # -------------------------------------------------------------------------
     # Validation
@@ -419,15 +592,29 @@ class NixosJob(BaseJob):
         passphrase = str(s.get("encryption_passphrase", ""))
         password = str(s.get("password", ""))
         root_password = str(s.get("root_password", ""))
+        hashes = PasswordHashes()
         try:
             if dry_run:
                 logger.info("DRY-RUN MODE: simulating NixOS install (no changes)")
             else:
                 logger.warning("EXECUTING REAL NIXOS INSTALL on %s", target_root)
 
+            # Step 0: compute password hashes ONCE, upstream of the template
+            # assembly, so hashing failures surface as a clean JobResult and
+            # ``_build_configuration`` never has to hash (and never crashes).
+            context.report_progress(8, "Preparing account credentials...")
+            try:
+                hashes = self._compute_password_hashes(context)
+            except RuntimeError as exc:
+                logger.error("Password hashing failed: %s", exc)
+                return JobResult.fail(
+                    f"Failed to hash account password(s): {exc}",
+                    error_code=ERR_HASH_FAILED,
+                )
+
             # Step 1: build configuration.nix contents.
             context.report_progress(10, "Assembling configuration.nix...")
-            cfg = self._build_configuration(context)
+            cfg = self._build_configuration(context, hashes)
 
             # Step 2: nixos-generate-config (produces hardware-configuration.nix).
             context.report_progress(25, "Generating hardware configuration...")
@@ -463,11 +650,12 @@ class NixosJob(BaseJob):
                 },
             )
         finally:
-            # SECURITY: wipe secrets from memory.
+            # SECURITY: wipe secrets (plaintext AND derived hashes) from memory.
             passphrase = ""
             password = ""
             root_password = ""
-            del passphrase, password, root_password
+            hashes = PasswordHashes()
+            del passphrase, password, root_password, hashes
 
     def _generate_config(self, target_root: str, dry_run: bool) -> JobResult:
         """Run ``nixos-generate-config --root <target>``."""
