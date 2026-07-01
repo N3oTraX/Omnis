@@ -21,7 +21,12 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # lsblk columns requested (bytes for SIZE, plus topology/identity fields).
-_LSBLK_COLUMNS = "NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,MODEL,RM,HOTPLUG,TRAN,ROTA,PARTTYPENAME"
+_LSBLK_COLUMNS = "NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,MODEL,RM,HOTPLUG,TRAN,ROTA,PARTTYPENAME,START"
+
+# Disk geometry constants (lsblk reports START in 512-byte sectors).
+_SECTOR_SIZE = 512
+_ALIGN = 2048  # 1 MiB alignment / first usable sector
+_GPT_TAIL = 34  # sectors reserved for the GPT secondary header
 
 
 def _coerce_bool(value: Any) -> bool:
@@ -134,9 +139,25 @@ def _is_live_disk(device: dict[str, Any], live_source: str | None) -> bool:
     return False
 
 
+def _finalize_mock_disk(disk: dict[str, Any]) -> dict[str, Any]:
+    """Lay mock partitions out sequentially and attach geometry + segments."""
+    disk_sectors = int(disk["sizeBytes"]) // _SECTOR_SIZE
+    cursor = _ALIGN
+    for part in disk["partitions"]:
+        size_sectors = int(part["sizeBytes"]) // _SECTOR_SIZE
+        part["startSector"] = cursor
+        part["sizeSectors"] = size_sectors
+        part["endSector"] = cursor + size_sectors - 1
+        cursor += size_sectors
+    disk["sizeSectors"] = disk_sectors
+    disk["sectorSize"] = _SECTOR_SIZE
+    disk["segments"] = _compute_segments(disk_sectors, disk["partitions"])
+    return disk
+
+
 def _mock_disks() -> list[dict[str, Any]]:
     """Return a deterministic mock disk list using the shared UI contract."""
-    return [
+    _disks = [
         {
             "name": "sda",
             "model": "Mock SSD 500G",
@@ -169,18 +190,68 @@ def _mock_disks() -> list[dict[str, Any]]:
             "partitions": [],
         },
     ]
+    return [_finalize_mock_disk(d) for d in _disks]
 
 
 def _build_partition(child: dict[str, Any]) -> dict[str, Any]:
     """Build a single partition dict from an lsblk child node."""
     fstype = child.get("fstype") or ""
     parttypename = child.get("parttypename") or ""
+    size_bytes = int(child.get("size", 0) or 0)
+    start_sector = int(child.get("start", 0) or 0)
+    size_sectors = size_bytes // _SECTOR_SIZE
     return {
         "name": child.get("name", ""),
-        "sizeBytes": int(child.get("size", 0) or 0),
+        "sizeBytes": size_bytes,
         "fstype": fstype,
         "partType": _classify_part_type(fstype, parttypename),
+        "startSector": start_sector,
+        "sizeSectors": size_sectors,
+        "endSector": (start_sector + size_sectors - 1) if size_sectors else start_sector,
     }
+
+
+def _compute_segments(
+    disk_sectors: int, partitions: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """
+    Interleave partitions and free-space regions across the whole disk.
+
+    Produces an ordered list of segments (``kind`` = ``"partition"`` or
+    ``"free"``) covering the disk from the first aligned usable sector to the
+    GPT tail. Free regions smaller than 1 MiB (alignment noise, GPT headers)
+    are omitted so the UI only offers usable gaps.
+    """
+    segments: list[dict[str, Any]] = []
+    usable_end = max(0, disk_sectors - _GPT_TAIL)
+    cursor = _ALIGN
+
+    def add_free(start: int, end: int) -> None:
+        # Only surface gaps larger than the 1 MiB alignment unit; sub-MiB gaps
+        # are padding (GPT headers, alignment) and never usable for a partition.
+        if end - start + 1 > _ALIGN:
+            segments.append(
+                {
+                    "kind": "free",
+                    "startSector": start,
+                    "endSector": end,
+                    "sizeSectors": end - start + 1,
+                    "sizeBytes": (end - start + 1) * _SECTOR_SIZE,
+                }
+            )
+
+    for part in sorted(partitions, key=lambda p: int(p.get("startSector") or 0)):
+        start = int(part.get("startSector") or 0)
+        if start > cursor:
+            add_free(cursor, start - 1)
+        segments.append({"kind": "partition", **part})
+        end = int(part.get("endSector") or start)
+        cursor = max(cursor, end + 1)
+
+    if cursor <= usable_end:
+        add_free(cursor, usable_end)
+
+    return segments
 
 
 def _build_disk(device: dict[str, Any]) -> dict[str, Any]:
@@ -196,14 +267,18 @@ def _build_disk(device: dict[str, Any]) -> dict[str, Any]:
         if child.get("type") == "part"
     ]
 
+    disk_sectors = size_bytes // _SECTOR_SIZE
     return {
         "name": device.get("name", ""),
         "model": model,
         "size": _format_size(size_bytes),
         "sizeBytes": size_bytes,
+        "sizeSectors": disk_sectors,
+        "sectorSize": _SECTOR_SIZE,
         "type": "HDD" if is_rotational else "SSD",
         "removable": removable,
         "partitions": partitions,
+        "segments": _compute_segments(disk_sectors, partitions),
     }
 
 
@@ -246,12 +321,17 @@ def list_disks() -> list[dict[str, Any]]:
     disks: list[dict[str, Any]] = []
 
     for device in data.get("blockdevices", []):
+        name = device.get("name", "")
         # Only real disks: skip loop, rom and bare partitions at top level.
         if device.get("type") != "disk":
             continue
+        # Skip virtual / non-installable block devices: RAM-backed swap (zram),
+        # loopback (squashfs on live media), ramdisks, floppy, optical, nbd.
+        if name.startswith(("zram", "loop", "ram", "fd", "sr", "nbd")):
+            continue
         # Exclude the disk carrying the running system.
         if _is_live_disk(device, live_source):
-            logger.debug("Excluding live disk: %s", device.get("name"))
+            logger.debug("Excluding live disk: %s", name)
             continue
         disks.append(_build_disk(device))
 
