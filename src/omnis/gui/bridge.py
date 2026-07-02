@@ -2231,24 +2231,26 @@ class EngineBridge(QObject):
 
     def _load_environment_data(self) -> None:
         """
-        Load desktop-environment and edition catalogs from the ``packages`` job.
+        Load desktop-environment and edition catalogs from the ``nixos`` job.
 
         Mirrors the Calamares GLF OS model (packagechooser@environment/@edition).
         The default selection is derived from the item flagged ``default: true``
         (falling back to the first item, then to the hard-coded default already
-        present in ``_selections``). Gracefully handles a config-less ``packages``
-        job (e.g. minimal.yaml) by leaving the catalogs empty.
+        present in ``_selections``). Gracefully handles a config-less job (e.g.
+        minimal.yaml) by leaving the catalogs empty.
         """
-        packages_config: dict[str, Any] = {}
+        environment_config: dict[str, Any] = {}
         for job_def in self._engine.config.normalize_jobs():
-            if job_def.name == "packages":
-                packages_config = job_def.config or {}
+            if job_def.name == "nixos":
+                environment_config = job_def.config or {}
                 break
 
         self._desktop_environments_model = self._build_environment_items(
-            packages_config.get("desktop_environments", [])
+            environment_config.get("desktop_environments", [])
         )
-        self._editions_model = self._build_environment_items(packages_config.get("editions", []))
+        self._editions_model = self._build_environment_items(
+            environment_config.get("editions", [])
+        )
 
         # Apply config-declared defaults so the summary/first render match the
         # highlighted card even before any user interaction.

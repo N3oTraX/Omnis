@@ -9,7 +9,7 @@ wizard (Calamares : users -> environnement/edition -> partition) :
 - La navigation traverse bien les 8 étapes (0..7) après insertion.
 - setDesktopEnvironment/setEdition se reflètent dans la Property `selections`
   (lue par SummaryView) et dans les getters notifiés.
-- Les catalogues DE/edition sont chargés depuis la config `packages`.
+- Les catalogues DE/edition sont chargés depuis la config du job `nixos`.
 
 Le test s'exécute en plateforme offscreen (aucune fenêtre réelle).
 """
