@@ -57,13 +57,28 @@ class Translator:
 
         # Determine i18n directory
         if i18n_dir is None:
-            # Default: config/i18n relative to package root
-            self._i18n_dir = Path(__file__).parent.parent.parent.parent / "config" / "i18n"
+            self._i18n_dir = self._default_i18n_dir()
         else:
             self._i18n_dir = Path(i18n_dir)
 
         # Load translations
         self._load_translations()
+
+    @staticmethod
+    def _default_i18n_dir() -> Path:
+        """Locate the ``config/i18n`` directory across dev and packaged layouts.
+
+        In a source checkout the files live at ``<repo>/config/i18n``. Packaged
+        builds (e.g. Nix ``buildPythonApplication``) ship them under
+        ``<prefix>/share/omnis/config/i18n`` — not next to the Python module —
+        so probe several candidates and fall back to the dev path.
+        """
+        here = Path(__file__).resolve()
+        candidates: list[Path] = [here.parents[3] / "config" / "i18n"]
+        # Walk up from the module to find an installed ``share/omnis`` tree.
+        candidates += [p / "share" / "omnis" / "config" / "i18n" for p in here.parents]
+        candidates.append(Path("/etc/omnis/config/i18n"))
+        return next((c for c in candidates if c.exists()), candidates[0])
 
     @property
     def locale(self) -> str:
