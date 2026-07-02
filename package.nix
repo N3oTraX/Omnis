@@ -52,6 +52,24 @@ python3Packages.buildPythonApplication {
   postInstall = ''
     mkdir -p $out/share/omnis
     cp -r config $out/share/omnis/config
+
+    # Desktop entry so Omnis appears in the application menu (in addition to
+    # the live-ISO autostart wired by the glf-os flake). Built with printf to
+    # stay independent of Nix indented-string de-indentation.
+    mkdir -p $out/share/applications
+    printf '%s\n' \
+      '[Desktop Entry]' \
+      'Type=Application' \
+      'Version=1.0' \
+      'Name=Install GLF-OS' \
+      'GenericName=System Installer' \
+      'Comment=Omnis - modular GLF-OS installer' \
+      'Exec=omnis' \
+      'TryExec=omnis' \
+      'Icon=system-software-install' \
+      'Terminal=false' \
+      'Categories=Qt;System;Settings;' \
+      > $out/share/applications/omnis.desktop
   '';
 
   meta = {
