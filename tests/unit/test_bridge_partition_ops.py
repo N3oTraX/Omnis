@@ -250,3 +250,14 @@ class TestApplySelectionsToContext:
         bridge.applySelectionsToContext()
         selections = bridge._engine._selections
         assert "partition_operations" not in selections
+
+    def test_short_disk_name_is_normalized_to_dev_path(self, bridge: EngineBridge) -> None:
+        # The QML wizard stores the short name; jobs need a /dev/ device path.
+        bridge.setSelectedDisk("sdb")
+        bridge.applySelectionsToContext()
+        assert bridge._engine._selections["disk"] == "/dev/sdb"
+
+    def test_dev_disk_path_is_left_unchanged(self, bridge: EngineBridge) -> None:
+        bridge.setSelectedDisk("/dev/nvme0n1")
+        bridge.applySelectionsToContext()
+        assert bridge._engine._selections["disk"] == "/dev/nvme0n1"

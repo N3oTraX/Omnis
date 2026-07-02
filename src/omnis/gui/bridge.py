@@ -2478,6 +2478,13 @@ class EngineBridge(QObject):
         # ``edition`` is already snake-compatible (single word); kept as-is.
         # filesystem and encryption keys are already snake-compatible.
 
+        # The QML wizard stores the short disk name (e.g. "sdb") for UI matching,
+        # but the destructive jobs (partition, nixos) expect a device path
+        # ("/dev/sdb"). Normalize here, idempotently.
+        disk = str(normalized.get("disk", ""))
+        if disk and not disk.startswith("/dev/"):
+            normalized["disk"] = f"/dev/{disk}"
+
         # Manual partitioning: forward the per-partition assignment plan, keeping
         # only entries the user actually touched (a mount point and/or a format).
         if normalized.get("partition_mode") == "manual":
