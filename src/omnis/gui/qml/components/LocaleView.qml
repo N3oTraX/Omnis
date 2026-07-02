@@ -145,7 +145,7 @@ Item {
                         radius: 10
                         color: surfaceColor
 
-                        layer.enabled: true
+                        layer.enabled: !engine.softwareRendering
                         layer.effect: MultiEffect {
                             shadowEnabled: true
                             shadowColor: Qt.rgba(0, 0, 0, 0.2)
@@ -221,7 +221,7 @@ Item {
                         radius: 10
                         color: surfaceColor
 
-                        layer.enabled: true
+                        layer.enabled: !engine.softwareRendering
                         layer.effect: MultiEffect {
                             shadowEnabled: true
                             shadowColor: Qt.rgba(0, 0, 0, 0.2)
@@ -292,7 +292,7 @@ Item {
                         radius: 10
                         color: surfaceColor
 
-                        layer.enabled: true
+                        layer.enabled: !engine.softwareRendering
                         layer.effect: MultiEffect {
                             shadowEnabled: true
                             shadowColor: Qt.rgba(0, 0, 0, 0.2)

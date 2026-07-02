@@ -6,6 +6,7 @@ Exposes engine functionality to QML via Qt properties and signals.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -1274,6 +1275,17 @@ class EngineBridge(QObject):
     def dryRun(self) -> bool:
         """Check if dry-run mode is enabled."""
         return self._dry_run
+
+    @Property(bool, constant=True)
+    def softwareRendering(self) -> bool:
+        """Whether Qt Quick uses the software backend (no GPU).
+
+        Under ``QT_QUICK_BACKEND=software`` (forced on the live ISO for
+        GPU-less VMs), shader-based ``layer.effect``/``MultiEffect`` do not
+        render, so QML guards ``layer.enabled`` with ``!engine.softwareRendering``
+        to keep content visible (effects apply only on accelerated backends).
+        """
+        return os.environ.get("QT_QUICK_BACKEND", "") == "software"
 
     # =========================================================================
     # Font Properties for Non-Latin Languages

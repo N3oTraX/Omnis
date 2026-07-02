@@ -75,7 +75,7 @@ Item {
                            Qt.rgba(successColor.r, successColor.g, successColor.b, 0.2) :
                            Qt.rgba(errorColor.r, errorColor.g, errorColor.b, 0.2)
 
-                    layer.enabled: true
+                    layer.enabled: !engine.softwareRendering
                     layer.effect: MultiEffect {
                         shadowEnabled: true
                         shadowColor: success ? successColor : errorColor
@@ -203,7 +203,7 @@ Item {
                     color: textColor
                     anchors.horizontalCenter: parent.horizontalCenter
 
-                    layer.enabled: true
+                    layer.enabled: !engine.softwareRendering
                     layer.effect: MultiEffect {
                         shadowEnabled: true
                         shadowColor: Qt.rgba(0, 0, 0, 0.4)

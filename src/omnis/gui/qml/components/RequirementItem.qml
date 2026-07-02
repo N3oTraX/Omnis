@@ -266,7 +266,7 @@ Rectangle {
                     border.width: 1
 
                     // Shadow effect
-                    layer.enabled: true
+                    layer.enabled: !engine.softwareRendering
                     layer.effect: null
                 }
             }

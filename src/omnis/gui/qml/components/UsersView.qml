@@ -119,7 +119,7 @@ Item {
             visible: source != ""
 
             // SVG color overlay for theming
-            layer.enabled: true
+            layer.enabled: !engine.softwareRendering
             layer.effect: MultiEffect {
                 colorization: 1.0
                 colorizationColor: met ? successColor : textMutedColor
@@ -155,7 +155,7 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         visible: source != ""
 
-        layer.enabled: true
+        layer.enabled: !engine.softwareRendering
         layer.effect: MultiEffect {
             colorization: 1.0
             colorizationColor: textColor
@@ -604,7 +604,7 @@ Item {
                                             sourceSize.height: 16
                                             visible: source != ""
 
-                                            layer.enabled: true
+                                            layer.enabled: !engine.softwareRendering
                                             layer.effect: MultiEffect {
                                                 colorization: 1.0
                                                 colorizationColor: passwordsMatch ? successColor : errorColor
@@ -719,7 +719,7 @@ Item {
                                         sourceSize.height: 12
                                         visible: showPasswordCheck.checked && source != ""
 
-                                        layer.enabled: true
+                                        layer.enabled: !engine.softwareRendering
                                         layer.effect: MultiEffect {
                                             colorization: 1.0
                                             colorizationColor: textColor
@@ -781,7 +781,7 @@ Item {
                                         sourceSize.height: 12
                                         visible: rootSameAsUserCheck.checked && source != ""
 
-                                        layer.enabled: true
+                                        layer.enabled: !engine.softwareRendering
                                         layer.effect: MultiEffect {
                                             colorization: 1.0
                                             colorizationColor: textColor
@@ -906,7 +906,7 @@ Item {
                                             sourceSize.height: 16
                                             visible: source != ""
 
-                                            layer.enabled: true
+                                            layer.enabled: !engine.softwareRendering
                                             layer.effect: MultiEffect {
                                                 colorization: 1.0
                                                 colorizationColor: rootPasswordsMatch ? successColor : errorColor
@@ -985,7 +985,7 @@ Item {
                                         sourceSize.height: 12
                                         visible: autoLoginCheck.checked && source != ""
 
-                                        layer.enabled: true
+                                        layer.enabled: !engine.softwareRendering
                                         layer.effect: MultiEffect {
                                             colorization: 1.0
                                             colorizationColor: textColor
@@ -1038,7 +1038,7 @@ Item {
                                         sourceSize.height: 12
                                         visible: adminCheck.checked && source != ""
 
-                                        layer.enabled: true
+                                        layer.enabled: !engine.softwareRendering
                                         layer.effect: MultiEffect {
                                             colorization: 1.0
                                             colorizationColor: textColor
