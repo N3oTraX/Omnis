@@ -231,6 +231,15 @@ class LocaleDetector:
         if not self.config.enabled:
             return self._get_default_result()
 
+        # "prefer_local": an explicit boot-medium choice (kernel cmdline, e.g.
+        # the GLF ISO GRUB kbd.* params) is authoritative and must win over the
+        # network GeoIP lookup. This honors override_mode from the config.
+        if self.config.override_mode == "prefer_local" and self.config.cmdline_enabled:
+            result = self._detect_cmdline()
+            if result is not None:
+                logger.info(f"Cmdline detection (prefer_local) successful: {result}")
+                return result
+
         # Try GeoIP first (highest confidence)
         if self.config.geoip_enabled:
             result = self._detect_geoip()
@@ -322,11 +331,13 @@ class LocaleDetector:
         """
         Detect locale from kernel command line.
 
-        Parses /proc/cmdline for parameters:
-        - lang=fr_FR.UTF-8
-        - locale=fr_FR.UTF-8
-        - keymap=fr
-        - timezone=Europe/Paris
+        Parses /proc/cmdline. The GLF live ISO drives the selection from the
+        GRUB menu via ``kbd.layout=`` / ``kbd.locale=`` / ``kbd.keymap=``:
+        - kbd.locale=fr_FR.UTF-8  (system locale / language)
+        - kbd.layout=fr           (XKB layout -> Omnis keymap field)
+        - kbd.keymap=fr           (CONSOLE keymap, e.g. "de-latin1"; NOT XKB)
+        Generic ``lang=`` / ``locale=`` / ``keymap=`` / ``timezone=`` are still
+        accepted as a fallback for non-GLF boot media.
 
         Returns:
             LocaleDetectionResult if useful values found, None otherwise
@@ -343,20 +354,29 @@ class LocaleDetector:
             timezone = None
             keymap = None
 
-            # Match lang= or locale=
-            lang_match = re.search(r"(?:lang|locale)=(\S+)", cmdline)
+            # Locale: prefer the explicit kbd.locale= (GLF ISO), else lang/locale.
+            lang_match = re.search(r"\bkbd\.locale=(\S+)", cmdline) or re.search(
+                r"(?:lang|locale)=(\S+)", cmdline
+            )
             if lang_match:
                 language = lang_match.group(1)
                 # Normalize to full locale format
                 if "." not in language:
                     language = f"{language}.UTF-8"
 
-            # Match keymap= or keyboard=
-            keymap_match = re.search(r"(?:keymap|keyboard|kbd)=(\S+)", cmdline)
-            if keymap_match:
-                keymap = keymap_match.group(1)
+            # Keymap: kbd.layout= is the XKB layout Omnis expects (fr, de, us).
+            # kbd.keymap= holds a CONSOLE keymap (e.g. "de-latin1") that is NOT a
+            # valid XKB layout, so it must never be used; fall back only to a
+            # standalone keymap=/keyboard= for non-GLF media.
+            layout_match = re.search(r"\bkbd\.layout=(\S+)", cmdline)
+            if layout_match:
+                keymap = layout_match.group(1)
+            else:
+                keymap_match = re.search(r"(?<!kbd\.)(?:keymap|keyboard)=(\S+)", cmdline)
+                if keymap_match:
+                    keymap = keymap_match.group(1)
 
-            # Match timezone= or tz=
+            # Match timezone= or tz= (the GLF ISO does not set a timezone param).
             tz_match = re.search(r"(?:timezone|tz)=(\S+)", cmdline)
             if tz_match:
                 timezone = tz_match.group(1)
@@ -388,7 +408,9 @@ class LocaleDetector:
                 timezone=timezone,
                 keymap=keymap,
                 source="cmdline",
-                confidence=0.7,
+                # Explicit boot-medium choice: high confidence so it clears the
+                # bridge's confidence threshold and pre-fills the UI selections.
+                confidence=0.9,
             )
 
         except OSError as e:

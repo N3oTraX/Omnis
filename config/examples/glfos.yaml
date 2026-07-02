@@ -290,7 +290,9 @@ jobs:
             enabled: true
           efi:
             enabled: true
-        override_mode: "auto"  # "auto", "prefer_geoip", "prefer_local"
+        # prefer_local: le choix GRUB de l'ISO (kbd.layout/kbd.locale) prime sur
+        # le GeoIP reseau pour la langue et le clavier.
+        override_mode: "prefer_local"  # "auto", "prefer_geoip", "prefer_local"
         confidence_threshold: 0.8
 
   # Partitionnement
