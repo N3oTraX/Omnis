@@ -31,8 +31,8 @@ i18n:
 branding:
   # Identite
   name: "GLF OS"
-  version: "Omnislash"
-  edition: "25.04"
+  version: "Quasar Quake"
+  edition: "26.05"
   tagline: "Linux Gaming made easy!"
 
   # Couleurs officielles (source: gaminglinux.fr)
