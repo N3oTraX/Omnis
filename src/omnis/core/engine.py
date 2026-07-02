@@ -26,12 +26,28 @@ class BrandingColors(BaseModel):
     secondary: str = "#A78BFA"
     accent: str = "#F59E0B"
     background: str = "#1F2937"
+    background_light: str = "#374151"
     surface: str = "#374151"
     text: str = "#F9FAFB"
     text_muted: str = "#9CA3AF"
+    text_on_primary: str = "#FFFFFF"
+    success: str = "#10B981"
+    warning: str = "#F59E0B"
+    error: str = "#EF4444"
 
     @field_validator(
-        "primary", "secondary", "accent", "background", "surface", "text", "text_muted"
+        "primary",
+        "secondary",
+        "accent",
+        "background",
+        "background_light",
+        "surface",
+        "text",
+        "text_muted",
+        "text_on_primary",
+        "success",
+        "warning",
+        "error",
     )
     @classmethod
     def validate_hex_color(cls, v: str) -> str:

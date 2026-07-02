@@ -326,6 +326,31 @@ class BrandingProxy(QObject):
         """Muted text color."""
         return self._branding.colors.text_muted
 
+    @Property(str, constant=True)
+    def backgroundLightColor(self) -> str:
+        """Lighter background shade."""
+        return self._branding.colors.background_light
+
+    @Property(str, constant=True)
+    def textOnPrimaryColor(self) -> str:
+        """Text color drawn on primary-colored surfaces."""
+        return self._branding.colors.text_on_primary
+
+    @Property(str, constant=True)
+    def successColor(self) -> str:
+        """Success / positive status color."""
+        return self._branding.colors.success
+
+    @Property(str, constant=True)
+    def warningColor(self) -> str:
+        """Warning status color."""
+        return self._branding.colors.warning
+
+    @Property(str, constant=True)
+    def errorColor(self) -> str:
+        """Error / failure status color."""
+        return self._branding.colors.error
+
     @Property(str, notify=brandingChanged)
     def welcomeTitle(self) -> str:
         """Welcome screen title with i18n interpolation."""

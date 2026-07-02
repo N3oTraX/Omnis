@@ -177,3 +177,32 @@ jobs: []
         branding = Engine.from_config_file(config_file).get_branding()
         assert branding.colors.primary == "#111111"
         assert branding.name == "Inline OS"
+
+    def test_status_colors_from_theme(self, tmp_path: Path) -> None:
+        # success/warning/error + background_light/text_on_primary must now be
+        # first-class branding colors, sourced from theme.yaml.
+        self._write_theme(
+            tmp_path,
+            """
+colors:
+  success: "#010203"
+  warning: "#040506"
+  error: "#070809"
+  background_light: "#0A0B0C"
+  text_on_primary: "#0D0E0F"
+""",
+        )
+        config_file = tmp_path / "omnis.yaml"
+        config_file.write_text("""
+version: "1.0"
+theme: "themes/glfos"
+branding:
+  name: "Inline OS"
+jobs: []
+""")
+        colors = Engine.from_config_file(config_file).get_branding().colors
+        assert colors.success == "#010203"
+        assert colors.warning == "#040506"
+        assert colors.error == "#070809"
+        assert colors.background_light == "#0A0B0C"
+        assert colors.text_on_primary == "#0D0E0F"
