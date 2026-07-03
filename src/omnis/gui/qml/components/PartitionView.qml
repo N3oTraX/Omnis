@@ -1570,6 +1570,7 @@ Item {
 
                         // ==== FORM: New partition (on selected free segment) ====
                         Rectangle {
+                            id: createFormBox
                             width: parent.width
                             visible: activeForm === "create" && selectedSegment
                                 && selectedSegment.kind === "free"
@@ -1583,6 +1584,20 @@ Item {
                             // Free size in MiB (bound to the selected free segment).
                             property int freeMib: selectedSegment
                                 ? sectorsToMib(selectedSegment.sizeSectors) : 0
+                            // Single source of truth for the chosen size. The slider and the
+                            // text field both display and write THIS (never each other), so
+                            // their two-way sync can't break via imperative assignment.
+                            property int sizeMib: Math.max(1, freeMib)
+                            // Default to the whole free region whenever the form (re)opens or
+                            // the target free segment changes.
+                            onVisibleChanged: if (visible) sizeMib = Math.max(1, freeMib)
+                            onFreeMibChanged: sizeMib = Math.max(1, freeMib)
+                            onSizeMibChanged: {
+                                if (Math.round(createSizeSlider.value) !== sizeMib)
+                                    createSizeSlider.value = sizeMib
+                                if (createSizeField.text !== sizeMib.toString())
+                                    createSizeField.text = sizeMib.toString()
+                            }
 
                             Column {
                                 id: createForm
@@ -1619,32 +1634,25 @@ Item {
                                             width: parent.width - createSizeField.width - 12
                                             anchors.verticalCenter: parent.verticalCenter
                                             from: 1
-                                            to: Math.max(1, parent.parent.parent.freeMib)
+                                            to: Math.max(1, createFormBox.freeMib)
                                             stepSize: 1
-                                            value: Math.max(1, Math.min(
-                                                parent.parent.parent.freeMib,
-                                                Math.round(parent.parent.parent.freeMib)))
-                                            onMoved: createSizeField.text = Math.round(value).toString()
+                                            Component.onCompleted: value = createFormBox.sizeMib
+                                            onMoved: createFormBox.sizeMib = Math.round(value)
                                         }
 
                                         TextField {
                                             id: createSizeField
                                             width: 120
                                             anchors.verticalCenter: parent.verticalCenter
-                                            text: Math.round(createSizeSlider.value).toString()
+                                            Component.onCompleted: text = createFormBox.sizeMib.toString()
                                             inputMethodHints: Qt.ImhDigitsOnly
                                             validator: IntValidator {
                                                 bottom: 1
-                                                top: Math.max(1, createForm.parent.freeMib)
+                                                top: Math.max(1, createFormBox.freeMib)
                                             }
                                             color: textColor
-                                            onEditingFinished: {
-                                                var v = parseInt(text)
-                                                if (isNaN(v)) v = 1
-                                                v = Math.max(1, Math.min(createForm.parent.freeMib, v))
-                                                createSizeSlider.value = v
-                                                text = v.toString()
-                                            }
+                                            onEditingFinished: createFormBox.sizeMib =
+                                                Math.max(1, Math.min(createFormBox.freeMib, parseInt(text) || 1))
                                         }
                                     }
 
@@ -1731,8 +1739,7 @@ Item {
                                         highlighted: true
                                         onClicked: {
                                             var mib = Math.max(1, Math.min(
-                                                createForm.parent.freeMib,
-                                                Math.round(createSizeSlider.value)))
+                                                createFormBox.freeMib, createFormBox.sizeMib))
                                             var flags = []
                                             if (createEspFlag.checked) flags.push("esp")
                                             if (createBootFlag.checked) flags.push("boot")
@@ -1761,6 +1768,7 @@ Item {
 
                         // ==== FORM: Resize (on selected existing partition) ====
                         Rectangle {
+                            id: resizeFormBox
                             width: parent.width
                             visible: activeForm === "resize" && selectedSegment
                                 && selectedSegment.kind !== "free"
@@ -1780,6 +1788,17 @@ Item {
                             property int minMib: selectedSegment
                                 ? Math.max(1, sectorsToMib(selectedSegment.minSizeSectors || 0)) : 1
                             property int maxMib: curMib + freeAfterMib
+                            // Single source of truth (see the create form): slider and field
+                            // both display and write this, defaulting to the current size.
+                            property int sizeMib: Math.max(minMib, Math.min(maxMib, curMib))
+                            onVisibleChanged: if (visible) sizeMib = Math.max(minMib, Math.min(maxMib, curMib))
+                            onCurMibChanged: sizeMib = Math.max(minMib, Math.min(maxMib, curMib))
+                            onSizeMibChanged: {
+                                if (Math.round(resizeSlider.value) !== sizeMib)
+                                    resizeSlider.value = sizeMib
+                                if (resizeField.text !== sizeMib.toString())
+                                    resizeField.text = sizeMib.toString()
+                            }
 
                             Column {
                                 id: resizeForm
@@ -1814,32 +1833,27 @@ Item {
                                             id: resizeSlider
                                             width: parent.width - resizeField.width - 12
                                             anchors.verticalCenter: parent.verticalCenter
-                                            from: resizeForm.parent.minMib
-                                            to: Math.max(resizeForm.parent.minMib, resizeForm.parent.maxMib)
+                                            from: resizeFormBox.minMib
+                                            to: Math.max(resizeFormBox.minMib, resizeFormBox.maxMib)
                                             stepSize: 1
-                                            value: resizeForm.parent.curMib
-                                            onMoved: resizeField.text = Math.round(value).toString()
+                                            Component.onCompleted: value = resizeFormBox.sizeMib
+                                            onMoved: resizeFormBox.sizeMib = Math.round(value)
                                         }
 
                                         TextField {
                                             id: resizeField
                                             width: 120
                                             anchors.verticalCenter: parent.verticalCenter
-                                            text: Math.round(resizeSlider.value).toString()
+                                            Component.onCompleted: text = resizeFormBox.sizeMib.toString()
                                             inputMethodHints: Qt.ImhDigitsOnly
                                             validator: IntValidator {
-                                                bottom: resizeForm.parent.minMib
-                                                top: Math.max(resizeForm.parent.minMib, resizeForm.parent.maxMib)
+                                                bottom: resizeFormBox.minMib
+                                                top: Math.max(resizeFormBox.minMib, resizeFormBox.maxMib)
                                             }
                                             color: textColor
-                                            onEditingFinished: {
-                                                var v = parseInt(text)
-                                                if (isNaN(v)) v = resizeForm.parent.minMib
-                                                v = Math.max(resizeForm.parent.minMib,
-                                                    Math.min(resizeForm.parent.maxMib, v))
-                                                resizeSlider.value = v
-                                                text = v.toString()
-                                            }
+                                            onEditingFinished: resizeFormBox.sizeMib =
+                                                Math.max(resizeFormBox.minMib,
+                                                    Math.min(resizeFormBox.maxMib, parseInt(text) || resizeFormBox.minMib))
                                         }
                                     }
 
@@ -1857,9 +1871,8 @@ Item {
                                         text: qsTr("Add to queue")
                                         highlighted: true
                                         onClicked: {
-                                            var v = Math.max(resizeForm.parent.minMib,
-                                                Math.min(resizeForm.parent.maxMib,
-                                                    Math.round(resizeSlider.value)))
+                                            var v = Math.max(resizeFormBox.minMib,
+                                                Math.min(resizeFormBox.maxMib, resizeFormBox.sizeMib))
                                             addOperation({
                                                 type: "resize",
                                                 target: selectedSegment.name,
