@@ -6,6 +6,9 @@
  *   - Desktop environment: Gnome / KDE Plasma (single choice)
  *   - Edition / flavor: Standard / Mini / Streamers / Studio / ... (single choice)
  *
+ * Layout: two columns on a single page — desktop environments on the left,
+ * editions/flavors on the right — so every option is visible at once.
+ *
  * Persistence pattern (source of truth = engine):
  *   - `selectedDesktopEnvironment` / `selectedEdition` are readonly downward
  *     mirrors of engine.* — never reassigned imperatively.
@@ -42,6 +45,100 @@ Item {
     property color surfaceColor: "#32373c"
     property color textColor: "#fffded"
     property color textMutedColor: "#9CA3AF"
+
+    // Reusable card delegate for a DE or an edition (single-choice).
+    // Inline component: root.* properties must be qualified (own scope).
+    component ChoiceCard: Rectangle {
+        id: card
+        property var item: ({})
+        property bool selected: false
+        signal clicked()
+
+        Layout.fillWidth: true
+        Layout.preferredHeight: cardRow.implicitHeight + 28
+        radius: 14
+        color: selected
+               ? Qt.rgba(root.primaryColor.r, root.primaryColor.g, root.primaryColor.b, 0.2)
+               : root.surfaceColor
+        border.color: selected ? root.primaryColor : "transparent"
+        border.width: 2
+
+        Behavior on color { ColorAnimation { duration: 150 } }
+        Behavior on border.color { ColorAnimation { duration: 150 } }
+
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: card.clicked()
+        }
+
+        RowLayout {
+            id: cardRow
+            anchors.fill: parent
+            anchors.margins: 14
+            spacing: 14
+
+            // Icon (image if available, otherwise initial letter)
+            Rectangle {
+                Layout.preferredWidth: 44
+                Layout.preferredHeight: 44
+                Layout.alignment: Qt.AlignVCenter
+                radius: 8
+                color: Qt.rgba(root.primaryColor.r, root.primaryColor.g, root.primaryColor.b, 0.2)
+
+                Image {
+                    id: cardIcon
+                    anchors.fill: parent
+                    anchors.margins: 6
+                    source: card.item.iconUrl || ""
+                    fillMode: Image.PreserveAspectFit
+                    visible: status === Image.Ready
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    visible: cardIcon.status !== Image.Ready
+                    text: (card.item.name || "?").charAt(0)
+                    font.pixelSize: 20
+                    font.bold: true
+                    color: root.textColor
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
+                spacing: 3
+
+                Text {
+                    text: card.item.name || card.item.id
+                    font.pixelSize: 15
+                    font.bold: true
+                    color: root.textColor
+                    Layout.fillWidth: true
+                }
+
+                Text {
+                    text: card.item.description || ""
+                    font.pixelSize: 12
+                    color: root.textMutedColor
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                    visible: text.length > 0
+                }
+            }
+
+            // Selected indicator
+            Text {
+                text: "✓"
+                font.pixelSize: 20
+                font.bold: true
+                color: root.primaryColor
+                Layout.alignment: Qt.AlignVCenter
+                visible: card.selected
+            }
+        }
+    }
 
     // Content container with semi-transparent background
     Rectangle {
@@ -98,204 +195,63 @@ Item {
                 Item { Layout.preferredHeight: 8 }
 
                 // ---------------------------------------------------------------
-                // Desktop environment section
+                // Two columns: Desktop Environment (left) + Edition (right)
                 // ---------------------------------------------------------------
-                Text {
-                    text: qsTr("Desktop Environment")
-                    font.pixelSize: 20
-                    font.bold: true
-                    color: textColor
+                RowLayout {
                     Layout.fillWidth: true
-                }
+                    spacing: 24
 
-                Repeater {
-                    model: desktopEnvironmentsModel
-
-                    Rectangle {
+                    // ===== Left column: Desktop Environment =====
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: deColumn.implicitHeight + 32
-                        radius: 16
-                        color: selectedDesktopEnvironment === modelData.id
-                               ? Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.2)
-                               : surfaceColor
-                        border.color: selectedDesktopEnvironment === modelData.id ? primaryColor : "transparent"
-                        border.width: 2
+                        Layout.preferredWidth: 1
+                        Layout.alignment: Qt.AlignTop
+                        spacing: 12
 
-                        Behavior on color { ColorAnimation { duration: 150 } }
-                        Behavior on border.color { ColorAnimation { duration: 150 } }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.desktopEnvironmentSelected(modelData.id)
+                        Text {
+                            text: qsTr("Desktop Environment")
+                            font.pixelSize: 20
+                            font.bold: true
+                            color: textColor
+                            Layout.fillWidth: true
                         }
 
-                        RowLayout {
-                            id: deColumn
-                            anchors.fill: parent
-                            anchors.margins: 16
-                            spacing: 16
+                        Repeater {
+                            model: desktopEnvironmentsModel
 
-                            // Icon (image if available, otherwise initial letter)
-                            Rectangle {
-                                Layout.preferredWidth: 48
-                                Layout.preferredHeight: 48
-                                Layout.alignment: Qt.AlignVCenter
-                                radius: 8
-                                color: Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.2)
-
-                                Image {
-                                    id: deIcon
-                                    anchors.fill: parent
-                                    anchors.margins: 6
-                                    source: modelData.iconUrl || ""
-                                    fillMode: Image.PreserveAspectFit
-                                    visible: status === Image.Ready
-                                }
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    visible: deIcon.status !== Image.Ready
-                                    text: (modelData.name || "?").charAt(0)
-                                    font.pixelSize: 22
-                                    font.bold: true
-                                    color: textColor
-                                }
-                            }
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                Layout.alignment: Qt.AlignVCenter
-                                spacing: 4
-
-                                Text {
-                                    text: modelData.name || modelData.id
-                                    font.pixelSize: 16
-                                    font.bold: true
-                                    color: textColor
-                                    Layout.fillWidth: true
-                                }
-
-                                Text {
-                                    text: modelData.description || ""
-                                    font.pixelSize: 13
-                                    color: textMutedColor
-                                    wrapMode: Text.WordWrap
-                                    Layout.fillWidth: true
-                                    visible: text.length > 0
-                                }
-                            }
-
-                            // Selected indicator
-                            Text {
-                                text: "✓"
-                                font.pixelSize: 22
-                                font.bold: true
-                                color: primaryColor
-                                Layout.alignment: Qt.AlignVCenter
-                                visible: selectedDesktopEnvironment === modelData.id
+                            ChoiceCard {
+                                item: modelData
+                                selected: selectedDesktopEnvironment === modelData.id
+                                onClicked: root.desktopEnvironmentSelected(modelData.id)
                             }
                         }
+
+                        // Push cards to the top so both columns align.
+                        Item { Layout.fillHeight: true }
                     }
-                }
 
-                Item { Layout.preferredHeight: 16 }
-
-                // ---------------------------------------------------------------
-                // Edition / flavor section
-                // ---------------------------------------------------------------
-                Text {
-                    text: qsTr("Edition")
-                    font.pixelSize: 20
-                    font.bold: true
-                    color: textColor
-                    Layout.fillWidth: true
-                }
-
-                Repeater {
-                    model: editionsModel
-
-                    Rectangle {
+                    // ===== Right column: Edition / flavor =====
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: editionColumn.implicitHeight + 32
-                        radius: 16
-                        color: selectedEdition === modelData.id
-                               ? Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.2)
-                               : surfaceColor
-                        border.color: selectedEdition === modelData.id ? primaryColor : "transparent"
-                        border.width: 2
+                        Layout.preferredWidth: 1
+                        Layout.alignment: Qt.AlignTop
+                        spacing: 12
 
-                        Behavior on color { ColorAnimation { duration: 150 } }
-                        Behavior on border.color { ColorAnimation { duration: 150 } }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.editionSelected(modelData.id)
+                        Text {
+                            text: qsTr("Edition")
+                            font.pixelSize: 20
+                            font.bold: true
+                            color: textColor
+                            Layout.fillWidth: true
                         }
 
-                        RowLayout {
-                            id: editionColumn
-                            anchors.fill: parent
-                            anchors.margins: 16
-                            spacing: 16
+                        Repeater {
+                            model: editionsModel
 
-                            Rectangle {
-                                Layout.preferredWidth: 48
-                                Layout.preferredHeight: 48
-                                Layout.alignment: Qt.AlignVCenter
-                                radius: 8
-                                color: Qt.rgba(primaryColor.r, primaryColor.g, primaryColor.b, 0.2)
-
-                                Image {
-                                    id: editionIcon
-                                    anchors.fill: parent
-                                    anchors.margins: 6
-                                    source: modelData.iconUrl || ""
-                                    fillMode: Image.PreserveAspectFit
-                                    visible: status === Image.Ready
-                                }
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    visible: editionIcon.status !== Image.Ready
-                                    text: (modelData.name || "?").charAt(0)
-                                    font.pixelSize: 22
-                                    font.bold: true
-                                    color: textColor
-                                }
-                            }
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                Layout.alignment: Qt.AlignVCenter
-                                spacing: 4
-
-                                Text {
-                                    text: modelData.name || modelData.id
-                                    font.pixelSize: 16
-                                    font.bold: true
-                                    color: textColor
-                                    Layout.fillWidth: true
-                                }
-
-                                Text {
-                                    text: modelData.description || ""
-                                    font.pixelSize: 13
-                                    color: textMutedColor
-                                    wrapMode: Text.WordWrap
-                                    Layout.fillWidth: true
-                                    visible: text.length > 0
-                                }
-                            }
-
-                            Text {
-                                text: "✓"
-                                font.pixelSize: 22
-                                font.bold: true
-                                color: primaryColor
-                                Layout.alignment: Qt.AlignVCenter
-                                visible: selectedEdition === modelData.id
+                            ChoiceCard {
+                                item: modelData
+                                selected: selectedEdition === modelData.id
+                                onClicked: root.editionSelected(modelData.id)
                             }
                         }
                     }
