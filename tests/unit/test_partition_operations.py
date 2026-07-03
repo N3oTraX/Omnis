@@ -144,7 +144,7 @@ class TestPartitionOperationFromDict:
             )
 
     def test_non_int_sector_raises(self) -> None:
-        with pytest.raises(ValueError, match="must be an int"):
+        with pytest.raises(ValueError, match="whole number"):
             PartitionOperation.from_dict(
                 {
                     "type": "create",
@@ -158,6 +158,30 @@ class TestPartitionOperationFromDict:
         with pytest.raises(ValueError, match="must be an int"):
             PartitionOperation.from_dict(
                 {"type": "delete", "target": "/dev/sda1", "params": {"number": True}}
+            )
+
+    def test_integral_float_sector_coerced_to_int(self) -> None:
+        # QML numbers cross the Qt boundary as floats; integral floats are
+        # accepted and normalized to int so the sgdisk commands get integers.
+        op = PartitionOperation.from_dict(
+            {
+                "type": "create",
+                "target": "free:2048",
+                "params": {"start_sector": 2048.0, "size_sectors": 1024.0, "fstype": "ext4"},
+            }
+        )
+        assert op.params["start_sector"] == 2048
+        assert isinstance(op.params["start_sector"], int)
+        assert isinstance(op.params["size_sectors"], int)
+
+    def test_non_integral_float_rejected(self) -> None:
+        with pytest.raises(ValueError, match="whole number"):
+            PartitionOperation.from_dict(
+                {
+                    "type": "create",
+                    "target": "free:0",
+                    "params": {"start_sector": 2048.5, "size_sectors": 10, "fstype": "ext4"},
+                }
             )
 
 

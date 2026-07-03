@@ -91,7 +91,7 @@ class PartitionOperation:
             raise ValueError(f"Operation must be a dict, got {type(data).__name__}")
 
         op_type = data.get("type")
-        if op_type not in _OPERATION_TYPES:
+        if not isinstance(op_type, str) or op_type not in _OPERATION_TYPES:
             raise ValueError(f"Unknown operation type: {op_type!r}")
 
         target = data.get("target")
@@ -102,12 +102,19 @@ class PartitionOperation:
         if not isinstance(params, dict):
             raise ValueError(f"Operation {op_type!r} 'params' must be a dict")
 
-        cls._validate_params(op_type, params)
-        return cls(type=op_type, target=target, params=dict(params))
+        coerced = cls._validate_params(op_type, params)
+        return cls(type=op_type, target=target, params=coerced)
 
     @staticmethod
-    def _validate_params(op_type: str, params: dict[str, Any]) -> None:
-        """Validate that ``params`` carries the required keys for ``op_type``."""
+    def _validate_params(op_type: str, params: dict[str, Any]) -> dict[str, Any]:
+        """
+        Validate required keys and coerce numeric params to ``int``.
+
+        QML numbers cross the Qt boundary as JS ``Number`` and arrive here as
+        Python ``float`` (e.g. ``2048.0``); the sector/number fields must be
+        integers, so accept an integral float and coerce it. Returns a copy of
+        ``params`` with the numeric fields normalized to ``int``.
+        """
         required: dict[str, tuple[str, ...]] = {
             "create": ("start_sector", "size_sectors", "fstype"),
             "delete": ("number",),
@@ -119,8 +126,9 @@ class PartitionOperation:
             if key not in params:
                 raise ValueError(f"Operation {op_type!r} missing required param {key!r}")
 
-        # Type spot-checks on numeric fields (bool is a subclass of int, so the
-        # setflag 'state' stays a bool; guard the sector/number fields).
+        # Numeric fields must be whole integers. bool is a subclass of int, so
+        # the setflag 'state' stays a bool; only the sector/number fields are
+        # coerced here.
         int_fields = {
             "create": ("start_sector", "size_sectors"),
             "delete": ("number",),
@@ -128,10 +136,18 @@ class PartitionOperation:
             "resize": ("number", "new_size_sectors"),
             "format": (),
         }
+        coerced = dict(params)
         for key in int_fields[op_type]:
             value = params[key]
-            if isinstance(value, bool) or not isinstance(value, int):
+            if isinstance(value, bool):
                 raise ValueError(f"Operation {op_type!r} param {key!r} must be an int")
+            if isinstance(value, int):
+                coerced[key] = value
+            elif isinstance(value, float) and value.is_integer():
+                coerced[key] = int(value)
+            else:
+                raise ValueError(f"Operation {op_type!r} param {key!r} must be a whole number")
+        return coerced
 
 
 def _partition_number(name: str) -> int:
