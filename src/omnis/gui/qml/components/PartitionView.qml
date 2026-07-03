@@ -56,6 +56,67 @@ Item {
     property color warningColor: "#F59E0B"
     property color errorColor: "#EF4444"
 
+    // Reusable ComboBox styled for our dark theme (the default Basic style
+    // renders near-invisible text on a light field). Field, selected value and
+    // popup items all use dark surface + light text, matching the themed
+    // password fields. Colors are literal because an inline component does not
+    // see the root's theme properties (surfaceColor/textColor/primaryColor).
+    component PartCombo: ComboBox {
+        id: partCombo
+        font.pixelSize: 13
+        implicitHeight: 34
+        contentItem: Text {
+            leftPadding: 12
+            rightPadding: partCombo.indicator.width + 6
+            text: partCombo.displayText
+            font: partCombo.font
+            color: "#fffded"
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+        background: Rectangle {
+            implicitHeight: 34
+            radius: 8
+            color: "#32373c"
+            border.color: partCombo.activeFocus ? "#5597e6" : "#4a4f55"
+            border.width: partCombo.activeFocus ? 2 : 1
+        }
+        delegate: ItemDelegate {
+            id: partComboItem
+            width: partCombo.width
+            highlighted: partCombo.highlightedIndex === index
+            contentItem: Text {
+                text: modelData
+                font: partCombo.font
+                color: "#fffded"
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+            }
+            background: Rectangle {
+                color: partComboItem.highlighted ? "#3a7bc8" : "#32373c"
+            }
+        }
+        popup: Popup {
+            y: partCombo.height
+            width: partCombo.width
+            implicitHeight: Math.min(contentItem.implicitHeight, 260)
+            padding: 1
+            contentItem: ListView {
+                clip: true
+                implicitHeight: contentHeight
+                model: partCombo.popup.visible ? partCombo.delegateModel : null
+                currentIndex: partCombo.highlightedIndex
+                ScrollIndicator.vertical: ScrollIndicator {}
+            }
+            background: Rectangle {
+                color: "#32373c"
+                border.color: "#4a4f55"
+                border.width: 1
+                radius: 8
+            }
+        }
+    }
+
     // Histobar partition palette (by partType, with fstype fallback)
     property color colorEfi: "#5597e6"        // efi / vfat
     property color colorLinux: "#10B981"      // ext4 / linux
@@ -648,7 +709,7 @@ Item {
                                             }
 
                                             // Mount point
-                                            ComboBox {
+                                            PartCombo {
                                                 id: mpCombo
                                                 Layout.preferredWidth: 130
                                                 property string pname: modelData.name
@@ -672,7 +733,7 @@ Item {
                                             }
 
                                             // Target filesystem (only relevant when formatting)
-                                            ComboBox {
+                                            PartCombo {
                                                 Layout.preferredWidth: 100
                                                 enabled: fmtCheck.checked
                                                 opacity: enabled ? 1.0 : 0.4
@@ -1651,6 +1712,15 @@ Item {
                                                 top: Math.max(1, createFormBox.freeMib)
                                             }
                                             color: textColor
+                                            selectionColor: primaryColor
+                                            selectedTextColor: textColor
+                                            leftPadding: 12
+                                            background: Rectangle {
+                                                radius: 8
+                                                color: surfaceColor
+                                                border.color: createSizeField.activeFocus ? primaryColor : "#4a4f55"
+                                                border.width: createSizeField.activeFocus ? 2 : 1
+                                            }
                                             onEditingFinished: createFormBox.sizeMib =
                                                 Math.max(1, Math.min(createFormBox.freeMib, parseInt(text) || 1))
                                         }
@@ -1676,7 +1746,7 @@ Item {
                                             font.pixelSize: 12
                                             color: textMutedColor
                                         }
-                                        ComboBox {
+                                        PartCombo {
                                             id: createFsCombo
                                             width: 130
                                             model: ["ext4", "btrfs", "vfat", "swap"]
@@ -1690,7 +1760,7 @@ Item {
                                             font.pixelSize: 12
                                             color: textMutedColor
                                         }
-                                        ComboBox {
+                                        PartCombo {
                                             id: createMountCombo
                                             width: 150
                                             model: ["(none)", "/", "/home", "/boot", "swap"]
@@ -1851,6 +1921,15 @@ Item {
                                                 top: Math.max(resizeFormBox.minMib, resizeFormBox.maxMib)
                                             }
                                             color: textColor
+                                            selectionColor: primaryColor
+                                            selectedTextColor: textColor
+                                            leftPadding: 12
+                                            background: Rectangle {
+                                                radius: 8
+                                                color: surfaceColor
+                                                border.color: resizeField.activeFocus ? primaryColor : "#4a4f55"
+                                                border.width: resizeField.activeFocus ? 2 : 1
+                                            }
                                             onEditingFinished: resizeFormBox.sizeMib =
                                                 Math.max(resizeFormBox.minMib,
                                                     Math.min(resizeFormBox.maxMib, parseInt(text) || resizeFormBox.minMib))
@@ -1930,7 +2009,7 @@ Item {
                                             font.pixelSize: 12
                                             color: textMutedColor
                                         }
-                                        ComboBox {
+                                        PartCombo {
                                             id: formatFsCombo
                                             width: 130
                                             model: ["ext4", "btrfs", "vfat", "swap"]
@@ -1944,7 +2023,7 @@ Item {
                                             font.pixelSize: 12
                                             color: textMutedColor
                                         }
-                                        ComboBox {
+                                        PartCombo {
                                             id: formatMountCombo
                                             width: 150
                                             model: ["(none)", "/", "/home", "/boot", "swap"]
