@@ -552,6 +552,51 @@ class TestApplyOperationsExecution:
         assert result.success is True, result.message
         return calls
 
+    def test_create_vfat_uses_parted_fat32_and_mkfs_fat(self) -> None:
+        # Regression: parted's mkpart rejects 'vfat' as an fs-type token; it must
+        # receive 'fat32'. The mkfs step still uses the real filesystem (mkfs.fat).
+        calls = self._apply(
+            [
+                {
+                    "type": "create",
+                    "target": "free:2048",
+                    "params": {
+                        "start_sector": 2048,
+                        "size_sectors": _sectors(512),
+                        "fstype": "vfat",
+                        "path": "/dev/sda9",
+                        "number": 9,
+                        "flags": ["esp"],
+                    },
+                }
+            ]
+        )
+        mkpart = next(c for c in calls if "mkpart" in c)
+        assert "fat32" in mkpart
+        assert "vfat" not in mkpart
+        assert ["mkfs.fat", "-F32", "/dev/sda9"] in calls
+
+    def test_create_swap_uses_parted_linux_swap(self) -> None:
+        calls = self._apply(
+            [
+                {
+                    "type": "create",
+                    "target": "free:2048",
+                    "params": {
+                        "start_sector": 2048,
+                        "size_sectors": _sectors(512),
+                        "fstype": "swap",
+                        "path": "/dev/sda9",
+                        "number": 9,
+                    },
+                }
+            ]
+        )
+        mkpart = next(c for c in calls if "mkpart" in c)
+        assert "linux-swap" in mkpart
+        assert "swap" not in mkpart  # exact token check, not the substring
+        assert ["mkswap", "/dev/sda9"] in calls
+
     def test_global_order_delete_shrink_grow_create_format_setflag(self) -> None:
         operations = [
             {

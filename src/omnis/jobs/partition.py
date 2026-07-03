@@ -526,6 +526,24 @@ def _validate_esp(parts: list[dict[str, Any]], flags: dict[int, set[str]]) -> tu
     return True, ""
 
 
+# parted's `mkpart` fs-type argument accepts only a fixed vocabulary (it sets the
+# partition type hint; it does NOT format). 'vfat' and 'swap' are rejected -> map
+# them to the tokens parted expects. Unknown values pass through unchanged.
+_PARTED_FSTYPE = {
+    "vfat": "fat32",
+    "fat": "fat32",
+    "fat32": "fat32",
+    "fat16": "fat16",
+    "swap": "linux-swap",
+    "linux-swap": "linux-swap",
+}
+
+
+def _parted_fstype(fstype: str) -> str:
+    """Map an Omnis fstype to a parted ``mkpart`` fs-type token."""
+    return _PARTED_FSTYPE.get(fstype.lower(), fstype.lower())
+
+
 class PartitionMode(Enum):
     """Partitioning mode selection."""
 
@@ -1280,7 +1298,7 @@ class PartitionJob(BaseJob):
         name = str(params.get("name") or "primary")
 
         result = self._run_partitioning_command(
-            ["parted", "-s", disk, "mkpart", name, fstype, f"{start}s", f"{end}s"],
+            ["parted", "-s", disk, "mkpart", name, _parted_fstype(fstype), f"{start}s", f"{end}s"],
             description=f"Creating partition {name} ({start}s-{end}s) on {disk}",
             dry_run=dry_run,
         )
