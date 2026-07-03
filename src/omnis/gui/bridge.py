@@ -2384,6 +2384,12 @@ class EngineBridge(QObject):
             print(f"[Engine] Found {len(self._disks_model)} disks")
 
         self.disksChanged.emit()
+        # A rescan changes the selected disk's geometry, so the manual editor's
+        # derived views (simulatedSegments, validity, command preview) must
+        # re-evaluate against the fresh geometry. Without this, applying a plan
+        # updates "Available Disks" but leaves the partition editor stale.
+        self._revalidate_operations()
+        self.partitionOperationsChanged.emit()
 
     # =========================================================================
     # Desktop Environment (DE) & Edition Properties

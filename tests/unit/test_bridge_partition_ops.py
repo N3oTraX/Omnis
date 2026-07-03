@@ -299,6 +299,43 @@ class TestApplyPartitionOperations:
         mock_scan.assert_not_called()
         assert bridge.partitionApplying is False
 
+    def test_apply_finished_success_refreshes_editor_geometry(
+        self, bridge: EngineBridge
+    ) -> None:
+        # Regression: after a successful apply the partition editor
+        # (simulatedSegments) must reflect the newly written layout, not the
+        # pre-apply geometry (which only "Available Disks" used to refresh).
+        bridge.addPartitionOperation(_create_free_op())
+        new_size = _sectors(20 * 1024)
+        new_disk = {
+            "name": "sda",
+            "sizeSectors": DISK_SECTORS,
+            "segments": [
+                {
+                    "kind": "partition",
+                    "name": "sda1",
+                    "startSector": _ALIGN,
+                    "sizeSectors": new_size,
+                    "sizeBytes": new_size * _SECTOR_SIZE,
+                    "fstype": "ext4",  # pre-apply sda1 was the vfat ESP
+                    "partType": "linux",
+                    "mountpoint": "",
+                },
+            ],
+        }
+        changed: list[int] = []
+        bridge.partitionOperationsChanged.connect(lambda: changed.append(1))
+
+        with patch("omnis.gui.bridge.disk_detector.list_disks", return_value=[new_disk]):
+            bridge._on_partition_apply_finished(True, "done")
+
+        segs = {s["name"]: s for s in bridge.simulatedSegments if s["kind"] != "free"}
+        assert "sda2" not in segs  # old root is gone
+        assert segs["sda1"]["fstype"] == "ext4"  # fresh geometry, not the old ESP
+        assert bridge.pendingOperations == []
+        # The editor's notify fired so the QML simulatedSegments binding re-reads.
+        assert changed
+
 
 class TestOperationsApplicable:
     """Apply is gated on structural applicability, not the installable layout."""
