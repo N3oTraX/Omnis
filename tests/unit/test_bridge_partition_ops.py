@@ -261,3 +261,40 @@ class TestApplySelectionsToContext:
         bridge.setSelectedDisk("/dev/nvme0n1")
         bridge.applySelectionsToContext()
         assert bridge._engine._selections["disk"] == "/dev/nvme0n1"
+
+
+class TestApplyPartitionOperations:
+    def test_apply_with_empty_queue_reports_failure(self, bridge: EngineBridge) -> None:
+        results: list[tuple[bool, str]] = []
+        bridge.partitionApplyFinished.connect(lambda ok, msg: results.append((ok, msg)))
+
+        bridge.applyPartitionOperations()
+
+        # No thread started; a synchronous failure is reported and no busy flip.
+        assert results and results[0][0] is False
+        assert bridge.partitionApplying is False
+
+    def test_apply_finished_success_clears_queue_and_rescans(
+        self, bridge: EngineBridge
+    ) -> None:
+        bridge.addPartitionOperation(_create_free_op())
+        assert len(bridge.pendingOperations) == 1
+
+        with patch("omnis.gui.bridge.disk_detector.list_disks", return_value=[]) as mock_scan:
+            bridge._on_partition_apply_finished(True, "done")
+
+        # Success path: queue cleared, disks rescanned, busy flag down.
+        assert bridge.pendingOperations == []
+        assert bridge.partitionApplying is False
+        mock_scan.assert_called_once()
+
+    def test_apply_finished_failure_keeps_queue(self, bridge: EngineBridge) -> None:
+        bridge.addPartitionOperation(_create_free_op())
+
+        with patch("omnis.gui.bridge.disk_detector.list_disks", return_value=[]) as mock_scan:
+            bridge._on_partition_apply_finished(False, "boom")
+
+        # Failure keeps the queue so the user can fix it; no rescan.
+        assert len(bridge.pendingOperations) == 1
+        mock_scan.assert_not_called()
+        assert bridge.partitionApplying is False

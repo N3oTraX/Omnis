@@ -2054,7 +2054,17 @@ Item {
                                 visible: pendingOperations.length > 0
 
                                 Button {
+                                    text: engine.partitionApplying
+                                        ? qsTr("Applying…")
+                                        : qsTr("Apply changes")
+                                    highlighted: true
+                                    enabled: engine.manualPlanValid && !engine.partitionApplying
+                                    onClicked: engine.applyPartitionOperations()
+                                }
+
+                                Button {
                                     text: qsTr("Reset")
+                                    enabled: !engine.partitionApplying
                                     onClicked: resetOperations()
                                 }
 
@@ -2064,6 +2074,26 @@ Item {
                                         : qsTr("Show command preview")
                                     visible: commandPreview.length > 0
                                     onClicked: commandPreviewColumn.expanded = !commandPreviewColumn.expanded
+                                }
+                            }
+
+                            // Live-apply result feedback (GParted-style apply).
+                            Text {
+                                id: applyResultText
+                                width: parent.width
+                                visible: text.length > 0
+                                wrapMode: Text.WordWrap
+                                font.pixelSize: 12
+                                property bool ok: false
+                                color: ok ? successColor : errorColor
+                            }
+
+                            Connections {
+                                target: engine
+                                function onPartitionApplyFinished(success, message) {
+                                    applyResultText.ok = success
+                                    applyResultText.text = (success
+                                        ? qsTr("Applied. ") : qsTr("Apply failed: ")) + message
                                 }
                             }
 

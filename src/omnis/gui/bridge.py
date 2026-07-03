@@ -239,6 +239,41 @@ class InstallationWorker(QObject):
             self.finished.emit(False)
 
 
+class PartitionApplyWorker(QObject):
+    """Worker that applies the manual (M2) partition operations off the UI thread."""
+
+    finished = Signal(bool, str)  # success, message
+
+    def __init__(
+        self,
+        disk: str,
+        operations: list[dict[str, Any]],
+        dry_run: bool,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._disk = disk
+        self._operations = operations
+        self._dry_run = dry_run
+
+    def run(self) -> None:
+        """Execute the queued operations (real sgdisk/mkfs) against the disk."""
+        try:
+            from omnis.jobs.base import JobContext
+            from omnis.jobs.partition import PartitionJob
+
+            job = PartitionJob()
+            context = JobContext(
+                selections={"disk": self._disk, "partition_operations": self._operations}
+            )
+            result = job._apply_operations(
+                context, self._disk, context.selections, dry_run=self._dry_run
+            )
+            self.finished.emit(result.success, result.message)
+        except Exception as e:  # noqa: BLE001 - never let the thread crash the UI
+            self.finished.emit(False, str(e))
+
+
 class BrandingProxy(QObject):
     """Exposes branding configuration to QML."""
 
@@ -529,6 +564,8 @@ class EngineBridge(QObject):
     disksChanged = Signal()  # emitted when disks are scanned
     partitionPlanChanged = Signal()  # emitted when a manual partition assignment changes
     partitionOperationsChanged = Signal()  # emitted when the M2 operation list/simulation changes
+    partitionApplyingChanged = Signal()  # emitted when the live-apply busy state flips
+    partitionApplyFinished = Signal(bool, str)  # success, message (live GParted-style apply)
     environmentDataChanged = Signal()  # emitted when DE/edition catalogs are loaded
     progressChanged = Signal()  # emitted when progress updates
     systemFontChanged = Signal()  # emitted when system font family changes
@@ -611,6 +648,11 @@ class EngineBridge(QObject):
         # Thread management
         self._worker: InstallationWorker | None = None
         self._thread: QThread | None = None
+
+        # Live (GParted-style) partition-apply thread state.
+        self._apply_worker: PartitionApplyWorker | None = None
+        self._apply_thread: QThread | None = None
+        self._partition_applying: bool = False
 
         # Requirements state
         self._requirements_checker: SystemRequirementsChecker | None = None
@@ -2178,6 +2220,63 @@ class EngineBridge(QObject):
             if self._debug:
                 print("[Engine] Cleared all partition operations")
             self.partitionOperationsChanged.emit()
+
+    @Property(bool, notify=partitionApplyingChanged)
+    def partitionApplying(self) -> bool:
+        """True while a live partition-apply is running (UI shows a busy state)."""
+        return self._partition_applying
+
+    @Slot()
+    def applyPartitionOperations(self) -> None:
+        """
+        Execute the queued M2 operations on the selected disk (GParted-style),
+        off the UI thread, then rescan so 'Available Disks' shows the real new
+        layout. Requires privileges (sgdisk/mkfs): on the live ISO Omnis runs as
+        root; in dev, launch the app with sudo.
+        """
+        if self._partition_applying:
+            return
+        selected = str(self._selections.get("disk", ""))
+        if not selected or not self._partition_operations:
+            self.partitionApplyFinished.emit(False, "No operations to apply")
+            return
+        if not self._manual_ops_valid:
+            self.partitionApplyFinished.emit(False, self._manual_ops_error or "Invalid plan")
+            return
+
+        disk_path = selected if selected.startswith("/dev/") else f"/dev/{selected}"
+
+        self._partition_applying = True
+        self.partitionApplyingChanged.emit()
+
+        self._apply_thread = QThread(self)
+        self._apply_worker = PartitionApplyWorker(
+            disk_path, list(self._partition_operations), self._dry_run
+        )
+        self._apply_worker.moveToThread(self._apply_thread)
+        self._apply_thread.started.connect(self._apply_worker.run)
+        self._apply_worker.finished.connect(self._on_partition_apply_finished)
+        self._apply_worker.finished.connect(self._apply_thread.quit)
+        self._apply_worker.finished.connect(self._apply_worker.deleteLater)
+        self._apply_thread.finished.connect(self._apply_thread.deleteLater)
+        self._apply_thread.finished.connect(self._cleanup_apply_thread)
+        self._apply_thread.start()
+
+    def _on_partition_apply_finished(self, success: bool, message: str) -> None:
+        """Main-thread handler: on success clear the queue and rescan the disks."""
+        self._partition_applying = False
+        self.partitionApplyingChanged.emit()
+        if success:
+            self.resetPartitionOperations()
+            self.refreshDisks()
+        if self._debug:
+            print(f"[Engine] Partition apply finished: success={success} ({message})")
+        self.partitionApplyFinished.emit(success, message)
+
+    def _cleanup_apply_thread(self) -> None:
+        """Drop the finished apply thread/worker references."""
+        self._apply_thread = None
+        self._apply_worker = None
 
     @Property(list, notify=partitionOperationsChanged)
     def simulatedSegments(self) -> list[dict[str, Any]]:
