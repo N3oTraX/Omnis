@@ -384,24 +384,23 @@ def _is_target_busy(target: str) -> bool:
     return result.returncode == 0 and bool(result.stdout.strip())
 
 
-def validate_operations(
+def validate_operations_applicable(
     disk_geom: dict[str, Any],
     operations: list[PartitionOperation],
-    uefi: bool = True,
 ) -> tuple[bool, str]:
     """
-    Validate a manual operation plan against a disk's geometry.
+    Validate that an operation plan can be safely written to the disk.
 
-    Checks (in order): device is not the live/mounted target, 1 MiB alignment
-    of every start/size, no overlap between resulting partitions, all boundaries
-    within ``[_ALIGN, disk_sectors - _GPT_TAIL]``, exactly one partition mounted
-    at ``/`` and (when ``uefi``) exactly one ESP (vfat + esp flag + >= 512 MiB).
+    This is the GParted-style "can I apply these changes?" check, independent of
+    whether the resulting layout is a complete installable system. Checks: no
+    operation touches the live/mounted target, 1 MiB alignment of every
+    start/size, no overlap between resulting partitions, all boundaries within
+    ``[_ALIGN, disk_sectors - _GPT_TAIL]``.
 
     Args:
         disk_geom: dict carrying at least ``sizeSectors`` and ``segments`` for
             the selected disk (the disk_detector disk contract).
         operations: parsed operations to validate.
-        uefi: when True, require exactly one conforming ESP.
 
     Returns:
         ``(True, "")`` on success or ``(False, "<clear reason>")``.
@@ -436,6 +435,39 @@ def validate_operations(
         prev_end = int(prev["startSector"]) + int(prev["sizeSectors"])
         if prev_end > int(cur["startSector"]):
             return False, "Partitions overlap"
+
+    return True, ""
+
+
+def validate_operations(
+    disk_geom: dict[str, Any],
+    operations: list[PartitionOperation],
+    uefi: bool = True,
+) -> tuple[bool, str]:
+    """
+    Validate a manual operation plan as a complete installable layout.
+
+    Runs :func:`validate_operations_applicable` first (device not busy,
+    alignment, no overlap, within bounds), then the install-completeness rules:
+    exactly one partition mounted at ``/`` and (when ``uefi``) exactly one ESP
+    (vfat + esp flag + >= 512 MiB). Gate installation/navigation on this;
+    gate the GParted-style Apply on ``validate_operations_applicable`` only.
+
+    Args:
+        disk_geom: dict carrying at least ``sizeSectors`` and ``segments`` for
+            the selected disk (the disk_detector disk contract).
+        operations: parsed operations to validate.
+        uefi: when True, require exactly one conforming ESP.
+
+    Returns:
+        ``(True, "")`` on success or ``(False, "<clear reason>")``.
+    """
+    ok, reason = validate_operations_applicable(disk_geom, operations)
+    if not ok:
+        return ok, reason
+
+    simulated = simulate_operations(disk_geom.get("segments", []), operations)
+    parts = [s for s in simulated if s["kind"] != "free" and not s["pendingDelete"]]
 
     # Apply pending setflag operations to a name->flags view for ESP detection.
     flags = _collect_flags(operations)

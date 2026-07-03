@@ -298,3 +298,67 @@ class TestApplyPartitionOperations:
         assert len(bridge.pendingOperations) == 1
         mock_scan.assert_not_called()
         assert bridge.partitionApplying is False
+
+
+class TestOperationsApplicable:
+    """Apply is gated on structural applicability, not the installable layout."""
+
+    def test_empty_queue_is_not_applicable(self, bridge: EngineBridge) -> None:
+        assert bridge.operationsApplicable is False
+        assert bridge.operationsApplicableError == ""
+
+    def test_delete_root_is_applicable_though_plan_invalid(self, bridge: EngineBridge) -> None:
+        # The reported bug: after deleting a partition the queue is populated and
+        # Apply must be enabled (applicable) even though the layout has no '/'.
+        with patch("omnis.jobs.partition._is_target_busy", return_value=False):
+            bridge.addPartitionOperation(
+                {"type": "delete", "target": "/dev/sda2", "params": {"number": 2}}
+            )
+        assert bridge.pendingOperations
+        assert bridge.operationsApplicable is True
+        assert bridge.operationsApplicableError == ""
+        # Navigation-level completeness still fails (no root), but does not block Apply.
+        assert bridge.manualPlanValid is False
+
+    def test_apply_starts_when_applicable_without_root(self, bridge: EngineBridge) -> None:
+        with patch("omnis.jobs.partition._is_target_busy", return_value=False):
+            bridge.addPartitionOperation(
+                {"type": "delete", "target": "/dev/sda2", "params": {"number": 2}}
+            )
+        results: list[tuple[bool, str]] = []
+        bridge.partitionApplyFinished.connect(lambda ok, msg: results.append((ok, msg)))
+
+        # Stub the worker/thread so no real sgdisk/mkfs runs; assert the gate passed.
+        with (
+            patch("omnis.gui.bridge.QThread"),
+            patch("omnis.gui.bridge.PartitionApplyWorker"),
+        ):
+            bridge.applyPartitionOperations()
+
+        # No synchronous "invalid plan" failure; the busy flag is raised.
+        assert results == []
+        assert bridge.partitionApplying is True
+
+    def test_apply_rejected_when_not_applicable(self, bridge: EngineBridge) -> None:
+        # An overlapping create is structurally inapplicable -> Apply short-circuits.
+        root = bridge._disks_model[0]["segments"][1]
+        with patch("omnis.jobs.partition._is_target_busy", return_value=False):
+            bridge.addPartitionOperation(
+                {
+                    "type": "create",
+                    "target": "free:overlap",
+                    "params": {
+                        "start_sector": int(root["startSector"]),
+                        "size_sectors": _sectors(1024),
+                        "fstype": "ext4",
+                    },
+                }
+            )
+        assert bridge.operationsApplicable is False
+
+        results: list[tuple[bool, str]] = []
+        bridge.partitionApplyFinished.connect(lambda ok, msg: results.append((ok, msg)))
+        bridge.applyPartitionOperations()
+
+        assert results and results[0][0] is False
+        assert bridge.partitionApplying is False

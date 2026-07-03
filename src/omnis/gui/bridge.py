@@ -20,6 +20,7 @@ from omnis.jobs.partition import (
     PartitionOperation,
     simulate_operations,
     validate_operations,
+    validate_operations_applicable,
 )
 from omnis.jobs.requirements import SystemRequirementsChecker
 from omnis.utils import disk_detector
@@ -1229,6 +1230,10 @@ class EngineBridge(QObject):
         self._partition_operations: list[dict[str, Any]] = []
         self._manual_ops_valid: bool = False
         self._manual_ops_error: str = ""
+        # Structural applicability (GParted-style), independent of a complete
+        # installable layout: gates the Apply button.
+        self._manual_ops_applicable: bool = False
+        self._manual_ops_applicable_error: str = ""
 
         # Progress tracking
         self._overall_progress: int = 0
@@ -2127,6 +2132,25 @@ class EngineBridge(QObject):
         }
         return messages.get(state, "")
 
+    @Property(bool, notify=partitionOperationsChanged)
+    def operationsApplicable(self) -> bool:
+        """
+        Whether the pending operations can be written to disk (GParted-style).
+
+        Independent of a complete installable layout: this gates the Apply
+        button so delete/create/resize can be applied without first assigning a
+        root/ESP. Install completeness is enforced separately by
+        ``manualPlanValid`` at navigation time.
+        """
+        return bool(self._partition_operations) and self._manual_ops_applicable
+
+    @Property(str, notify=partitionOperationsChanged)
+    def operationsApplicableError(self) -> str:
+        """Human-readable reason the pending operations cannot be applied."""
+        if not self._partition_operations:
+            return ""
+        return self._manual_ops_applicable_error
+
     # =========================================================================
     # Manual partitioning editor (M2: create/delete/format/setflag/resize)
     # =========================================================================
@@ -2151,15 +2175,23 @@ class EngineBridge(QObject):
         return parsed
 
     def _revalidate_operations(self) -> None:
-        """Recompute validity/error for the current operations + selected disk."""
+        """Recompute validity/error for the current operations + selected disk.
+
+        Two levels: ``applicable`` (structural, GParted-style, gates Apply) and
+        ``valid`` (complete installable layout, gates navigation/install).
+        """
         if not self._partition_operations:
             self._manual_ops_valid = False
             self._manual_ops_error = ""
+            self._manual_ops_applicable = False
+            self._manual_ops_applicable_error = ""
             return
         geom = self._selected_disk_geometry()
         if not geom:
             self._manual_ops_valid = False
             self._manual_ops_error = "No disk selected"
+            self._manual_ops_applicable = False
+            self._manual_ops_applicable_error = "No disk selected"
             return
         uefi = Path("/sys/firmware/efi").exists()
         try:
@@ -2167,7 +2199,12 @@ class EngineBridge(QObject):
         except ValueError as exc:
             self._manual_ops_valid = False
             self._manual_ops_error = str(exc)
+            self._manual_ops_applicable = False
+            self._manual_ops_applicable_error = str(exc)
             return
+        applicable, applicable_error = validate_operations_applicable(geom, operations)
+        self._manual_ops_applicable = applicable
+        self._manual_ops_applicable_error = applicable_error
         valid, error = validate_operations(geom, operations, uefi=uefi)
         self._manual_ops_valid = valid
         self._manual_ops_error = error
@@ -2229,6 +2266,8 @@ class EngineBridge(QObject):
             self._partition_operations = []
             self._manual_ops_valid = False
             self._manual_ops_error = ""
+            self._manual_ops_applicable = False
+            self._manual_ops_applicable_error = ""
             if self._debug:
                 print("[Engine] Cleared all partition operations")
             self.partitionOperationsChanged.emit()
@@ -2252,8 +2291,10 @@ class EngineBridge(QObject):
         if not selected or not self._partition_operations:
             self.partitionApplyFinished.emit(False, "No operations to apply")
             return
-        if not self._manual_ops_valid:
-            self.partitionApplyFinished.emit(False, self._manual_ops_error or "Invalid plan")
+        if not self._manual_ops_applicable:
+            self.partitionApplyFinished.emit(
+                False, self._manual_ops_applicable_error or "Operations cannot be applied"
+            )
             return
 
         disk_path = selected if selected.startswith("/dev/") else f"/dev/{selected}"

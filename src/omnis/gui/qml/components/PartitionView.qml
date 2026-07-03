@@ -1425,10 +1425,14 @@ Item {
                                     Layout.fillWidth: true
                                     wrapMode: Text.WordWrap
                                     font.pixelSize: 13
-                                    color: pendingOperations.length === 0 ? textMutedColor : textColor
+                                    color: pendingOperations.length === 0
+                                        ? textMutedColor
+                                        : (engine.operationsApplicable ? textColor : errorColor)
                                     text: pendingOperations.length === 0
                                         ? qsTr("No pending operation yet — select a segment and Add to queue.")
-                                        : qsTr("%1 operation(s) queued").replace("%1", pendingOperations.length)
+                                        : (engine.operationsApplicable
+                                            ? qsTr("%1 operation(s) queued").replace("%1", pendingOperations.length)
+                                            : qsTr("Cannot apply: %1").replace("%1", engine.operationsApplicableError))
                                 }
 
                                 Button {
@@ -1442,8 +1446,10 @@ Item {
                                         ? qsTr("Applying…")
                                         : qsTr("Apply changes")
                                     highlighted: true
+                                    // GParted-style: gate on structural applicability, NOT the full
+                                    // installable-layout rule (root/ESP) which gates navigation.
                                     enabled: pendingOperations.length > 0
-                                        && engine.manualPlanValid && !engine.partitionApplying
+                                        && engine.operationsApplicable && !engine.partitionApplying
                                     onClicked: engine.applyPartitionOperations()
                                 }
                             }

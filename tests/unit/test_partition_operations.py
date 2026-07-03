@@ -27,6 +27,7 @@ from omnis.jobs.partition import (
     PartitionOperation,
     simulate_operations,
     validate_operations,
+    validate_operations_applicable,
 )
 
 MIB = 1024 * 1024
@@ -450,6 +451,78 @@ class TestValidateOperations:
             valid, error = validate_operations(disk, ops, uefi=True)
         assert valid is False
         assert "usable sector" in error
+
+
+class TestValidateOperationsApplicable:
+    """GParted-style applicability: structural only, no root/ESP requirement."""
+
+    def _no_busy(self) -> Any:
+        return patch("omnis.jobs.partition._is_target_busy", return_value=False)
+
+    def test_delete_root_is_applicable_but_not_installable(self) -> None:
+        # The user scenario: deleting the root leaves no '/'. The plan is not a
+        # complete installable layout, but the delete itself is applicable.
+        disk = _existing_disk()
+        ops = [
+            PartitionOperation.from_dict(
+                {"type": "delete", "target": "/dev/sda2", "params": {"number": 2}}
+            )
+        ]
+        with self._no_busy():
+            applicable, app_err = validate_operations_applicable(disk, ops)
+            valid, val_err = validate_operations(disk, ops, uefi=True)
+        assert applicable is True
+        assert app_err == ""
+        assert valid is False
+        assert "mounted at /" in val_err
+
+    def test_wipe_all_partitions_is_applicable(self) -> None:
+        # Deleting every partition (empty disk) is a legitimate GParted apply.
+        disk = _existing_disk()
+        ops = [
+            PartitionOperation.from_dict(
+                {"type": "delete", "target": "/dev/sda1", "params": {"number": 1}}
+            ),
+            PartitionOperation.from_dict(
+                {"type": "delete", "target": "/dev/sda2", "params": {"number": 2}}
+            ),
+        ]
+        with self._no_busy():
+            applicable, app_err = validate_operations_applicable(disk, ops)
+        assert applicable is True
+        assert app_err == ""
+
+    def test_applicable_rejects_overlap(self) -> None:
+        disk = _existing_disk()
+        ops = [
+            PartitionOperation.from_dict(
+                {
+                    "type": "create",
+                    "target": "free:2048",
+                    "params": {
+                        "start_sector": disk["segments"][1]["startSector"],
+                        "size_sectors": _sectors(10 * 1024),
+                        "fstype": "ext4",
+                    },
+                }
+            )
+        ]
+        with self._no_busy():
+            applicable, error = validate_operations_applicable(disk, ops)
+        assert applicable is False
+        assert "overlap" in error
+
+    def test_applicable_rejects_busy_target(self) -> None:
+        disk = _existing_disk()
+        ops = [
+            PartitionOperation.from_dict(
+                {"type": "delete", "target": "/dev/sda2", "params": {"number": 2}}
+            )
+        ]
+        with patch("omnis.jobs.partition._is_target_busy", return_value=True):
+            applicable, error = validate_operations_applicable(disk, ops)
+        assert applicable is False
+        assert "mounted or backs the live system" in error
 
 
 class TestApplyOperationsExecution:
