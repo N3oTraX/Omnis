@@ -1269,8 +1269,8 @@ Item {
 
                         Text {
                             width: parent.width
-                            text: qsTr("Click a segment on the bar below, then choose an action. "
-                                + "Changes are queued and applied only after confirmation.")
+                            text: qsTr("Click a segment on the bar below, choose an action and "
+                                + "Add to queue, then click Apply changes to write them to the disk.")
                             font.pixelSize: 13
                             color: textMutedColor
                             wrapMode: Text.WordWrap
@@ -1400,6 +1400,71 @@ Item {
                             font.pixelSize: 13
                             color: textMutedColor
                             wrapMode: Text.WordWrap
+                        }
+
+                        // ---- Apply bar (always visible; GParted-style live apply) ----
+                        Rectangle {
+                            width: parent.width
+                            visible: simulatedSegments.length > 0
+                            implicitHeight: applyBarRow.implicitHeight + 20
+                            height: implicitHeight
+                            radius: 10
+                            color: Qt.rgba(0, 0, 0, 0.18)
+
+                            RowLayout {
+                                id: applyBarRow
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.margins: 12
+                                spacing: 12
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.WordWrap
+                                    font.pixelSize: 13
+                                    color: pendingOperations.length === 0 ? textMutedColor : textColor
+                                    text: pendingOperations.length === 0
+                                        ? qsTr("No pending operation yet — select a segment and Add to queue.")
+                                        : qsTr("%1 operation(s) queued").replace("%1", pendingOperations.length)
+                                }
+
+                                Button {
+                                    text: qsTr("Reset")
+                                    enabled: pendingOperations.length > 0 && !engine.partitionApplying
+                                    onClicked: resetOperations()
+                                }
+
+                                Button {
+                                    text: engine.partitionApplying
+                                        ? qsTr("Applying…")
+                                        : qsTr("Apply changes")
+                                    highlighted: true
+                                    enabled: pendingOperations.length > 0
+                                        && engine.manualPlanValid && !engine.partitionApplying
+                                    onClicked: engine.applyPartitionOperations()
+                                }
+                            }
+                        }
+
+                        // Live-apply result feedback (GParted-style apply).
+                        Text {
+                            id: applyResultText
+                            width: parent.width
+                            visible: text.length > 0
+                            wrapMode: Text.WordWrap
+                            font.pixelSize: 12
+                            property bool ok: false
+                            color: ok ? successColor : errorColor
+                        }
+
+                        Connections {
+                            target: engine
+                            function onPartitionApplyFinished(success, message) {
+                                applyResultText.ok = success
+                                applyResultText.text = (success
+                                    ? qsTr("Applied. ") : qsTr("Apply failed: ")) + message
+                            }
                         }
 
                         // ---- Selection summary ----
@@ -2051,49 +2116,13 @@ Item {
 
                             Row {
                                 spacing: 10
-                                visible: pendingOperations.length > 0
-
-                                Button {
-                                    text: engine.partitionApplying
-                                        ? qsTr("Applying…")
-                                        : qsTr("Apply changes")
-                                    highlighted: true
-                                    enabled: engine.manualPlanValid && !engine.partitionApplying
-                                    onClicked: engine.applyPartitionOperations()
-                                }
-
-                                Button {
-                                    text: qsTr("Reset")
-                                    enabled: !engine.partitionApplying
-                                    onClicked: resetOperations()
-                                }
+                                visible: commandPreview.length > 0
 
                                 Button {
                                     text: commandPreviewColumn.expanded
                                         ? qsTr("Hide command preview")
                                         : qsTr("Show command preview")
-                                    visible: commandPreview.length > 0
                                     onClicked: commandPreviewColumn.expanded = !commandPreviewColumn.expanded
-                                }
-                            }
-
-                            // Live-apply result feedback (GParted-style apply).
-                            Text {
-                                id: applyResultText
-                                width: parent.width
-                                visible: text.length > 0
-                                wrapMode: Text.WordWrap
-                                font.pixelSize: 12
-                                property bool ok: false
-                                color: ok ? successColor : errorColor
-                            }
-
-                            Connections {
-                                target: engine
-                                function onPartitionApplyFinished(success, message) {
-                                    applyResultText.ok = success
-                                    applyResultText.text = (success
-                                        ? qsTr("Applied. ") : qsTr("Apply failed: ")) + message
                                 }
                             }
 
