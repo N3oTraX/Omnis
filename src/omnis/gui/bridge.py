@@ -6,6 +6,7 @@ Exposes engine functionality to QML via Qt properties and signals.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -2176,22 +2177,33 @@ class EngineBridge(QObject):
         """The ordered list of pending operation dicts (contract shape)."""
         return self._partition_operations
 
-    @Slot("QVariant")
-    def addPartitionOperation(self, op: Any) -> None:
+    @Slot(str)
+    def addPartitionOperation(self, op_json: str) -> None:
         """
-        Append an operation, then revalidate and recompute the simulation.
+        Append an operation received as a JSON string from QML.
 
-        ``op`` is the serializable contract dict coming from QML. Malformed
-        operations are rejected (surfaced through manualPlanError) rather than
-        raising into the QML layer.
+        The operation is passed as JSON (``JSON.stringify`` in QML) rather than
+        a plain QML object because a JS object does NOT marshal reliably to a
+        QVariant slot across PySide6 versions — the slot would silently never be
+        invoked, leaving the queue empty. Malformed / invalid operations are
+        rejected (surfaced through manualPlanError) rather than raising.
         """
-        op_dict = dict(op) if isinstance(op, dict) else op
+        op_dict: Any = op_json
+        if isinstance(op_json, str):
+            try:
+                op_dict = json.loads(op_json)
+            except (ValueError, TypeError) as exc:
+                self._manual_ops_valid = False
+                self._manual_ops_error = f"Malformed operation payload: {exc}"
+                self.partitionOperationsChanged.emit()
+                return
         try:
-            # Validate the shape eagerly; keep the raw dict for round-tripping.
             PartitionOperation.from_dict(op_dict)
         except ValueError as exc:
             self._manual_ops_valid = False
             self._manual_ops_error = str(exc)
+            if self._debug:
+                print(f"[Engine] REJECTED partition op ({exc}): {op_dict!r}")
             self.partitionOperationsChanged.emit()
             return
         self._partition_operations.append(op_dict)

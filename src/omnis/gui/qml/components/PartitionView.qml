@@ -155,7 +155,9 @@ Item {
     // Safe wrappers around the (parallel) backend slots. No-op if absent so the
     // offscreen harness and pre-integration runs never throw.
     function addOperation(op) {
-        if (engine.addPartitionOperation) engine.addPartitionOperation(op)
+        // Pass as JSON: a plain QML object does not marshal reliably to the
+        // QVariant slot across PySide6 versions (the slot would never fire).
+        if (engine.addPartitionOperation) engine.addPartitionOperation(JSON.stringify(op))
         activeForm = ""
     }
     function removeOperation(index) {
