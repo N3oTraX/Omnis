@@ -16,7 +16,7 @@ High-level sequence (executed on an already-mounted ``target_root``):
 2. Run ``nixos-generate-config --root <target>`` to produce
    ``hardware-configuration.nix``.
 3. Write ``configuration.nix`` and copy the GLF flake files
-   (``flake.nix``, ``flake.lock``, ``customConfig``) into
+   (``flake.nix``, ``flake.lock``, ``customConfig``, ``customized.nix``) into
    ``<target>/etc/nixos`` while PRESERVING the generated
    ``hardware-configuration.nix``.
 4. Inject ``boot.initrd.luks.devices`` when the root partition is encrypted.
@@ -701,9 +701,13 @@ class NixosJob(BaseJob):
                     error_code=ERR_WRITE_CONFIG,
                 )
 
-        # Copy GLF flake files, preserving hardware-configuration.nix.
+        # Copy GLF flake files, preserving hardware-configuration.nix. The GLF
+        # target flake (iso-cfg/flake.nix) imports ./configuration.nix (written
+        # above), ./customized.nix (glf-customizer managed) and
+        # glf.nixosModules.default, so customized.nix must be copied too or the
+        # flake fails to evaluate at nixos-install time.
         flake_source = Path(self._flake_source())
-        for item in ("flake.nix", "flake.lock", "customConfig"):
+        for item in ("flake.nix", "flake.lock", "customConfig", "customized.nix"):
             src = flake_source / item
             dest = etc_nixos / item
             result = self._run_command(

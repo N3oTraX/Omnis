@@ -410,6 +410,9 @@ class TestInstallSequence:
         assert "flake.nix" in copied
         assert "flake.lock" in copied
         assert "customConfig" in copied
+        # customized.nix (glf-customizer managed) is imported by the target
+        # flake, so it must be copied alongside the others.
+        assert "customized.nix" in copied
         # hardware-configuration.nix is NEVER copied over (it is preserved).
         assert "hardware-configuration.nix" not in copied
 
