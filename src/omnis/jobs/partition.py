@@ -466,6 +466,15 @@ def validate_operations(
     if not ok:
         return ok, reason
 
+    # GLF OS boots with systemd-boot (UEFI). The bios_grub flag sets up a BIOS
+    # boot partition for GRUB, which GLF no longer supports and would yield an
+    # unbootable system -> refuse the plan with an explicit message.
+    if _plan_sets_bios_grub(operations):
+        return False, (
+            "The 'bios_grub' flag is not supported: GLF OS installs with "
+            "systemd-boot (UEFI), not GRUB. Remove it to continue."
+        )
+
     simulated = simulate_operations(disk_geom.get("segments", []), operations)
     parts = [s for s in simulated if s["kind"] != "free" and not s["pendingDelete"]]
 
@@ -561,6 +570,21 @@ def _parted_flag(flag: str) -> str | None:
     """
     token = flag.strip().lower()
     return token if token in _PARTED_FLAGS else None
+
+
+def _plan_sets_bios_grub(operations: list[PartitionOperation]) -> bool:
+    """True if any operation activates the ``bios_grub`` flag (GRUB, unsupported)."""
+    for op in operations:
+        if (
+            op.type == "setflag"
+            and str(op.params.get("flag", "")).lower() == "bios_grub"
+            and op.params.get("state")
+        ):
+            return True
+        flags = op.params.get("flags") or []
+        if any(str(f).lower() == "bios_grub" for f in flags):
+            return True
+    return False
 
 
 class PartitionMode(Enum):

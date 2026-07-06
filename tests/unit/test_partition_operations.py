@@ -369,6 +369,46 @@ class TestValidateOperations:
         assert valid is False
         assert "mounted at /" in error
 
+    def test_rejects_bios_grub_setflag(self) -> None:
+        # GLF OS is systemd-boot only: a bios_grub flag must block the install.
+        disk = _existing_disk()
+        ops = [
+            PartitionOperation.from_dict(
+                {
+                    "type": "setflag",
+                    "target": "/dev/sda1",
+                    "params": {"number": 1, "flag": "bios_grub", "state": True},
+                }
+            )
+        ]
+        with self._no_busy():
+            valid, error = validate_operations(disk, ops, uefi=True)
+        assert valid is False
+        assert "bios_grub" in error
+        assert "systemd-boot" in error
+
+    def test_rejects_bios_grub_on_create(self) -> None:
+        disk = _existing_disk()
+        start = disk["segments"][1]["startSector"] + disk["segments"][1]["sizeSectors"]
+        ops = [
+            PartitionOperation.from_dict(
+                {
+                    "type": "create",
+                    "target": f"free:{start}",
+                    "params": {
+                        "start_sector": start,
+                        "size_sectors": _sectors(10),
+                        "fstype": "ext4",
+                        "flags": ["bios_grub"],
+                    },
+                }
+            )
+        ]
+        with self._no_busy():
+            valid, error = validate_operations(disk, ops, uefi=True)
+        assert valid is False
+        assert "bios_grub" in error
+
     def test_rejects_missing_esp_uefi(self) -> None:
         # A disk with only a root and no ESP must fail under UEFI.
         root_start = _ALIGN
