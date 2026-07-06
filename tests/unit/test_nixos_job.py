@@ -23,6 +23,7 @@ try:
         ERR_HASH_FAILED,
         ERR_NOT_CONFIRMED,
         NixosJob,
+        _NixProgress,
     )
 
     HAS_NIXOS_JOB = True
@@ -384,12 +385,21 @@ class TestInstallSequence:
             calls.append(cmd)
             return MagicMock(returncode=0, stdout="", stderr="")
 
-        # Patch subprocess.run (command execution) and the config/flake writing
-        # filesystem ops so nothing touches the real disk. The stateVersion
-        # query is stubbed so ``calls`` contains only the install sequence.
+        def fake_popen(cmd: list[str], **_kwargs: Any) -> MagicMock:
+            # nixos-install is streamed via Popen; record it in the same log.
+            calls.append(cmd)
+            proc = MagicMock()
+            proc.stdout = iter([])
+            proc.wait.return_value = 0
+            return proc
+
+        # Patch subprocess.run/Popen (command execution) and the config/flake
+        # writing filesystem ops so nothing touches the real disk. The
+        # stateVersion query is stubbed so ``calls`` is only the install sequence.
         with (
             patch.object(job, "_detect_state_version", return_value="25.11"),
             patch("omnis.jobs.nixos.subprocess.run", side_effect=fake_run),
+            patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
             patch("omnis.jobs.nixos.Path.is_dir", return_value=True),
             patch("omnis.jobs.nixos.Path.exists", return_value=True),
             patch("omnis.jobs.nixos.Path.mkdir"),
@@ -484,8 +494,16 @@ class TestSecurityGuards:
     def test_real_run_allowed_with_confirmed(self) -> None:
         """dry_run=False AND confirmed=True proceeds to run commands."""
         job = NixosJob()
+
+        def fake_popen(_cmd: list[str], **_kwargs: Any) -> MagicMock:
+            proc = MagicMock()
+            proc.stdout = iter([])  # nixos-install emits no output in the stub
+            proc.wait.return_value = 0
+            return proc
+
         with (
             patch("omnis.jobs.nixos.subprocess.run") as mock_run,
+            patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
             patch("omnis.jobs.nixos.Path.is_dir", return_value=True),
             patch("omnis.jobs.nixos.Path.exists", return_value=True),
             patch("omnis.jobs.nixos.Path.mkdir"),
@@ -614,3 +632,50 @@ def test_result_is_jobresult() -> None:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         result = job.run(_context(dry_run=True))
     assert isinstance(result, JobResult)
+
+
+class TestNixProgress:
+    """Parse real nix internal-json events into a monotonic 0..1 fraction."""
+
+    @staticmethod
+    def _build(id_: int, done: int, expected: int) -> str:
+        return f'@nix {{"action":"result","fields":[{done},{expected},0,0],"id":{id_},"type":105}}'
+
+    def test_ignores_non_nix_and_malformed_lines(self) -> None:
+        p = _NixProgress()
+        assert p.feed("copying path '/nix/store/x'") is None
+        assert p.feed("@nix not-json") is None
+        assert p.feed('@nix {"action":"msg","level":3,"msg":"building:"}') is None
+
+    def test_builds_and_copies_are_aggregated(self) -> None:
+        p = _NixProgress()
+        # Builds activity opens and reports progress (only activities that have
+        # a resProgress contribute to 'expected').
+        p.feed('@nix {"action":"start","id":1,"type":104}')
+        assert p.feed(self._build(1, 2, 10)) == 0.2  # 2/10 built
+        assert p.feed(self._build(1, 6, 10)) == 0.6  # 6/10 built
+        assert "6/10 built" in p.message()
+        # copyPaths joins in: 6 built + 10 copied over (10 + 10) = 16/20 = 0.8.
+        p.feed('@nix {"action":"start","id":2,"type":103}')
+        assert p.feed(self._build(2, 10, 10)) == 0.8
+        assert "10/10 copied" in p.message()
+
+    def test_ignores_per_byte_file_transfer_results(self) -> None:
+        p = _NixProgress()
+        p.feed('@nix {"action":"start","id":1,"type":104}')
+        p.feed(self._build(1, 1, 4))
+        # A file-transfer (type 101) progress result for an unregistered id must
+        # not perturb the fraction (its id was never a build/copy activity).
+        before = p._fraction
+        assert p.feed('@nix {"action":"result","fields":[84,84,0,0],"id":99,"type":105}') is None
+        assert p._fraction == before
+
+    def test_fraction_is_monotonic(self) -> None:
+        p = _NixProgress()
+        p.feed('@nix {"action":"start","id":1,"type":104}')
+        assert p.feed(self._build(1, 8, 10)) == 0.8
+        # A newly discovered activity enlarges 'expected'; the fraction would dip
+        # but must not move backwards.
+        p.feed('@nix {"action":"start","id":2,"type":103}')
+        assert p.feed(self._build(2, 0, 10)) is None
+        assert p._fraction == 0.8

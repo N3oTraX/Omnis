@@ -35,7 +35,9 @@ mounted target). It honours the same guard-rails as the partition job:
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -168,6 +170,79 @@ ERR_INSTALL = 67
 ERR_COMMAND_FAILED = 68
 ERR_TOOL_NOT_FOUND = 69
 ERR_HASH_FAILED = 70
+
+
+class _NixProgress:
+    """Turn ``nix --log-format internal-json`` events into a 0..1 fraction.
+
+    nix emits ``@nix {...}`` activity events; two of them meter the heavy work
+    of an install (verified against nix's own output):
+
+    - ``start`` with ``type == 104`` (ActBuilds) and ``type == 103``
+      (ActCopyPaths) open the aggregate build/copy activities.
+    - ``result`` with ``type == 105`` (resProgress) carries
+      ``fields = [done, expected, running, failed]`` for that activity.
+
+    We sum done/expected across those two activities (unit = store paths) and
+    ignore per-byte file-transfer results (``type == 101``). The fraction is
+    monotonic so the bar never moves backwards when nix discovers more work.
+    """
+
+    _ACT_COPY_PATHS = 103
+    _ACT_BUILDS = 104
+    _RES_PROGRESS = 105
+
+    def __init__(self) -> None:
+        self._kind: dict[int, str] = {}  # activity id -> "build" | "copy"
+        self._done: dict[int, int] = {}
+        self._expected: dict[int, int] = {}
+        self._fraction = 0.0
+
+    def feed(self, line: str) -> float | None:
+        """Consume one output line; return the current fraction if it advanced."""
+        if not line.startswith("@nix "):
+            return None
+        try:
+            event = json.loads(line[5:])
+        except ValueError:
+            return None
+        action = event.get("action")
+        if action == "start":
+            act_type = event.get("type")
+            if act_type == self._ACT_BUILDS:
+                self._kind[event.get("id")] = "build"
+            elif act_type == self._ACT_COPY_PATHS:
+                self._kind[event.get("id")] = "copy"
+        elif action == "result" and event.get("type") == self._RES_PROGRESS:
+            rid = event.get("id")
+            if rid in self._kind:
+                fields = event.get("fields") or []
+                self._done[rid] = int(fields[0]) if len(fields) > 0 else 0
+                self._expected[rid] = int(fields[1]) if len(fields) > 1 else 0
+        expected = sum(self._expected.values())
+        if expected <= 0:
+            return None
+        fraction = min(1.0, sum(self._done.values()) / expected)
+        if fraction <= self._fraction:
+            return None
+        self._fraction = fraction
+        return fraction
+
+    def _totals(self, kind: str) -> tuple[int, int]:
+        done = sum(v for i, v in self._done.items() if self._kind.get(i) == kind)
+        exp = sum(v for i, v in self._expected.items() if self._kind.get(i) == kind)
+        return done, exp
+
+    def message(self) -> str:
+        """Human summary, e.g. ``Installing NixOS: 12/345 built, 67/89 copied``."""
+        parts = []
+        b_done, b_exp = self._totals("build")
+        if b_exp:
+            parts.append(f"{b_done}/{b_exp} built")
+        c_done, c_exp = self._totals("copy")
+        if c_exp:
+            parts.append(f"{c_done}/{c_exp} copied")
+        return "Installing NixOS: " + ", ".join(parts) if parts else "Installing NixOS..."
 
 
 @dataclass(frozen=True)
@@ -629,9 +704,11 @@ class NixosJob(BaseJob):
             if not result.success:
                 return result
 
-            # Step 4: nixos-install against the GLF flake attribute.
+            # Step 4: nixos-install against the GLF flake attribute. Streamed so
+            # the bar advances through the build/download (60..98 %) instead of
+            # freezing; see _run_install_streamed / _NixProgress.
             context.report_progress(60, "Installing NixOS (this can take a while)...")
-            result = self._nixos_install(target_root, dry_run)
+            result = self._nixos_install(target_root, dry_run, context)
             if not result.success:
                 return result
 
@@ -721,7 +798,9 @@ class NixosJob(BaseJob):
 
         return JobResult.ok("Configuration written and flake copied")
 
-    def _nixos_install(self, target_root: str, dry_run: bool) -> JobResult:
+    def _nixos_install(
+        self, target_root: str, dry_run: bool, context: JobContext | None = None
+    ) -> JobResult:
         """
         Run ``nixos-install`` against the GLF flake attribute.
 
@@ -732,6 +811,9 @@ class NixosJob(BaseJob):
                 --option build-users-group "" \
                 --flake <target>/etc/nixos#GLF-OS \
                 --root <target>
+
+        Streamed so the progress bar advances during the (long) build/download
+        instead of freezing: see :meth:`_run_install_streamed`.
         """
         flake_ref = f"{target_root}/etc/nixos#{self._flake_attr()}"
         cmd = [
@@ -748,12 +830,63 @@ class NixosJob(BaseJob):
             "--root",
             target_root,
         ]
-        return self._run_command(
-            cmd,
-            description="Running nixos-install",
-            dry_run=dry_run,
-            error_code=ERR_INSTALL,
-        )
+        return self._run_install_streamed(cmd, "Running nixos-install", dry_run, context)
+
+    def _run_install_streamed(
+        self,
+        cmd: list[str],
+        description: str,
+        dry_run: bool,
+        context: JobContext | None,
+    ) -> JobResult:
+        """
+        Run nixos-install streaming its output, driving the progress bar.
+
+        Every child ``nix`` is asked to speak ``internal-json`` (via NIX_CONFIG)
+        so :class:`_NixProgress` can turn build/copy counts into a live fraction,
+        mapped into the 60..98 % band. Degrades gracefully to no movement (but
+        no freeze/crash) if no progress events are emitted.
+        """
+        if dry_run:
+            logger.info("[DRY-RUN] %s: %s", description, " ".join(cmd))
+            return JobResult.ok(f"[DRY-RUN] {description}")
+
+        env = dict(os.environ)
+        extra = "log-format = internal-json"
+        env["NIX_CONFIG"] = f"{env['NIX_CONFIG']}\n{extra}" if env.get("NIX_CONFIG") else extra
+
+        logger.info("Executing: %s", description)
+        logger.debug("Command: %s", " ".join(cmd))
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                env=env,
+            )
+        except FileNotFoundError:
+            logger.error("Command not found: %s", cmd[0])
+            return JobResult.fail(f"Required tool not found: {cmd[0]}", error_code=ERR_TOOL_NOT_FOUND)
+
+        progress = _NixProgress()
+        assert proc.stdout is not None
+        for raw in proc.stdout:
+            line = raw.rstrip("\n")
+            fraction = progress.feed(line)
+            if fraction is not None and context is not None:
+                pct = 60 + round(38 * fraction)
+                context.report_progress(min(98, pct), progress.message())
+            elif not line.startswith("@nix "):
+                logger.debug("nixos-install: %s", line)
+
+        code = proc.wait()
+        if code != 0:
+            logger.error("FAILED: %s (exit %s)", description, code)
+            return JobResult.fail(f"{description} failed (exit code {code})", error_code=ERR_INSTALL)
+        logger.info("OK: %s", description)
+        return JobResult.ok(description)
 
     def _run_command(
         self,
