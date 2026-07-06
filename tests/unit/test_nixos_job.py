@@ -128,11 +128,14 @@ class TestConfigurationGeneration:
         assert "boot.loader.systemd-boot.enable = true;" in cfg
         assert "boot.loader.efi.canTouchEfiVariables = true;" in cfg
 
-    def test_bios_bootloader_when_requested(self) -> None:
+    def test_always_systemd_boot_never_grub(self) -> None:
+        # GLF OS boots with systemd-boot only; GRUB/BIOS is not supported, so the
+        # config is always systemd-boot regardless of any firmware hint.
         job = NixosJob()
-        cfg = job._build_configuration(_context(firmware_type="bios", disk="/dev/sdb"))
-        assert "boot.loader.grub.enable = true;" in cfg
-        assert 'boot.loader.grub.device = "/dev/sdb";' in cfg
+        with patch.object(job, "_gpu_config", return_value=""):
+            cfg = job._build_configuration(_context(firmware_type="bios", disk="/dev/sdb"))
+        assert "boot.loader.systemd-boot.enable = true;" in cfg
+        assert "grub" not in cfg
 
     def test_user_and_groups(self) -> None:
         job = NixosJob()
@@ -366,10 +369,11 @@ class TestInstallSequence:
     def test_dry_run_executes_no_real_command(self) -> None:
         """dry_run=True must never issue a real install command."""
         job = NixosJob()
-        # The benign, read-only stateVersion query is stubbed so the assertion
-        # targets the destructive install sequence only.
+        # The benign, read-only stateVersion + GPU (lspci) queries are stubbed so
+        # the assertion targets the destructive install sequence only.
         with (
             patch.object(job, "_detect_state_version", return_value="25.11"),
+            patch.object(job, "_gpu_config", return_value=""),
             patch("omnis.jobs.nixos.subprocess.run") as mock_run,
         ):
             result = job.run(_context(dry_run=True))
@@ -398,6 +402,7 @@ class TestInstallSequence:
         # stateVersion query is stubbed so ``calls`` is only the install sequence.
         with (
             patch.object(job, "_detect_state_version", return_value="25.11"),
+            patch.object(job, "_gpu_config", return_value=""),
             patch("omnis.jobs.nixos.subprocess.run", side_effect=fake_run),
             patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
             patch("omnis.jobs.nixos.Path.is_dir", return_value=True),
@@ -469,6 +474,7 @@ class TestSecurityGuards:
         job = NixosJob()
         with (
             patch.object(job, "_detect_state_version", return_value="25.11"),
+            patch.object(job, "_gpu_config", return_value=""),
             patch("omnis.jobs.nixos.subprocess.run") as mock_run,
         ):
             # No dry_run/confirmed keys at all.

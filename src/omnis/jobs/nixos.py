@@ -44,6 +44,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from omnis.jobs import gpu_config
 from omnis.jobs.base import BaseJob, JobContext, JobResult
 
 logger = logging.getLogger(__name__)
@@ -376,14 +377,13 @@ class NixosJob(BaseJob):
         edition = self._map_edition(str(s.get("edition", "standard")))
         cfg += CFG_ENVIRONMENT.format(environment=environment, edition=edition)
 
-        # Bootloader: EFI (systemd-boot) is the GLF OS default. BIOS/GRUB is
-        # emitted only when explicitly requested via ``firmware_type``.
-        firmware = str(s.get("firmware_type", "efi")).lower()
-        if firmware == "bios":
-            bootdev = str(s.get("disk", "nodev")) or "nodev"
-            cfg += CFG_BOOT_BIOS.format(bootdev=bootdev)
-        else:
-            cfg += CFG_BOOT_EFI
+        # GPU: classify detected hardware and inject glf.{nvidia,amdgpu,intel}
+        # options (multi-vendor, PRIME) exactly like the Calamares nixos module.
+        cfg += self._gpu_config()
+
+        # Bootloader: GLF OS boots with systemd-boot (UEFI). GRUB/BIOS is not
+        # supported; installs are gated to EFI upstream (see validate()).
+        cfg += CFG_BOOT_EFI
 
         # LUKS device injection (before network, matching Calamares ordering
         # where luks devices are appended to cfg as they are discovered).
@@ -439,6 +439,23 @@ class NixosJob(BaseJob):
         # Tail (stateVersion).
         cfg += CFG_TAIL.format(nixos_version=self._detect_state_version())
         return cfg
+
+    @staticmethod
+    def _gpu_config() -> str:
+        """
+        Return the GPU ``configuration.nix`` snippet for the live hardware.
+
+        Runs ``lspci`` and delegates to :mod:`omnis.jobs.gpu_config`. Never
+        raises: on a missing ``lspci`` or an unreadable bus it returns an empty
+        string and the flake defaults apply (same behaviour as Calamares).
+        """
+        try:
+            proc = subprocess.run(["lspci"], capture_output=True, text=True, check=False)
+        except (FileNotFoundError, OSError) as exc:
+            logger.warning("lspci unavailable, skipping GPU config: %s", exc)
+            return ""
+        output = proc.stdout if isinstance(proc.stdout, str) else ""
+        return gpu_config.render(output)
 
     def _luks_config(self, context: JobContext) -> str:
         """
