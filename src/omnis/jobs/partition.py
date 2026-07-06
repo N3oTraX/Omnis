@@ -544,6 +544,25 @@ def _parted_fstype(fstype: str) -> str:
     return _PARTED_FSTYPE.get(fstype.lower(), fstype.lower())
 
 
+# parted `set` flags relevant to a Linux installer, using parted's own generic
+# names. 'bios_grub' (BIOS boot partition for GRUB on GPT) was previously
+# missing, and 'boot' used to be silently rewritten to 'esp'.
+_PARTED_FLAGS = frozenset(
+    {"esp", "boot", "bios_grub", "swap", "raid", "lvm", "legacy_boot", "hidden", "msftres", "diag"}
+)
+
+
+def _parted_flag(flag: str) -> str | None:
+    """Return the parted ``set`` flag token if supported, else None.
+
+    Passes the generic parted name through unchanged (no more silent boot->esp
+    remap) and rejects unknown tokens so they never reach parted, which errors
+    on an unknown flag and would abort the whole apply.
+    """
+    token = flag.strip().lower()
+    return token if token in _PARTED_FLAGS else None
+
+
 class PartitionMode(Enum):
     """Partitioning mode selection."""
 
@@ -1305,11 +1324,13 @@ class PartitionJob(BaseJob):
         if not result.success:
             return result
 
-        # Flags requested at creation time (esp/boot map to parted 'esp').
+        # Flags requested at creation time, using parted's generic names.
         flags = params.get("flags", [])
         number = self._next_partition_number(disk, op)
         for flag in flags:
-            parted_flag = "esp" if flag in ("esp", "boot") else str(flag)
+            parted_flag = _parted_flag(str(flag))
+            if parted_flag is None:
+                continue
             result = self._run_partitioning_command(
                 ["parted", "-s", disk, "set", str(number), parted_flag, "on"],
                 description=f"Setting {parted_flag} flag on partition {number}",
@@ -1355,11 +1376,12 @@ class PartitionJob(BaseJob):
         )
 
     def _op_setflag(self, disk: str, op: PartitionOperation, dry_run: bool) -> JobResult:
-        """Toggle a partition flag (esp/boot/swap) via parted."""
+        """Toggle a partition flag (esp/boot/bios_grub/swap/raid/lvm) via parted."""
         number = int(op.params["number"])
-        flag = str(op.params["flag"])
+        parted_flag = _parted_flag(str(op.params["flag"]))
+        if parted_flag is None:
+            return JobResult.ok(f"Ignored unsupported flag: {op.params['flag']}")
         state = "on" if op.params.get("state") else "off"
-        parted_flag = "esp" if flag in ("esp", "boot") else flag
         return self._run_partitioning_command(
             ["parted", "-s", disk, "set", str(number), parted_flag, state],
             description=f"Setting {parted_flag} {state} on partition {number}",

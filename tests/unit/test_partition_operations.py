@@ -597,6 +597,53 @@ class TestApplyOperationsExecution:
         assert "swap" not in mkpart  # exact token check, not the substring
         assert ["mkswap", "/dev/sda9"] in calls
 
+    def test_create_flags_pass_generic_parted_names(self) -> None:
+        # Both flags reach parted under their own generic names (no boot->esp
+        # collapse); bios_grub is now supported.
+        calls = self._apply(
+            [
+                {
+                    "type": "create",
+                    "target": "free:2048",
+                    "params": {
+                        "start_sector": 2048,
+                        "size_sectors": _sectors(512),
+                        "fstype": "ext4",
+                        "path": "/dev/sda9",
+                        "number": 9,
+                        "flags": ["esp", "bios_grub"],
+                    },
+                }
+            ]
+        )
+        assert ["parted", "-s", "/dev/sda", "set", "9", "esp", "on"] in calls
+        assert ["parted", "-s", "/dev/sda", "set", "9", "bios_grub", "on"] in calls
+
+    def test_setflag_boot_is_not_remapped_to_esp(self) -> None:
+        calls = self._apply(
+            [
+                {
+                    "type": "setflag",
+                    "target": "/dev/sda1",
+                    "params": {"number": 1, "flag": "boot", "state": True},
+                }
+            ]
+        )
+        assert ["parted", "-s", "/dev/sda", "set", "1", "boot", "on"] in calls
+        assert not any(c[-2:] == ["esp", "on"] for c in calls)
+
+    def test_setflag_unknown_flag_is_ignored(self) -> None:
+        calls = self._apply(
+            [
+                {
+                    "type": "setflag",
+                    "target": "/dev/sda1",
+                    "params": {"number": 1, "flag": "bogus", "state": True},
+                }
+            ]
+        )
+        assert not any("set" in c for c in calls)  # never reaches parted
+
     def test_global_order_delete_shrink_grow_create_format_setflag(self) -> None:
         operations = [
             {
@@ -729,8 +776,8 @@ class TestApplyOperationsExecution:
                 }
             ]
         )
-        # boot maps to parted 'esp'.
-        assert ["parted", "-s", "/dev/sda", "set", "1", "esp", "on"] in calls_on
+        # 'boot' keeps its generic parted name (no longer remapped to 'esp').
+        assert ["parted", "-s", "/dev/sda", "set", "1", "boot", "on"] in calls_on
 
         calls_off = self._apply(
             [

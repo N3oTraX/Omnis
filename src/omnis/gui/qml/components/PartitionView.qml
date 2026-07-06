@@ -181,6 +181,10 @@ Item {
     // Which contextual form is open: "" | "create" | "resize" | "format" | "flags"
     property string activeForm: ""
 
+    // Partition flags offered by the editor, using parted's generic names.
+    // (esp = EFI System Partition, bios_grub = BIOS boot partition for GRUB.)
+    readonly property var partFlags: ["esp", "boot", "bios_grub", "swap", "raid", "lvm"]
+
     // Clear the selection/forms when the disk or simulated layout changes.
     onSelectedDiskChanged: { selectedSegmentIndex = -1; activeForm = "" }
     onSimulatedSegmentsChanged: { selectedSegmentIndex = -1; activeForm = "" }
@@ -1798,6 +1802,17 @@ Item {
                                                     leftPadding: createBootFlag.indicator.width + createBootFlag.spacing
                                                 }
                                             }
+                                            CheckBox {
+                                                id: createBiosGrubFlag
+                                                text: "bios_grub"
+                                                contentItem: Text {
+                                                    text: createBiosGrubFlag.text
+                                                    color: textColor
+                                                    font.pixelSize: 13
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    leftPadding: createBiosGrubFlag.indicator.width + createBiosGrubFlag.spacing
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1813,6 +1828,7 @@ Item {
                                             var flags = []
                                             if (createEspFlag.checked) flags.push("esp")
                                             if (createBootFlag.checked) flags.push("boot")
+                                            if (createBiosGrubFlag.checked) flags.push("bios_grub")
                                             var mp = createMountCombo.currentIndex === 0
                                                 ? "" : createMountCombo.currentText
                                             addOperation({
@@ -2085,10 +2101,12 @@ Item {
                                     color: textColor
                                 }
 
-                                Row {
-                                    spacing: 12
+                                Grid {
+                                    columns: partFlags.length
+                                    columnSpacing: 8
+                                    rowSpacing: 8
                                     Repeater {
-                                        model: ["esp", "boot"]
+                                        model: partFlags
                                         Button {
                                             required property string modelData
                                             text: qsTr("Set") + " " + modelData
@@ -2106,7 +2124,7 @@ Item {
                                         }
                                     }
                                     Repeater {
-                                        model: ["esp", "boot"]
+                                        model: partFlags
                                         Button {
                                             required property string modelData
                                             text: qsTr("Clear") + " " + modelData
