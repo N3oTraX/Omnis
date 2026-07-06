@@ -1093,3 +1093,28 @@ class TestPathAndNumberResolution:
             }
         )
         assert job._resolve_partition_number("/dev/sdb", 100, op, dry_run=True) == 7
+
+    @staticmethod
+    def _capture(job: PartitionJob) -> list[list[str]]:
+        calls: list[list[str]] = []
+
+        def rec(cmd: list[str], description: str, dry_run: bool) -> JobResult:  # noqa: ARG001
+            calls.append(list(cmd))
+            return JobResult.ok(description)
+
+        job._run_partitioning_command = rec  # type: ignore[method-assign]
+        return calls
+
+    def test_ensure_gpt_label_when_missing(self) -> None:
+        job = PartitionJob()
+        calls = self._capture(job)
+        with patch.object(job, "_disk_has_label", return_value=False):
+            job._ensure_partition_table("/dev/sdb", dry_run=False)
+        assert ["parted", "-s", "/dev/sdb", "mklabel", "gpt"] in calls
+
+    def test_ensure_gpt_label_skipped_when_present(self) -> None:
+        job = PartitionJob()
+        calls = self._capture(job)
+        with patch.object(job, "_disk_has_label", return_value=True):
+            job._ensure_partition_table("/dev/sdb", dry_run=False)
+        assert calls == []

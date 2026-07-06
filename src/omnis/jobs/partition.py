@@ -1220,6 +1220,11 @@ class PartitionJob(BaseJob):
         formats = [op for op in operations if op.type == "format"]
         setflags = [op for op in operations if op.type == "setflag"]
 
+        if creates:
+            result = self._ensure_partition_table(disk, dry_run)
+            if not result.success:
+                return result
+
         groups: list[tuple[list[PartitionOperation], bool]] = [
             (deletes, True),
             (shrinks, True),
@@ -1363,6 +1368,28 @@ class PartitionJob(BaseJob):
             return JobResult.fail(f"Unsupported filesystem for {path}: {fstype}", error_code=51)
         return self._run_partitioning_command(
             mkfs, description=f"Formatting {path} ({fstype})", dry_run=dry_run
+        )
+
+    def _disk_has_label(self, disk: str) -> bool:
+        """True si le disque a une table de partitions (sinon mkpart echoue)."""
+        if self._disk_partition_starts(disk):
+            return True
+        try:
+            rc = subprocess.run(
+                ["parted", "-s", disk, "print"], capture_output=True, text=True, check=False
+            ).returncode
+        except OSError:
+            return True
+        return rc == 0
+
+    def _ensure_partition_table(self, disk: str, dry_run: bool) -> JobResult:
+        """Cree une etiquette GPT si le disque n'en a aucune."""
+        if dry_run or self._disk_has_label(disk):
+            return JobResult.ok("Partition table present")
+        return self._run_partitioning_command(
+            ["parted", "-s", disk, "mklabel", "gpt"],
+            description=f"Creating GPT label on {disk}",
+            dry_run=dry_run,
         )
 
     def _disk_partition_starts(self, disk: str) -> dict[int, int]:
