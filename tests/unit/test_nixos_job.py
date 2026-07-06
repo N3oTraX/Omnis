@@ -206,6 +206,13 @@ class TestLuksInjection:
         )
         assert 'boot.initrd.luks.devices."glfroot".device = "/dev/nvme0n1p2";' in cfg
 
+    def test_luks_omitted_when_root_partition_unknown(self) -> None:
+        # Safety: without a resolved RAW partition we must NOT emit a device (the
+        # /dev/mapper alias is the decrypted device and would break boot).
+        job = NixosJob()
+        cfg = job._build_configuration(_context(encryption=True, root_partition=""))
+        assert "boot.initrd.luks.devices" not in cfg
+
 
 # =============================================================================
 # Declarative password hashing (hashedPassword)
@@ -731,3 +738,44 @@ class TestHardenTarget:
         assert result.success is True
         assert captured["env"].get("TMPDIR") == "/secure/tmp"
         assert "internal-json" in captured["env"].get("NIX_CONFIG", "")
+
+
+class TestNetworkConfigCopy:
+    """Carry over the live NetworkManager connections (Wi-Fi + wired)."""
+
+    def test_noop_when_no_source(self) -> None:
+        job = NixosJob()
+        with (
+            patch("omnis.jobs.nixos.Path.is_dir", return_value=False),
+            patch("omnis.jobs.nixos.Path.mkdir") as mk,
+        ):
+            job._copy_network_config("/mnt/target", dry_run=False)
+        mk.assert_not_called()
+
+    def test_dry_run_copies_nothing(self) -> None:
+        job = NixosJob()
+        with (
+            patch("omnis.jobs.nixos.Path.is_dir", return_value=True),
+            patch("omnis.jobs.nixos.Path.mkdir") as mk,
+        ):
+            job._copy_network_config("/mnt/target", dry_run=True)
+        mk.assert_not_called()
+
+    def test_copies_nmconnection_files_secured(self) -> None:
+        job = NixosJob()
+        conn = MagicMock()
+        conn.name = "MyWifi.nmconnection"
+        conn.read_bytes.return_value = b"[wifi]\npsk=secret\n"
+        with (
+            patch("omnis.jobs.nixos.Path.is_dir", return_value=True),
+            patch("omnis.jobs.nixos.Path.mkdir"),
+            patch("omnis.jobs.nixos.Path.glob", return_value=[conn]),
+            patch("omnis.jobs.nixos.Path.write_bytes") as write_bytes,
+            patch("omnis.jobs.nixos.os.chmod") as chmod,
+            patch("omnis.jobs.nixos.os.chown") as chown,
+        ):
+            job._copy_network_config("/mnt/target", dry_run=False)
+        write_bytes.assert_called_once_with(b"[wifi]\npsk=secret\n")
+        # The copied secret is locked down (root:root, 0600).
+        assert any(call.args[1] == 0o600 for call in chmod.call_args_list)
+        assert chown.call_args_list and chown.call_args_list[-1].args[1:] == (0, 0)

@@ -476,11 +476,18 @@ class NixosJob(BaseJob):
             return ""
 
         mapper = str(s.get("luks_mapper_name", self._luks_mapper_name))
-        # The raw partition that was LUKS-formatted. Prefer an explicit value
-        # provided by the partition job; fall back to the well-known layout.
+        # The RAW partition that was LUKS-formatted (e.g. /dev/sda2), resolved by
+        # the partition job and propagated into selections by the engine. Never
+        # emit the /dev/mapper alias here: that is the *decrypted* device, not
+        # the LUKS container, and would leave the system unbootable.
         root_part = str(s.get("root_partition", "") or "")
-        device = root_part or f"/dev/mapper/{mapper}"
-        return f'  boot.initrd.luks.devices."{mapper}".device = "{device}";\n\n'
+        if not root_part:
+            logger.warning(
+                "Encryption enabled but root_partition is unknown; leaving LUKS "
+                "detection to nixos-generate-config."
+            )
+            return ""
+        return f'  boot.initrd.luks.devices."{mapper}".device = "{root_part}";\n\n'
 
     # -------------------------------------------------------------------------
     # Password hashing (declarative NixOS approach)
@@ -721,6 +728,12 @@ class NixosJob(BaseJob):
             if not result.success:
                 return result
 
+            # Step 3a: carry over the live NetworkManager connections (Wi-Fi AND
+            # wired) so the user does not re-enter the Wi-Fi password after the
+            # first reboot.
+            context.report_progress(50, "Copying network configuration...")
+            self._copy_network_config(target_root, dry_run)
+
             # Step 3b: secure the Nix build dir hierarchy (avoids the
             # world-writable-parent failures nixos-install otherwise hits).
             context.report_progress(55, "Securing Nix build directories...")
@@ -819,6 +832,39 @@ class NixosJob(BaseJob):
                 return result
 
         return JobResult.ok("Configuration written and flake copied")
+
+    def _copy_network_config(self, target_root: str, dry_run: bool) -> None:
+        """
+        Copy the live NetworkManager connections (Wi-Fi + wired) to the target.
+
+        NetworkManager stores every connection (Wi-Fi PSKs, wired, VPN) as a
+        ``*.nmconnection`` keyfile under ``/etc/NetworkManager/system-connections``.
+        Copying them (root:root, 0600, secrets preserved) means the installed
+        system reconnects automatically without re-entering the Wi-Fi password.
+        Best-effort: any failure is logged, never fatal.
+        """
+        src = Path("/etc/NetworkManager/system-connections")
+        if not src.is_dir():
+            return
+        dest = Path(target_root) / "etc/NetworkManager/system-connections"
+        if dry_run:
+            logger.info("[DRY-RUN] would copy NetworkManager connections to %s", dest)
+            return
+        try:
+            dest.mkdir(parents=True, exist_ok=True)
+            os.chmod(dest, 0o700)
+        except OSError as exc:
+            logger.warning("Could not prepare %s: %s", dest, exc)
+            return
+        for conn in sorted(src.glob("*.nmconnection")):
+            try:
+                target = dest / conn.name
+                target.write_bytes(conn.read_bytes())
+                os.chmod(target, 0o600)
+                os.chown(target, 0, 0)
+                logger.info("Copied NetworkManager connection: %s", conn.name)
+            except OSError as exc:
+                logger.warning("Could not copy %s: %s", conn.name, exc)
 
     def _harden_target(self, target_root: str, dry_run: bool) -> str:
         """

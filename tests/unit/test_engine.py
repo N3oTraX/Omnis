@@ -206,3 +206,44 @@ jobs: []
         assert colors.error == "#070809"
         assert colors.background_light == "#0A0B0C"
         assert colors.text_on_primary == "#0D0E0F"
+
+
+class TestLayoutPropagation:
+    """A job's computed layout is forwarded into the shared selections."""
+
+    def test_partition_layout_reaches_later_jobs(self, tmp_path: Path) -> None:
+        from omnis.jobs.base import BaseJob, JobContext, JobResult
+
+        class _PartJob(BaseJob):
+            name = "part"
+            description = "part"
+
+            def run(self, _context: JobContext) -> JobResult:
+                return JobResult.ok(
+                    "ok", data={"layout": {"root": "/dev/sda2", "efi": "/dev/sda1"}}
+                )
+
+            def estimate_duration(self) -> int:
+                return 1
+
+        seen: dict[str, str] = {}
+
+        class _NixJob(BaseJob):
+            name = "nix"
+            description = "nix"
+
+            def run(self, context: JobContext) -> JobResult:
+                seen["root"] = str(context.selections.get("root_partition", ""))
+                seen["efi"] = str(context.selections.get("efi_partition", ""))
+                return JobResult.ok("ok")
+
+            def estimate_duration(self) -> int:
+                return 1
+
+        config_file = tmp_path / "c.yaml"
+        config_file.write_text('version: "1.0"\nbranding:\n  name: "T"\njobs: []\n')
+        engine = Engine.from_config_file(config_file)
+        engine.jobs = [_PartJob(), _NixJob()]
+
+        assert engine.run_all() is True
+        assert seen == {"root": "/dev/sda2", "efi": "/dev/sda1"}

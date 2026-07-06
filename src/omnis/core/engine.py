@@ -434,6 +434,19 @@ class Engine:
                 self.state.is_running = False
                 return False
 
+            # Propagate a job's computed layout into the shared selections so
+            # later jobs can read it (e.g. the nixos LUKS device needs the raw
+            # root partition path resolved by the partition job).
+            layout = result.data.get("layout")
+            if isinstance(layout, dict):
+                for src_key, dst_key in (
+                    ("root", "root_partition"),
+                    ("efi", "efi_partition"),
+                    ("swap", "swap_partition"),
+                ):
+                    if layout.get(src_key):
+                        context.selections[dst_key] = str(layout[src_key])
+
         self.state.is_running = False
         self.state.is_finished = True
         return True
