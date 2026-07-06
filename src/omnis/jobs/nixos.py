@@ -721,11 +721,16 @@ class NixosJob(BaseJob):
             if not result.success:
                 return result
 
+            # Step 3b: secure the Nix build dir hierarchy (avoids the
+            # world-writable-parent failures nixos-install otherwise hits).
+            context.report_progress(55, "Securing Nix build directories...")
+            secure_tmpdir = self._harden_target(target_root, dry_run)
+
             # Step 4: nixos-install against the GLF flake attribute. Streamed so
             # the bar advances through the build/download (60..98 %) instead of
             # freezing; see _run_install_streamed / _NixProgress.
             context.report_progress(60, "Installing NixOS (this can take a while)...")
-            result = self._nixos_install(target_root, dry_run, context)
+            result = self._nixos_install(target_root, dry_run, context, secure_tmpdir)
             if not result.success:
                 return result
 
@@ -815,8 +820,45 @@ class NixosJob(BaseJob):
 
         return JobResult.ok("Configuration written and flake copied")
 
+    def _harden_target(self, target_root: str, dry_run: bool) -> str:
+        """
+        Create and secure the Nix build directories before nixos-install.
+
+        nixos-install refuses to build when a parent of the store is
+        world-writable ("suspicious ownership or permission"). Mirrors the
+        Calamares nixos module: force root:root + sane modes on the target root,
+        a dedicated TMPDIR and the ``nix/var/nix/{builds,db,profiles}``
+        hierarchy. Returns the secure TMPDIR to hand to nixos-install.
+        """
+        secure_tmpdir = os.path.join(target_root, "var/tmp/nix-installer")
+        if dry_run:
+            logger.info("[DRY-RUN] would secure Nix build dirs under %s", target_root)
+            return secure_tmpdir
+        entries = [
+            (target_root, 0o755),
+            (secure_tmpdir, 0o700),
+            (os.path.join(target_root, "nix"), 0o755),
+            (os.path.join(target_root, "nix/var"), 0o755),
+            (os.path.join(target_root, "nix/var/nix"), 0o755),
+            (os.path.join(target_root, "nix/var/nix/builds"), 0o755),
+            (os.path.join(target_root, "nix/var/nix/db"), 0o755),
+            (os.path.join(target_root, "nix/var/nix/profiles"), 0o755),
+        ]
+        for path, mode in entries:
+            try:
+                os.makedirs(path, exist_ok=True)
+                os.chmod(path, mode)
+                os.chown(path, 0, 0)
+            except OSError as exc:
+                logger.warning("Could not secure %s: %s", path, exc)
+        return secure_tmpdir
+
     def _nixos_install(
-        self, target_root: str, dry_run: bool, context: JobContext | None = None
+        self,
+        target_root: str,
+        dry_run: bool,
+        context: JobContext | None = None,
+        tmpdir: str | None = None,
     ) -> JobResult:
         """
         Run ``nixos-install`` against the GLF flake attribute.
@@ -847,7 +889,7 @@ class NixosJob(BaseJob):
             "--root",
             target_root,
         ]
-        return self._run_install_streamed(cmd, "Running nixos-install", dry_run, context)
+        return self._run_install_streamed(cmd, "Running nixos-install", dry_run, context, tmpdir)
 
     def _run_install_streamed(
         self,
@@ -855,6 +897,7 @@ class NixosJob(BaseJob):
         description: str,
         dry_run: bool,
         context: JobContext | None,
+        tmpdir: str | None = None,
     ) -> JobResult:
         """
         Run nixos-install streaming its output, driving the progress bar.
@@ -862,7 +905,9 @@ class NixosJob(BaseJob):
         Every child ``nix`` is asked to speak ``internal-json`` (via NIX_CONFIG)
         so :class:`_NixProgress` can turn build/copy counts into a live fraction,
         mapped into the 60..98 % band. Degrades gracefully to no movement (but
-        no freeze/crash) if no progress events are emitted.
+        no freeze/crash) if no progress events are emitted. ``tmpdir`` (when
+        given) is exported as ``TMPDIR`` so nix builds land in the secured
+        directory prepared by :meth:`_harden_target`.
         """
         if dry_run:
             logger.info("[DRY-RUN] %s: %s", description, " ".join(cmd))
@@ -871,6 +916,8 @@ class NixosJob(BaseJob):
         env = dict(os.environ)
         extra = "log-format = internal-json"
         env["NIX_CONFIG"] = f"{env['NIX_CONFIG']}\n{extra}" if env.get("NIX_CONFIG") else extra
+        if tmpdir:
+            env["TMPDIR"] = tmpdir
 
         logger.info("Executing: %s", description)
         logger.debug("Command: %s", " ".join(cmd))

@@ -403,6 +403,7 @@ class TestInstallSequence:
         with (
             patch.object(job, "_detect_state_version", return_value="25.11"),
             patch.object(job, "_gpu_config", return_value=""),
+            patch.object(job, "_harden_target", return_value="/mnt/target/var/tmp/nix-installer"),
             patch("omnis.jobs.nixos.subprocess.run", side_effect=fake_run),
             patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
             patch("omnis.jobs.nixos.Path.is_dir", return_value=True),
@@ -508,6 +509,7 @@ class TestSecurityGuards:
             return proc
 
         with (
+            patch.object(job, "_harden_target", return_value="/mnt/target/var/tmp/nix-installer"),
             patch("omnis.jobs.nixos.subprocess.run") as mock_run,
             patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
             patch("omnis.jobs.nixos.Path.is_dir", return_value=True),
@@ -685,3 +687,47 @@ class TestNixProgress:
         p.feed('@nix {"action":"start","id":2,"type":103}')
         assert p.feed(self._build(2, 0, 10)) is None
         assert p._fraction == 0.8
+
+
+class TestHardenTarget:
+    """Securing the Nix build-dir hierarchy before nixos-install."""
+
+    def test_dry_run_returns_path_without_touching_fs(self) -> None:
+        job = NixosJob()
+        with patch("omnis.jobs.nixos.os.makedirs") as mk:
+            path = job._harden_target("/mnt/target", dry_run=True)
+        assert path == "/mnt/target/var/tmp/nix-installer"
+        mk.assert_not_called()
+
+    def test_creates_and_secures_nix_dirs(self) -> None:
+        job = NixosJob()
+        with (
+            patch("omnis.jobs.nixos.os.makedirs") as mk,
+            patch("omnis.jobs.nixos.os.chmod") as chm,
+            patch("omnis.jobs.nixos.os.chown") as cho,
+        ):
+            path = job._harden_target("/mnt/target", dry_run=False)
+        made = {c.args[0] for c in mk.call_args_list}
+        assert "/mnt/target/nix/var/nix/builds" in made
+        assert "/mnt/target/nix/var/nix/db" in made
+        assert "/mnt/target/nix/var/nix/profiles" in made
+        assert path in made  # the secure TMPDIR is created too
+        assert all(c.args[1:] == (0, 0) for c in cho.call_args_list)  # root:root
+        assert chm.called
+
+    def test_tmpdir_and_json_reach_the_install_env(self) -> None:
+        job = NixosJob()
+        captured: dict[str, Any] = {}
+
+        def fake_popen(_cmd: list[str], **kwargs: Any) -> MagicMock:
+            captured["env"] = kwargs.get("env", {})
+            proc = MagicMock()
+            proc.stdout = iter([])
+            proc.wait.return_value = 0
+            return proc
+
+        with patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen):
+            result = job._nixos_install("/mnt/target", dry_run=False, tmpdir="/secure/tmp")
+        assert result.success is True
+        assert captured["env"].get("TMPDIR") == "/secure/tmp"
+        assert "internal-json" in captured["env"].get("NIX_CONFIG", "")
