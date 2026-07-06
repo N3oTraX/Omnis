@@ -25,6 +25,7 @@ from omnis.jobs.partition import (
     _SECTOR_SIZE,
     PartitionJob,
     PartitionOperation,
+    _dev_path,
     simulate_operations,
     validate_operations,
     validate_operations_applicable,
@@ -1028,3 +1029,67 @@ class TestConstants:
         assert _ALIGN == 2048
         assert _GPT_TAIL == 34
         assert _SECTOR_SIZE == 512
+
+
+class TestPathAndNumberResolution:
+    def test_dev_path_normalizes_bare_name(self) -> None:
+        assert _dev_path("sdb3") == "/dev/sdb3"
+        assert _dev_path("/dev/sdb3") == "/dev/sdb3"
+        assert _dev_path("  sdb1 ") == "/dev/sdb1"
+        assert _dev_path("") == ""
+
+    def test_format_uses_dev_path(self) -> None:
+        job = PartitionJob()
+        calls: list[list[str]] = []
+
+        def rec(cmd: list[str], description: str, dry_run: bool) -> JobResult:  # noqa: ARG001
+            calls.append(list(cmd))
+            return JobResult.ok(description)
+
+        job._run_partitioning_command = rec  # type: ignore[method-assign]
+        op = PartitionOperation.from_dict(
+            {"type": "format", "target": "sdb3", "params": {"path": "sdb3", "fstype": "ext4"}}
+        )
+        job._op_format(op, dry_run=False)
+        assert ["mkfs.ext4", "-F", "/dev/sdb3"] in calls
+
+    def test_resolve_number_by_start_sector(self) -> None:
+        job = PartitionJob()
+        op = PartitionOperation.from_dict(
+            {
+                "type": "create",
+                "target": "free:2101248",
+                "params": {"start_sector": 2101248, "size_sectors": 1000, "fstype": "ext4"},
+            }
+        )
+        with patch.object(job, "_disk_partition_starts", return_value={2048: 1, 2101248: 2}):
+            assert job._resolve_partition_number("/dev/sdb", 2101248, op, dry_run=False) == 2
+
+    def test_resolve_number_nearest_within_align(self) -> None:
+        # parted may nudge the start a few sectors for alignment.
+        job = PartitionJob()
+        op = PartitionOperation.from_dict(
+            {
+                "type": "create",
+                "target": "free:2101248",
+                "params": {"start_sector": 2101248, "size_sectors": 1000, "fstype": "ext4"},
+            }
+        )
+        with patch.object(job, "_disk_partition_starts", return_value={2048: 1, 2101250: 2}):
+            assert job._resolve_partition_number("/dev/sdb", 2101248, op, dry_run=False) == 2
+
+    def test_resolve_number_explicit_wins(self) -> None:
+        job = PartitionJob()
+        op = PartitionOperation.from_dict(
+            {
+                "type": "create",
+                "target": "free:x",
+                "params": {
+                    "start_sector": 100,
+                    "size_sectors": 10,
+                    "fstype": "ext4",
+                    "number": 7,
+                },
+            }
+        )
+        assert job._resolve_partition_number("/dev/sdb", 100, op, dry_run=True) == 7

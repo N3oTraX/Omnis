@@ -1655,7 +1655,14 @@ Item {
                             property int sizeMib: Math.max(1, freeMib)
                             // Default to the whole free region whenever the form (re)opens or
                             // the target free segment changes.
-                            onVisibleChanged: if (visible) sizeMib = Math.max(1, freeMib)
+                            onVisibleChanged: if (visible) {
+                                sizeMib = Math.max(1, freeMib)
+                                createEspFlag.checked = false
+                                createBootFlag.checked = false
+                                createBiosGrubFlag.checked = false
+                                createMountCombo.currentIndex = 0
+                                createFsCombo.currentIndex = 0
+                            }
                             onFreeMibChanged: sizeMib = Math.max(1, freeMib)
                             onSizeMibChanged: {
                                 if (Math.round(createSizeSlider.value) !== sizeMib)

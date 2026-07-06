@@ -46,6 +46,12 @@ def part_path(disk: str, n: int) -> str:
     return f"{disk}{sep}{n}"
 
 
+def _dev_path(p: str) -> str:
+    """Normalise un chemin de partition vers /dev/ (accepte un nom nu comme 'sdb3')."""
+    p = p.strip()
+    return p if not p or p.startswith("/dev/") else f"/dev/{p}"
+
+
 def _detect_ram_mb() -> int:
     """
     Detect total RAM in MiB from ``/proc/meminfo``.
@@ -1334,7 +1340,7 @@ class PartitionJob(BaseJob):
 
         # Flags requested at creation time, using parted's generic names.
         flags = params.get("flags", [])
-        number = self._next_partition_number(disk, op)
+        number = self._resolve_partition_number(disk, start, op, dry_run)
         for flag in flags:
             parted_flag = _parted_flag(str(flag))
             if parted_flag is None:
@@ -1351,13 +1357,55 @@ class PartitionJob(BaseJob):
         if not settle.success:
             return settle
 
-        path = str(params.get("path") or part_path(disk, number))
+        path = _dev_path(str(params.get("path") or part_path(disk, number)))
         mkfs = self._mkfs_command(fstype, path)
         if mkfs is None:
             return JobResult.fail(f"Unsupported filesystem for {path}: {fstype}", error_code=51)
         return self._run_partitioning_command(
             mkfs, description=f"Formatting {path} ({fstype})", dry_run=dry_run
         )
+
+    def _disk_partition_starts(self, disk: str) -> dict[int, int]:
+        """Map secteur_de_depart -> numero, lu depuis `parted print` (vide si erreur)."""
+        try:
+            out = (
+                subprocess.run(
+                    ["parted", "-s", disk, "unit", "s", "print"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).stdout
+                or ""
+            )
+        except OSError:
+            return {}
+        mapping: dict[int, int] = {}
+        for line in out.splitlines():
+            toks = line.split()
+            if (
+                len(toks) >= 2
+                and toks[0].isdigit()
+                and toks[1].endswith("s")
+                and toks[1][:-1].isdigit()
+            ):
+                mapping[int(toks[1][:-1])] = int(toks[0])
+        return mapping
+
+    def _resolve_partition_number(
+        self, disk: str, start: int, op: PartitionOperation, dry_run: bool
+    ) -> int:
+        explicit = op.params.get("number")
+        if isinstance(explicit, int) and not isinstance(explicit, bool):
+            return explicit
+        if not dry_run:
+            starts = self._disk_partition_starts(disk)
+            if start in starts:
+                return starts[start]
+            if starts:
+                nearest = min(starts, key=lambda s: abs(s - start))
+                if abs(nearest - start) <= _ALIGN:
+                    return starts[nearest]
+        return self._next_partition_number(disk, op)
 
     @staticmethod
     def _next_partition_number(disk: str, op: PartitionOperation) -> int:
@@ -1374,7 +1422,7 @@ class PartitionJob(BaseJob):
 
     def _op_format(self, op: PartitionOperation, dry_run: bool) -> JobResult:
         """Format an existing partition (mkfs) without touching the table."""
-        path = str(op.params["path"])
+        path = _dev_path(str(op.params["path"]))
         fstype = str(op.params["fstype"])
         mkfs = self._mkfs_command(fstype, path)
         if mkfs is None:
@@ -1405,7 +1453,7 @@ class PartitionJob(BaseJob):
         ``parted resizepart``. NTFS is out of scope for M2c and refused cleanly.
         """
         params = op.params
-        path = str(params["path"])
+        path = _dev_path(str(params["path"]))
         number = int(params["number"])
         fstype = str(params["fstype"]).lower()
         new_size = int(params["new_size_sectors"])
