@@ -174,33 +174,19 @@ ERR_HASH_FAILED = 70
 
 
 class _NixProgress:
-    """Turn ``nix --log-format internal-json`` events into a 0..1 fraction.
-
-    nix emits ``@nix {...}`` activity events; two of them meter the heavy work
-    of an install (verified against nix's own output):
-
-    - ``start`` with ``type == 104`` (ActBuilds) and ``type == 103``
-      (ActCopyPaths) open the aggregate build/copy activities.
-    - ``result`` with ``type == 105`` (resProgress) carries
-      ``fields = [done, expected, running, failed]`` for that activity.
-
-    We sum done/expected across those two activities (unit = store paths) and
-    ignore per-byte file-transfer results (``type == 101``). The fraction is
-    monotonic so the bar never moves backwards when nix discovers more work.
-    """
+    """Fraction 0..1 depuis les events nix internal-json (builds type 104 + copyPaths 103)."""
 
     _ACT_COPY_PATHS = 103
     _ACT_BUILDS = 104
     _RES_PROGRESS = 105
 
     def __init__(self) -> None:
-        self._kind: dict[int, str] = {}  # activity id -> "build" | "copy"
+        self._kind: dict[int, str] = {}
         self._done: dict[int, int] = {}
         self._expected: dict[int, int] = {}
         self._fraction = 0.0
 
     def feed(self, line: str) -> float | None:
-        """Consume one output line; return the current fraction if it advanced."""
         if not line.startswith("@nix "):
             return None
         try:
@@ -235,7 +221,6 @@ class _NixProgress:
         return done, exp
 
     def message(self) -> str:
-        """Human summary, e.g. ``Installing NixOS: 12/345 built, 67/89 copied``."""
         parts = []
         b_done, b_exp = self._totals("build")
         if b_exp:
@@ -376,13 +361,7 @@ class NixosJob(BaseJob):
         environment = self._map_environment(str(s.get("desktop_environment", "gnome")))
         edition = self._map_edition(str(s.get("edition", "standard")))
         cfg += CFG_ENVIRONMENT.format(environment=environment, edition=edition)
-
-        # GPU: classify detected hardware and inject glf.{nvidia,amdgpu,intel}
-        # options (multi-vendor, PRIME) exactly like the Calamares nixos module.
         cfg += self._gpu_config()
-
-        # Bootloader: GLF OS boots with systemd-boot (UEFI). GRUB/BIOS is not
-        # supported; installs are gated to EFI upstream (see validate()).
         cfg += CFG_BOOT_EFI
 
         # LUKS device injection (before network, matching Calamares ordering
@@ -442,13 +421,7 @@ class NixosJob(BaseJob):
 
     @staticmethod
     def _gpu_config() -> str:
-        """
-        Return the GPU ``configuration.nix`` snippet for the live hardware.
-
-        Runs ``lspci`` and delegates to :mod:`omnis.jobs.gpu_config`. Never
-        raises: on a missing ``lspci`` or an unreadable bus it returns an empty
-        string and the flake defaults apply (same behaviour as Calamares).
-        """
+        """Snippet GPU configuration.nix via lspci (vide si lspci absent)."""
         try:
             proc = subprocess.run(["lspci"], capture_output=True, text=True, check=False)
         except (FileNotFoundError, OSError) as exc:
@@ -476,16 +449,10 @@ class NixosJob(BaseJob):
             return ""
 
         mapper = str(s.get("luks_mapper_name", self._luks_mapper_name))
-        # The RAW partition that was LUKS-formatted (e.g. /dev/sda2), resolved by
-        # the partition job and propagated into selections by the engine. Never
-        # emit the /dev/mapper alias here: that is the *decrypted* device, not
-        # the LUKS container, and would leave the system unbootable.
+        # partition BRUTE, jamais l'alias /dev/mapper (device dechiffre -> non amorcable)
         root_part = str(s.get("root_partition", "") or "")
         if not root_part:
-            logger.warning(
-                "Encryption enabled but root_partition is unknown; leaving LUKS "
-                "detection to nixos-generate-config."
-            )
+            logger.warning("Encryption enabled but root_partition unknown; skipping LUKS block")
             return ""
         return f'  boot.initrd.luks.devices."{mapper}".device = "{root_part}";\n\n'
 
@@ -728,20 +695,12 @@ class NixosJob(BaseJob):
             if not result.success:
                 return result
 
-            # Step 3a: carry over the live NetworkManager connections (Wi-Fi AND
-            # wired) so the user does not re-enter the Wi-Fi password after the
-            # first reboot.
             context.report_progress(50, "Copying network configuration...")
             self._copy_network_config(target_root, dry_run)
 
-            # Step 3b: secure the Nix build dir hierarchy (avoids the
-            # world-writable-parent failures nixos-install otherwise hits).
             context.report_progress(55, "Securing Nix build directories...")
             secure_tmpdir = self._harden_target(target_root, dry_run)
 
-            # Step 4: nixos-install against the GLF flake attribute. Streamed so
-            # the bar advances through the build/download (60..98 %) instead of
-            # freezing; see _run_install_streamed / _NixProgress.
             context.report_progress(60, "Installing NixOS (this can take a while)...")
             result = self._nixos_install(target_root, dry_run, context, secure_tmpdir)
             if not result.success:
@@ -834,15 +793,7 @@ class NixosJob(BaseJob):
         return JobResult.ok("Configuration written and flake copied")
 
     def _copy_network_config(self, target_root: str, dry_run: bool) -> None:
-        """
-        Copy the live NetworkManager connections (Wi-Fi + wired) to the target.
-
-        NetworkManager stores every connection (Wi-Fi PSKs, wired, VPN) as a
-        ``*.nmconnection`` keyfile under ``/etc/NetworkManager/system-connections``.
-        Copying them (root:root, 0600, secrets preserved) means the installed
-        system reconnects automatically without re-entering the Wi-Fi password.
-        Best-effort: any failure is logged, never fatal.
-        """
+        """Recopie les connexions NetworkManager (wifi + filaire) vers la cible."""
         src = Path("/etc/NetworkManager/system-connections")
         if not src.is_dir():
             return
@@ -867,15 +818,7 @@ class NixosJob(BaseJob):
                 logger.warning("Could not copy %s: %s", conn.name, exc)
 
     def _harden_target(self, target_root: str, dry_run: bool) -> str:
-        """
-        Create and secure the Nix build directories before nixos-install.
-
-        nixos-install refuses to build when a parent of the store is
-        world-writable ("suspicious ownership or permission"). Mirrors the
-        Calamares nixos module: force root:root + sane modes on the target root,
-        a dedicated TMPDIR and the ``nix/var/nix/{builds,db,profiles}``
-        hierarchy. Returns the secure TMPDIR to hand to nixos-install.
-        """
+        """Securise les repertoires de build nix (root:root) et renvoie le TMPDIR dedie."""
         secure_tmpdir = os.path.join(target_root, "var/tmp/nix-installer")
         if dry_run:
             logger.info("[DRY-RUN] would secure Nix build dirs under %s", target_root)
@@ -917,8 +860,8 @@ class NixosJob(BaseJob):
                 --flake <target>/etc/nixos#GLF-OS \
                 --root <target>
 
-        Streamed so the progress bar advances during the (long) build/download
-        instead of freezing: see :meth:`_run_install_streamed`.
+        Streame pour faire avancer la barre pendant le build (voir
+        :meth:`_run_install_streamed`).
         """
         flake_ref = f"{target_root}/etc/nixos#{self._flake_attr()}"
         cmd = [
@@ -945,16 +888,7 @@ class NixosJob(BaseJob):
         context: JobContext | None,
         tmpdir: str | None = None,
     ) -> JobResult:
-        """
-        Run nixos-install streaming its output, driving the progress bar.
-
-        Every child ``nix`` is asked to speak ``internal-json`` (via NIX_CONFIG)
-        so :class:`_NixProgress` can turn build/copy counts into a live fraction,
-        mapped into the 60..98 % band. Degrades gracefully to no movement (but
-        no freeze/crash) if no progress events are emitted. ``tmpdir`` (when
-        given) is exported as ``TMPDIR`` so nix builds land in the secured
-        directory prepared by :meth:`_harden_target`.
-        """
+        """Lance nixos-install en streaming (internal-json) et pilote la barre 60..98 %."""
         if dry_run:
             logger.info("[DRY-RUN] %s: %s", description, " ".join(cmd))
             return JobResult.ok(f"[DRY-RUN] {description}")

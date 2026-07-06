@@ -466,9 +466,6 @@ def validate_operations(
     if not ok:
         return ok, reason
 
-    # GLF OS boots with systemd-boot (UEFI). The bios_grub flag sets up a BIOS
-    # boot partition for GRUB, which GLF no longer supports and would yield an
-    # unbootable system -> refuse the plan with an explicit message.
     if _plan_sets_bios_grub(operations):
         return False, (
             "The 'bios_grub' flag is not supported: GLF OS installs with "
@@ -535,9 +532,7 @@ def _validate_esp(parts: list[dict[str, Any]], flags: dict[int, set[str]]) -> tu
     return True, ""
 
 
-# parted's `mkpart` fs-type argument accepts only a fixed vocabulary (it sets the
-# partition type hint; it does NOT format). 'vfat' and 'swap' are rejected -> map
-# them to the tokens parted expects. Unknown values pass through unchanged.
+# parted mkpart n'accepte qu'un vocabulaire fixe pour le fs-type (vfat/swap refuses).
 _PARTED_FSTYPE = {
     "vfat": "fat32",
     "fat": "fat32",
@@ -549,31 +544,20 @@ _PARTED_FSTYPE = {
 
 
 def _parted_fstype(fstype: str) -> str:
-    """Map an Omnis fstype to a parted ``mkpart`` fs-type token."""
     return _PARTED_FSTYPE.get(fstype.lower(), fstype.lower())
 
 
-# parted `set` flags relevant to a Linux installer, using parted's own generic
-# names. 'bios_grub' (BIOS boot partition for GRUB on GPT) was previously
-# missing, and 'boot' used to be silently rewritten to 'esp'.
 _PARTED_FLAGS = frozenset(
     {"esp", "boot", "bios_grub", "swap", "raid", "lvm", "legacy_boot", "hidden", "msftres", "diag"}
 )
 
 
 def _parted_flag(flag: str) -> str | None:
-    """Return the parted ``set`` flag token if supported, else None.
-
-    Passes the generic parted name through unchanged (no more silent boot->esp
-    remap) and rejects unknown tokens so they never reach parted, which errors
-    on an unknown flag and would abort the whole apply.
-    """
     token = flag.strip().lower()
     return token if token in _PARTED_FLAGS else None
 
 
 def _plan_sets_bios_grub(operations: list[PartitionOperation]) -> bool:
-    """True if any operation activates the ``bios_grub`` flag (GRUB, unsupported)."""
     for op in operations:
         if (
             op.type == "setflag"
