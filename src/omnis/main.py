@@ -20,7 +20,7 @@ from omnis import __version__
 from omnis.core.engine import ConfigurationError
 
 if TYPE_CHECKING:
-    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtGui import QGuiApplication, QIcon
 
     from omnis.core.engine import BrandingConfig
 
@@ -199,6 +199,27 @@ def find_qml_file() -> Path:
     raise FileNotFoundError("Main.qml not found. Check installation.")
 
 
+def _resolve_app_icon() -> QIcon:
+    """Locate the Omnis app icon across dev and packaged layouts.
+
+    Dev checkout: ``<repo>/data/icons/org.glfos.omnis.svg``. Packaged builds
+    ship it in the hicolor theme under ``<prefix>/share/icons/...``. Fall back
+    to the icon theme name if no concrete file is found.
+    """
+    from PySide6.QtGui import QIcon
+
+    here = Path(__file__).resolve()
+    name = "org.glfos.omnis.svg"
+    candidates = [here.parents[2] / "data" / "icons" / name]
+    candidates += [
+        p / "share" / "icons" / "hicolor" / "scalable" / "apps" / name for p in here.parents
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return QIcon(str(candidate))
+    return QIcon.fromTheme("org.glfos.omnis")
+
+
 def create_application(branding: BrandingConfig) -> QGuiApplication:
     """Create and configure Qt application."""
     from PySide6.QtGui import QGuiApplication
@@ -209,6 +230,11 @@ def create_application(branding: BrandingConfig) -> QGuiApplication:
     app.setApplicationName(branding.name)
     app.setApplicationVersion(branding.version)
     app.setOrganizationName("Omnis")
+
+    # Wayland associates the window with its .desktop file (app_id) to pick up
+    # the taskbar/dock icon; setWindowIcon covers X11 and other compositors.
+    app.setDesktopFileName("omnis")
+    app.setWindowIcon(_resolve_app_icon())
 
     return app
 

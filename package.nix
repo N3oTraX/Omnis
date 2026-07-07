@@ -53,6 +53,13 @@ python3Packages.buildPythonApplication {
     mkdir -p $out/share/omnis
     cp -r config $out/share/omnis/config
 
+    # App icon (GLF family style) in the hicolor theme so the name
+    # 'org.glfos.omnis' resolves for both the desktop entry and the Wayland
+    # window (via StartupWMClass / QGuiApplication.setDesktopFileName).
+    mkdir -p $out/share/icons/hicolor/scalable/apps
+    cp data/icons/org.glfos.omnis.svg \
+      $out/share/icons/hicolor/scalable/apps/org.glfos.omnis.svg
+
     # Desktop entry so Omnis appears in the application menu (in addition to
     # the live-ISO autostart wired by the glf-os flake). Built with printf to
     # stay independent of Nix indented-string de-indentation.
@@ -66,7 +73,8 @@ python3Packages.buildPythonApplication {
       'Comment=Omnis - modular GLF-OS installer' \
       'Exec=omnis' \
       'TryExec=omnis' \
-      'Icon=system-software-install' \
+      'Icon=org.glfos.omnis' \
+      'StartupWMClass=omnis' \
       'Terminal=false' \
       'Categories=Qt;System;Settings;' \
       > $out/share/applications/omnis.desktop
