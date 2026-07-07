@@ -513,10 +513,18 @@ Item {
 
                         // Log content
                         ScrollView {
+                            id: logScroll
                             width: parent.width
                             height: 300
                             clip: true
                             visible: showLog
+
+                            // Défilement vertical seul : la TextArea est bornée
+                            // en largeur (availableWidth) pour que wrapMode enroule
+                            // le texte au lieu de déborder horizontalement — cause
+                            // de l'illisibilité et du "scroll cassé".
+                            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                            ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
                             opacity: showLog ? 1 : 0
                             Behavior on opacity {
@@ -525,6 +533,7 @@ Item {
 
                             TextArea {
                                 id: logTextArea
+                                width: logScroll.availableWidth
                                 readOnly: true
                                 selectByMouse: true
                                 wrapMode: TextArea.Wrap
@@ -538,9 +547,20 @@ Item {
                                     radius: 8
                                 }
 
-                                // Auto-scroll to bottom
-                                onTextChanged: {
-                                    cursorPosition = text.length
+                                // Auto-suivi du bas UNIQUEMENT si l'utilisateur y
+                                // est déjà : il peut remonter lire les lignes
+                                // précédentes sans être ramené en bas à chaque
+                                // nouvelle ligne (ce qui donnait "ne scroll pas").
+                                property bool pinnedToBottom: true
+                                onTextChanged: if (pinnedToBottom) cursorPosition = length
+                            }
+
+                            // Détecte si l'utilisateur a fait défiler vers le haut.
+                            Connections {
+                                target: logScroll.ScrollBar.vertical
+                                function onPositionChanged() {
+                                    var vbar = logScroll.ScrollBar.vertical
+                                    logTextArea.pinnedToBottom = (vbar.position + vbar.size >= 0.98)
                                 }
                             }
                         }

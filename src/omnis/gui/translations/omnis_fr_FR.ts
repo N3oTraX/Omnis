@@ -87,7 +87,7 @@
     <message>
         <location filename="../qml/components/FinishedView.qml" line="574"/>
         <source>Retry Installation</source>
-        <translation>Réessayer l&apos;installation</translation>
+        <translation>Recommencer l&apos;installation</translation>
     </message>
     <message>
         <location filename="../qml/components/FinishedView.qml" line="618"/>

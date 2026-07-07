@@ -524,6 +524,13 @@ ApplicationWindow {
                 onShutdownClicked: engine.executeFinishAction("shutdown")
                 onContinueClicked: Qt.quit()
                 onViewLogsClicked: fullLogDialog.open()
+                onRetryClicked: {
+                    // Repart d'un état propre : réinitialise le moteur/journal
+                    // puis relance l'installation depuis le début.
+                    engine.resetInstallation()
+                    progressView.logMessages = []
+                    startInstallation()
+                }
 
                 Behavior on opacity {
                     NumberAnimation { duration: 300 }

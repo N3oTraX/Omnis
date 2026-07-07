@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import Property, QObject, QThread, QUrl, Signal, Slot
 
 from omnis.i18n.translator import get_translator
+from omnis.jobs.base import JobStatus
 from omnis.jobs.locale import LocaleJob
 from omnis.jobs.partition import (
     PartitionOperation,
@@ -1597,6 +1598,31 @@ class EngineBridge(QObject):
         """Clean up thread references after completion."""
         self._thread = None
         self._worker = None
+
+    @Slot()
+    def resetInstallation(self) -> None:
+        """Reset installation state so the user can retry after a failure.
+
+        Clears the status/error, resets the engine and per-job state to a clean
+        slate, and empties the captured log so the retry starts fresh. No-op
+        while an installation is still running.
+        """
+        if self._thread is not None and self._thread.isRunning():
+            return
+
+        self._installation_status = "idle"
+        self._error_message = ""
+        self._engine.state.last_error = None
+        self._engine.state.is_running = False
+        self._engine.state.is_finished = False
+        self._engine.state.current_job_index = 0
+        for job in self._engine.jobs:
+            job.status = JobStatus.PENDING
+        self._update_jobs_list()
+        self._log_handler.clear()
+
+        self.progressChanged.emit()
+        self.logChanged.emit()
 
     @Slot(result=int)
     def getCurrentJobIndex(self) -> int:
