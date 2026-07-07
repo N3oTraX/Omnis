@@ -661,6 +661,10 @@ class PartitionJob(BaseJob):
         """Initialize the partition job."""
         super().__init__(config)
         self._layout: PartitionLayout | None = None
+        # True once partitioning has successfully mounted the target. The mounts
+        # are then a deliverable for the downstream nixos job, so cleanup() must
+        # NOT tear them down (see cleanup() for the full rationale).
+        self._succeeded: bool = False
 
     def validate(self, context: JobContext) -> JobResult:
         """
@@ -774,6 +778,8 @@ class PartitionJob(BaseJob):
             JobResult indicating success or failure
         """
         context.report_progress(0, "Starting partitioning job...")
+        # Reset the hand-off flag so a retry starts from a clean slate.
+        self._succeeded = False
 
         # Validate first
         validation = self.validate(context)
@@ -833,6 +839,11 @@ class PartitionJob(BaseJob):
                 return result
 
             context.report_progress(100, "Partitioning complete")
+
+            # Hand off the mounted target to the downstream nixos job: cleanup()
+            # must not unmount it now (that job runs nixos-generate-config /
+            # nixos-install against these mounts and performs the final unmount).
+            self._succeeded = True
 
             return JobResult.ok(
                 f"Disk {disk} partitioned successfully",
@@ -1949,13 +1960,27 @@ class PartitionJob(BaseJob):
 
     def cleanup(self, context: JobContext) -> None:
         """
-        Clean up after partitioning failure.
+        Clean up after a partitioning FAILURE only.
 
-        Attempts to unmount any mounted filesystems.
+        The engine calls ``cleanup()`` after every job (in a ``finally`` block),
+        on success as well as failure. On success the target filesystems must
+        stay mounted: the downstream ``nixos`` job runs ``nixos-generate-config``
+        and ``nixos-install`` against them (and performs the final unmount).
+        Tearing them down here made ``nixos-generate-config --root`` see an empty
+        target, so the generated ``hardware-configuration.nix`` had no
+        ``fileSystems`` and ``nixos-install`` aborted with
+        "The 'fileSystems' option does not specify your root file system".
+
+        We therefore only unmount / close LUKS when partitioning did NOT hand off
+        a mounted target (i.e. it failed).
 
         Args:
             context: Execution context
         """
+        if self._succeeded:
+            # Mounted target handed off to the nixos job; do not tear it down.
+            return
+
         if not self._layout:
             return
 

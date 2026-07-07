@@ -1492,3 +1492,44 @@ class TestManualOperationsIntegration:
         assert result.success is True
         # The M2 path must NOT have been taken.
         mock_apply.assert_not_called()
+
+
+class TestCleanupHandoff:
+    """cleanup() must keep the target mounted on success (hand-off to nixos)."""
+
+    def test_cleanup_skips_unmount_on_success(self) -> None:
+        """On success the mounts are a deliverable for the nixos job: no umount."""
+        job = PartitionJob()
+        job._layout = PartitionLayout(root_partition="/dev/sda2", encrypted=True)
+        job._succeeded = True
+        context = JobContext(target_root="/mnt/target")
+
+        with patch("omnis.jobs.partition.subprocess.run") as mock_run:
+            job.cleanup(context)
+
+        mock_run.assert_not_called()
+
+    def test_cleanup_unmounts_on_failure(self) -> None:
+        """On failure the mounts (and LUKS mapper) are torn down."""
+        job = PartitionJob()
+        job._layout = PartitionLayout(root_partition="/dev/sda2", encrypted=True)
+        job._succeeded = False
+        context = JobContext(target_root="/mnt/target")
+
+        with patch("omnis.jobs.partition.subprocess.run") as mock_run:
+            job.cleanup(context)
+
+        cmds = [call.args[0] for call in mock_run.call_args_list]
+        assert ["umount", "/mnt/target"] in cmds
+        assert any(cmd[:2] == ["cryptsetup", "luksClose"] for cmd in cmds)
+
+    def test_run_resets_succeeded_flag(self) -> None:
+        """A fresh run() clears a stale hand-off flag so retries are safe."""
+        job = PartitionJob()
+        job._succeeded = True
+        # Empty selections → validate() fails fast, before any mounting.
+        context = JobContext(selections={})
+
+        job.run(context)
+
+        assert job._succeeded is False
