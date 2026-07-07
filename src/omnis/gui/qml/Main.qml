@@ -523,6 +523,7 @@ ApplicationWindow {
                 onRebootClicked: engine.executeFinishAction("reboot")
                 onShutdownClicked: engine.executeFinishAction("shutdown")
                 onContinueClicked: Qt.quit()
+                onViewLogsClicked: fullLogDialog.open()
 
                 Behavior on opacity {
                     NumberAnimation { duration: 300 }
@@ -750,6 +751,176 @@ ApplicationWindow {
         onTriggered: {
             console.log("Rechecking internet connectivity...")
             engine.recheckInternetStatus()
+        }
+    }
+
+    // Full installation log dialog (opened from FinishedView "View Full Logs")
+    Dialog {
+        id: fullLogDialog
+
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: parent ? parent.width * 0.9 : 900
+        height: parent ? parent.height * 0.9 : 650
+        modal: true
+        focus: true
+        padding: 20
+        title: qsTr("Installation Logs")
+
+        // Upload state, local to this dialog
+        property bool uploadInProgress: false
+        property string uploadUrl: ""
+        property string uploadError: ""
+
+        background: Rectangle {
+            color: surfaceColor
+            radius: 12
+            border.color: textMutedColor
+            border.width: 1
+        }
+
+        header: Rectangle {
+            color: "transparent"
+            implicitHeight: dialogTitle.implicitHeight + 24
+
+            Text {
+                id: dialogTitle
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: 24
+                text: fullLogDialog.title
+                font.pixelSize: 20
+                font.bold: true
+                color: textColor
+            }
+        }
+
+        onOpened: {
+            uploadUrl = ""
+            uploadError = ""
+            uploadInProgress = false
+        }
+
+        Connections {
+            target: engine
+            function onLogUploadFinished(url, ok, error) {
+                fullLogDialog.uploadInProgress = false
+                if (ok) {
+                    fullLogDialog.uploadUrl = url
+                    fullLogDialog.uploadError = ""
+                } else {
+                    fullLogDialog.uploadUrl = ""
+                    fullLogDialog.uploadError = error
+                }
+            }
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 16
+
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+
+                TextArea {
+                    id: fullLogTextArea
+                    readOnly: true
+                    selectByMouse: true
+                    wrapMode: TextArea.Wrap
+                    font.family: "monospace"
+                    font.pixelSize: 12
+                    color: textColor
+                    text: engine.installationLog
+
+                    background: Rectangle {
+                        color: backgroundColor
+                        radius: 8
+                    }
+                }
+            }
+
+            // Upload result (URL sélectionnable + copie), affiché sous le journal
+            RowLayout {
+                Layout.fillWidth: true
+                visible: fullLogDialog.uploadInProgress || fullLogDialog.uploadUrl.length > 0 || fullLogDialog.uploadError.length > 0
+                spacing: 8
+
+                Text {
+                    visible: fullLogDialog.uploadInProgress
+                    text: qsTr("Sending…")
+                    color: textMutedColor
+                    font.pixelSize: 13
+                }
+
+                TextField {
+                    id: uploadUrlField
+                    Layout.fillWidth: true
+                    visible: !fullLogDialog.uploadInProgress && fullLogDialog.uploadUrl.length > 0
+                    readOnly: true
+                    selectByMouse: true
+                    text: fullLogDialog.uploadUrl
+                    color: textColor
+                    font.pixelSize: 13
+                }
+
+                Button {
+                    text: qsTr("Copy")
+                    visible: !fullLogDialog.uploadInProgress && fullLogDialog.uploadUrl.length > 0
+                    onClicked: {
+                        uploadUrlField.selectAll()
+                        uploadUrlField.copy()
+                        uploadUrlField.deselect()
+                    }
+                }
+
+                Text {
+                    visible: !fullLogDialog.uploadInProgress && fullLogDialog.uploadError.length > 0
+                    text: qsTr("Sending failed: ") + fullLogDialog.uploadError
+                    color: errorColor
+                    font.pixelSize: 13
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+            }
+        }
+
+        footer: Item {
+            implicitHeight: footerRow.implicitHeight + 24
+
+            RowLayout {
+                id: footerRow
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 12
+
+                Button {
+                    text: qsTr("Copy")
+                    onClicked: {
+                        fullLogTextArea.selectAll()
+                        fullLogTextArea.copy()
+                        fullLogTextArea.deselect()
+                    }
+                }
+
+                Button {
+                    text: qsTr("Send Logs")
+                    enabled: !fullLogDialog.uploadInProgress
+                    onClicked: {
+                        fullLogDialog.uploadInProgress = true
+                        fullLogDialog.uploadUrl = ""
+                        fullLogDialog.uploadError = ""
+                        engine.uploadInstallLog()
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Button {
+                    text: qsTr("Close")
+                    onClicked: fullLogDialog.close()
+                }
+            }
         }
     }
 

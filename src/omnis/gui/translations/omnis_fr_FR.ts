@@ -109,6 +109,31 @@
         <source>Powered by Omnis Installer</source>
         <translation>Propulsé par l&apos;installateur Omnis</translation>
     </message>
+    <message>
+        <location filename="../qml/components/FinishedView.qml" line="442"/>
+        <source>Send Logs</source>
+        <translation>Envoyer les logs</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/FinishedView.qml" line="479"/>
+        <source>The log will be sent to a public paste service.</source>
+        <translation>Le journal sera envoyé vers un service de collage public.</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/FinishedView.qml" line="496"/>
+        <source>Sending…</source>
+        <translation>Envoi en cours…</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/FinishedView.qml" line="516"/>
+        <source>Copy</source>
+        <translation>Copier</translation>
+    </message>
+    <message>
+        <location filename="../qml/components/FinishedView.qml" line="527"/>
+        <source>Sending failed: </source>
+        <translation>Échec de l&apos;envoi : </translation>
+    </message>
 </context>
 <context>
     <name>LocaleView</name>
@@ -230,6 +255,37 @@
         <location filename="../qml/Main.qml" line="506"/>
         <source>Install</source>
         <translation>Installer</translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="768"/>
+        <source>Installation Logs</source>
+        <translation>Journaux d&apos;installation</translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="851"/>
+        <source>Sending…</source>
+        <translation>Envoi en cours…</translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="868"/>
+        <location filename="../qml/Main.qml" line="898"/>
+        <source>Copy</source>
+        <translation>Copier</translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="879"/>
+        <source>Sending failed: </source>
+        <translation>Échec de l&apos;envoi : </translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="907"/>
+        <source>Send Logs</source>
+        <translation>Envoyer les logs</translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="920"/>
+        <source>Close</source>
+        <translation>Fermer</translation>
     </message>
 </context>
 <context>

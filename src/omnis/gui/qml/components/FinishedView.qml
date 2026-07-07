@@ -48,6 +48,25 @@ Item {
     property color warningColor: "#F59E0B"
     property color errorColor: "#EF4444"
 
+    // Log upload state (bouton "Send Logs" en état échec)
+    property bool logUploadInProgress: false
+    property string logUploadUrl: ""
+    property string logUploadError: ""
+
+    Connections {
+        target: engine
+        function onLogUploadFinished(url, ok, error) {
+            root.logUploadInProgress = false
+            if (ok) {
+                root.logUploadUrl = url
+                root.logUploadError = ""
+            } else {
+                root.logUploadUrl = ""
+                root.logUploadError = error
+            }
+        }
+    }
+
     // Content container
     Rectangle {
         anchors.fill: parent
@@ -393,27 +412,125 @@ Item {
                             }
                         }
 
-                        Button {
-                            text: qsTr("View Full Logs")
+                        Row {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            height: 36
+                            spacing: 12
 
-                            background: Rectangle {
-                                radius: 8
-                                color: parent.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
-                                border.color: textMutedColor
-                                border.width: 1
+                            Button {
+                                text: qsTr("View Full Logs")
+                                height: 36
+
+                                background: Rectangle {
+                                    radius: 8
+                                    color: parent.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
+                                    border.color: textMutedColor
+                                    border.width: 1
+                                }
+
+                                contentItem: Text {
+                                    text: parent.text
+                                    font.pixelSize: 14
+                                    color: textColor
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+
+                                onClicked: root.viewLogsClicked()
                             }
 
-                            contentItem: Text {
-                                text: parent.text
-                                font.pixelSize: 14
-                                color: textColor
+                            Button {
+                                text: qsTr("Send Logs")
+                                height: 36
+                                enabled: !root.logUploadInProgress
+
+                                background: Rectangle {
+                                    radius: 8
+                                    color: {
+                                        if (!parent.enabled) return Qt.darker(errorColor, 1.4)
+                                        if (parent.pressed) return Qt.darker(errorColor, 1.2)
+                                        if (parent.hovered) return Qt.lighter(errorColor, 1.1)
+                                        return errorColor
+                                    }
+                                    border.color: Qt.lighter(errorColor, 1.3)
+                                    border.width: 1
+                                }
+
+                                contentItem: Text {
+                                    text: parent.text
+                                    font.pixelSize: 14
+                                    color: textColor
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+
+                                onClicked: {
+                                    root.logUploadInProgress = true
+                                    root.logUploadUrl = ""
+                                    root.logUploadError = ""
+                                    engine.uploadInstallLog()
+                                }
+                            }
+                        }
+
+                        // Avertissement discret : le journal part vers un service
+                        // de collage public (pas de stockage local persistant).
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: qsTr("The log will be sent to a public paste service.")
+                            font.pixelSize: 12
+                            font.italic: true
+                            color: textMutedColor
+                            wrapMode: Text.WordWrap
+                            width: 400
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+
+                        // Résultat de l'envoi : en cours, URL sélectionnable + copie, ou erreur
+                        Column {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            spacing: 8
+                            visible: root.logUploadInProgress || root.logUploadUrl.length > 0 || root.logUploadError.length > 0
+
+                            Text {
+                                visible: root.logUploadInProgress
+                                text: qsTr("Sending…")
+                                font.pixelSize: 13
+                                color: textMutedColor
+                            }
+
+                            Row {
+                                visible: !root.logUploadInProgress && root.logUploadUrl.length > 0
+                                spacing: 8
+
+                                TextField {
+                                    id: logUploadUrlField
+                                    width: 320
+                                    readOnly: true
+                                    selectByMouse: true
+                                    text: root.logUploadUrl
+                                    color: textColor
+                                    font.pixelSize: 13
+                                }
+
+                                Button {
+                                    text: qsTr("Copy")
+                                    onClicked: {
+                                        logUploadUrlField.selectAll()
+                                        logUploadUrlField.copy()
+                                        logUploadUrlField.deselect()
+                                    }
+                                }
+                            }
+
+                            Text {
+                                visible: !root.logUploadInProgress && root.logUploadError.length > 0
+                                text: qsTr("Sending failed: ") + root.logUploadError
+                                font.pixelSize: 13
+                                color: errorColor
+                                wrapMode: Text.WordWrap
+                                width: 400
                                 horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
                             }
-
-                            onClicked: root.viewLogsClicked()
                         }
                     }
                 }

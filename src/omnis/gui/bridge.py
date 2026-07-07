@@ -7,6 +7,7 @@ Exposes engine functionality to QML via Qt properties and signals.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 from pathlib import Path
@@ -25,6 +26,7 @@ from omnis.jobs.partition import (
 from omnis.jobs.requirements import SystemRequirementsChecker
 from omnis.utils import disk_detector
 from omnis.utils.locale_detector import LocaleDetectionResult, LocaleDetector
+from omnis.utils.log_capture import BridgeLogHandler, SecretRedactor, resolve_log_path, upload_log
 from omnis.utils.network_helper import NetworkHelper
 
 if TYPE_CHECKING:
@@ -239,6 +241,24 @@ class InstallationWorker(QObject):
         except Exception as e:
             self.error.emit(str(e))
             self.finished.emit(False)
+
+
+class LogUploadWorker(QObject):
+    """Worker that uploads the (already redacted) install log in a background thread."""
+
+    finished = Signal(str, bool, str)  # url, ok, error_message
+
+    def __init__(self, text: str, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._text = text
+
+    def run(self) -> None:
+        """Upload the log text and emit the result."""
+        try:
+            url = upload_log(self._text)
+            self.finished.emit(url, True, "")
+        except Exception as e:  # noqa: BLE001 - never let the thread crash the UI
+            self.finished.emit("", False, str(e))
 
 
 class PartitionApplyWorker(QObject):
@@ -572,6 +592,11 @@ class EngineBridge(QObject):
     progressChanged = Signal()  # emitted when progress updates
     systemFontChanged = Signal()  # emitted when system font family changes
 
+    # Logs/diagnostics signals
+    logMessageAppended = Signal(str)  # a single redacted log line (live streaming)
+    logChanged = Signal()  # notify for the installationLog Property
+    logUploadFinished = Signal(str, bool, str)  # url, ok, error_message
+
     # Locale prefixes that require non-Latin font (CJK, Arabic, Hebrew, etc.)
     # These scripts need fonts with broader Unicode coverage like Noto Sans
     NON_LATIN_LOCALE_PREFIXES = (
@@ -650,6 +675,19 @@ class EngineBridge(QObject):
         # Thread management
         self._worker: InstallationWorker | None = None
         self._thread: QThread | None = None
+
+        # Logs/diagnostics: in-process capture (jobs run in this same process).
+        self._redactor = SecretRedactor()
+        self._log_path = resolve_log_path()
+        self._log_handler = BridgeLogHandler(
+            self._redactor, self._log_path, on_line=self._emit_log_line
+        )
+        self._log_handler.setLevel(logging.DEBUG)
+        logging.getLogger("omnis").addHandler(self._log_handler)
+        logging.getLogger("omnis").setLevel(logging.DEBUG)
+        logging.getLogger().addHandler(self._log_handler)
+        self._log_upload_thread: QThread | None = None
+        self._log_upload_worker: LogUploadWorker | None = None
 
         # Live (GParted-style) partition-apply thread state.
         self._apply_worker: PartitionApplyWorker | None = None
@@ -1314,6 +1352,55 @@ class EngineBridge(QObject):
         self.progressChanged.emit()
         self.errorOccurred.emit(job_name, error)
 
+    def _emit_log_line(self, line: str) -> None:
+        """Forward a captured (already redacted) log line to QML.
+
+        May be invoked from the installation QThread worker; Qt signal
+        delivery across threads is queued-connection safe by default.
+        """
+        self.logMessageAppended.emit(line)
+        self.logChanged.emit()
+
+    @Property(str, notify=logChanged)
+    def installationLog(self) -> str:
+        """Get the full captured (redacted) installation log text."""
+        return self._log_handler.get_text()
+
+    @Slot()
+    def uploadInstallLog(self) -> None:
+        """Upload the captured install log to a public pastebin, asynchronously."""
+        if self._log_upload_thread is not None and self._log_upload_thread.isRunning():
+            if self._debug:
+                print("[Engine] Log upload already in progress")
+            return
+
+        text = self._log_handler.get_text()
+
+        self._log_upload_thread = QThread(self)
+        self._log_upload_worker = LogUploadWorker(text)
+        self._log_upload_worker.moveToThread(self._log_upload_thread)
+
+        self._log_upload_thread.started.connect(self._log_upload_worker.run)
+        self._log_upload_worker.finished.connect(self._on_log_upload_finished)
+        self._log_upload_worker.finished.connect(self._log_upload_thread.quit)
+        self._log_upload_worker.finished.connect(self._log_upload_worker.deleteLater)
+        self._log_upload_thread.finished.connect(self._log_upload_thread.deleteLater)
+        self._log_upload_thread.finished.connect(self._cleanup_log_upload_thread)
+
+        self._log_upload_thread.start()
+
+    def _on_log_upload_finished(self, url: str, ok: bool, error_message: str) -> None:
+        """Handle log upload completion."""
+        if self._debug:
+            status = url if ok else error_message
+            print(f"[Engine] Log upload finished: {status}")
+        self.logUploadFinished.emit(url, ok, error_message)
+
+    def _cleanup_log_upload_thread(self) -> None:
+        """Clean up log-upload thread references after completion."""
+        self._log_upload_thread = None
+        self._log_upload_worker = None
+
     @Property(bool, constant=True)
     def debugMode(self) -> bool:
         """Check if debug mode is enabled."""
@@ -1823,6 +1910,7 @@ class EngineBridge(QObject):
         """Set password."""
         if self._selections.get("password") != password:
             self._selections["password"] = password
+            self._redactor.add_secret(password)
             self.selectionsChanged.emit()
 
     @Property(str, notify=selectionsChanged)
@@ -1835,6 +1923,7 @@ class EngineBridge(QObject):
         """Set root password (SECURITY: never logged, same posture as password)."""
         if self._selections.get("rootPassword") != rootPassword:
             self._selections["rootPassword"] = rootPassword
+            self._redactor.add_secret(rootPassword)
             self.selectionsChanged.emit()
 
     @Property(bool, notify=selectionsChanged)
@@ -1976,6 +2065,7 @@ class EngineBridge(QObject):
         """Set LUKS passphrase (SECURITY: never logged, same posture as password)."""
         if self._selections.get("encryptionPassphrase") != passphrase:
             self._selections["encryptionPassphrase"] = passphrase
+            self._redactor.add_secret(passphrase)
             if self._debug:
                 print("[Engine] Encryption passphrase set (hidden)")
             self.selectionsChanged.emit()
@@ -2625,10 +2715,18 @@ class EngineBridge(QObject):
     @Slot()
     def applySelectionsToContext(self) -> None:
         """Apply user selections to the engine context before installation."""
+        # SECURITY: never log password material (user, root or LUKS). Register
+        # any secret value with the redactor as a defense-in-depth measure,
+        # in case a secret reached self._selections outside the dedicated
+        # setPassword/setRootPassword/setEncryptionPassphrase slots.
+        secret_keys = {"password", "rootPassword", "encryptionPassphrase"}
+        for key in secret_keys:
+            value = self._selections.get(key)
+            if isinstance(value, str):
+                self._redactor.add_secret(value)
+
         if self._debug:
             print("[Engine] Applying selections to context...")
-            # SECURITY: never log password material (user, root or LUKS).
-            secret_keys = {"password", "rootPassword", "encryptionPassphrase"}
             for key, value in self._selections.items():
                 if key not in secret_keys:
                     print(f"[Engine]   {key}: {value}")

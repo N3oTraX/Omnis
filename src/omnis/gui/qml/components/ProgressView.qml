@@ -428,13 +428,35 @@ Item {
                 // Log viewer (collapsible)
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: showLog ? logColumn.implicitHeight + 48 : 60
+                    // Hauteur FIXE en mode déplié (le ScrollView interne gère le
+                    // défilement) : l'ancien calcul `logColumn.implicitHeight + 48`
+                    // faisait grandir la carte avec le contenu du journal, ce qui la
+                    // faisait déborder de la fenêtre et rendait le ScrollView interne
+                    // inutile (rien ne défilait, le texte était simplement tronqué).
+                    Layout.preferredHeight: showLog ? 400 : 60
                     radius: 16
                     color: surfaceColor
                     clip: true
 
                     Behavior on Layout.preferredHeight {
                         NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
+                    }
+
+                    // Alimentation live du journal pendant l'installation. Le backend
+                    // émet une ligne redigée à la fois via logMessageAppended(line);
+                    // on l'ajoute au tableau existant et on force la notification
+                    // (les mutations de tableau JS ne déclenchent pas les bindings
+                    // QML automatiquement).
+                    Connections {
+                        target: engine
+                        function onLogMessageAppended(line) {
+                            root.logMessages.push(line)
+                            // Borne la mémoire : conserve les 2000 dernières lignes
+                            if (root.logMessages.length > 2000) {
+                                root.logMessages = root.logMessages.slice(root.logMessages.length - 2000)
+                            }
+                            root.logMessagesChanged()
+                        }
                     }
 
                     Column {

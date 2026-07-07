@@ -308,6 +308,26 @@
         <source>Check the logs for more details about the error</source>
         <translation>Check the logs for more details about the error</translation>
     </message>
+    <message>
+        <source>Send Logs</source>
+        <translation>Send Logs</translation>
+    </message>
+    <message>
+        <source>The log will be sent to a public paste service.</source>
+        <translation>The log will be sent to a public paste service.</translation>
+    </message>
+    <message>
+        <source>Sending…</source>
+        <translation>Sending…</translation>
+    </message>
+    <message>
+        <source>Copy</source>
+        <translation>Copy</translation>
+    </message>
+    <message>
+        <source>Sending failed: </source>
+        <translation>Sending failed: </translation>
+    </message>
 </context>
 <context>
     <name>Main</name>
@@ -318,6 +338,30 @@
     <message>
         <source>Next</source>
         <translation>Next</translation>
+    </message>
+    <message>
+        <source>Installation Logs</source>
+        <translation>Installation Logs</translation>
+    </message>
+    <message>
+        <source>Sending…</source>
+        <translation>Sending…</translation>
+    </message>
+    <message>
+        <source>Copy</source>
+        <translation>Copy</translation>
+    </message>
+    <message>
+        <source>Sending failed: </source>
+        <translation>Sending failed: </translation>
+    </message>
+    <message>
+        <source>Send Logs</source>
+        <translation>Send Logs</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>Close</translation>
     </message>
     <message>
         <source>Install</source>

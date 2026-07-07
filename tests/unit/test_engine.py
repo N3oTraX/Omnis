@@ -1,6 +1,7 @@
 """Unit tests for Omnis Engine."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -247,3 +248,94 @@ class TestLayoutPropagation:
 
         assert engine.run_all() is True
         assert seen == {"root": "/dev/sda2", "efi": "/dev/sda1"}
+
+
+class TestOnErrorCallback:
+    """Regression tests for the P0 fix: on_error must fire for every failure mode.
+
+    Before the fix, ``_run_single_job`` only invoked ``on_error`` when
+    ``job.validate()`` failed or when ``job.run()`` raised an exception. A job
+    that *returned* ``JobResult.fail(...)`` from ``run()`` (the normal,
+    non-exceptional failure path) never triggered ``on_error``, so the GUI
+    surfaced a generic "unknown error" instead of the job's real message.
+    """
+
+    @staticmethod
+    def _make_engine(tmp_path: Path, job: Any) -> Engine:
+        from omnis.jobs.base import BaseJob
+
+        assert isinstance(job, BaseJob)
+        config_file = tmp_path / "c.yaml"
+        config_file.write_text('version: "1.0"\nbranding:\n  name: "T"\njobs: []\n')
+        engine = Engine.from_config_file(config_file)
+        engine.jobs = [job]
+        return engine
+
+    def test_returned_failure_triggers_on_error(self, tmp_path: Path) -> None:
+        """A job that returns JobResult.fail(...) must call on_error with its message."""
+        from omnis.jobs.base import BaseJob, JobContext, JobResult
+
+        class _FailingJob(BaseJob):
+            name = "failing_job"
+            description = "fails via return value"
+
+            def run(self, _context: JobContext) -> JobResult:
+                return JobResult.fail("boom")
+
+            def estimate_duration(self) -> int:
+                return 1
+
+        engine = self._make_engine(tmp_path, _FailingJob())
+
+        errors: list[tuple[str, str]] = []
+        engine.on_error = lambda name, message: errors.append((name, message))
+
+        assert engine.run_all() is False
+        assert errors == [("failing_job", "boom")]
+        assert engine.state.last_error == "boom"
+
+    def test_exception_still_triggers_on_error(self, tmp_path: Path) -> None:
+        """Non-regression: a job that raises must still call on_error (pre-existing path)."""
+        from omnis.jobs.base import BaseJob, JobContext, JobResult
+
+        class _RaisingJob(BaseJob):
+            name = "raising_job"
+            description = "raises an exception"
+
+            def run(self, _context: JobContext) -> JobResult:
+                raise RuntimeError("kaboom")
+
+            def estimate_duration(self) -> int:
+                return 1
+
+        engine = self._make_engine(tmp_path, _RaisingJob())
+
+        errors: list[tuple[str, str]] = []
+        engine.on_error = lambda name, message: errors.append((name, message))
+
+        assert engine.run_all() is False
+        assert errors == [("raising_job", "kaboom")]
+        assert engine.state.last_error == "kaboom"
+
+    def test_successful_job_does_not_trigger_on_error(self, tmp_path: Path) -> None:
+        """A successful job must never call on_error."""
+        from omnis.jobs.base import BaseJob, JobContext, JobResult
+
+        class _OkJob(BaseJob):
+            name = "ok_job"
+            description = "succeeds"
+
+            def run(self, _context: JobContext) -> JobResult:
+                return JobResult.ok("all good")
+
+            def estimate_duration(self) -> int:
+                return 1
+
+        engine = self._make_engine(tmp_path, _OkJob())
+
+        errors: list[tuple[str, str]] = []
+        engine.on_error = lambda name, message: errors.append((name, message))
+
+        assert engine.run_all() is True
+        assert errors == []
+        assert engine.state.last_error is None

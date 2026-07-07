@@ -495,6 +495,9 @@ class Engine:
         # Update status
         job.status = JobStatus.COMPLETED if result.success else JobStatus.FAILED
 
+        if not result.success and self.on_error:
+            self.on_error(job.name, result.message)
+
         if self.on_job_complete:
             self.on_job_complete(job.name, result)
 
