@@ -824,6 +824,30 @@ Item {
                             width: parent.width
                             checked: root.confirmed
                             onToggled: root.confirmedToggled(checked)
+                            spacing: 8
+
+                            // Explicit indicator pinned top-left: the default one
+                            // is vertically centred over the wrapped (2-line) label,
+                            // which lands the box in the middle of the text.
+                            indicator: Rectangle {
+                                implicitWidth: 22
+                                implicitHeight: 22
+                                x: 0
+                                y: 0
+                                radius: 4
+                                color: "transparent"
+                                border.color: confirmCheckBox.checked ? successColor : textMutedColor
+                                border.width: 2
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: confirmCheckBox.checked
+                                    text: "✓"
+                                    color: successColor
+                                    font.pixelSize: 15
+                                    font.bold: true
+                                }
+                            }
 
                             contentItem: Text {
                                 text: qsTr("I understand that the selected disk (%1) will be modified and erased.")
@@ -832,8 +856,7 @@ Item {
                                 font.bold: true
                                 color: textColor
                                 wrapMode: Text.WordWrap
-                                leftPadding: confirmCheckBox.indicator.width + 8
-                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: confirmCheckBox.indicator.width + confirmCheckBox.spacing
                                 width: parent.width
                             }
                         }

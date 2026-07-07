@@ -1173,6 +1173,7 @@ Item {
                                     ColumnLayout {
                                         Layout.fillWidth: true
                                         Layout.preferredWidth: 1
+                                        Layout.alignment: Qt.AlignTop
                                         spacing: 8
 
                                         TextField {
@@ -1210,6 +1211,7 @@ Item {
                                     ColumnLayout {
                                         Layout.fillWidth: true
                                         Layout.preferredWidth: 1
+                                        Layout.alignment: Qt.AlignTop
                                         spacing: 8
 
                                         TextField {

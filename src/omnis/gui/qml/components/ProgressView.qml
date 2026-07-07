@@ -136,6 +136,7 @@ Item {
                                 height: parent.height
                                 radius: parent.radius
                                 color: primaryColor
+                                clip: true  // keep the shimmer inside the filled bar
 
                                 Behavior on width {
                                     NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
