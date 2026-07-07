@@ -1184,7 +1184,7 @@ Item {
                                             echoMode: showEncPassCheck.checked ? TextInput.Normal : TextInput.Password
 
                                             onTextChanged: {
-                                                if (encryptionPassValid && encryptionEnabled)
+                                                if (encryptionEnabled)
                                                     encryptionPassphraseSet(text)
                                             }
 
@@ -1221,7 +1221,7 @@ Item {
                                             echoMode: showEncPassCheck.checked ? TextInput.Normal : TextInput.Password
 
                                             onTextChanged: {
-                                                if (encryptionPassValid && encryptionEnabled)
+                                                if (encryptionEnabled)
                                                     encryptionPassphraseSet(encPassField.text)
                                             }
 
