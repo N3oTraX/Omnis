@@ -869,11 +869,39 @@ ApplicationWindow {
                     text: fullLogDialog.uploadUrl
                     color: textColor
                     font.pixelSize: 13
+
+                    // Le style Fusion par défaut affiche un fond clair pour
+                    // les TextField (palette embossée), ce qui rend le texte
+                    // clair (`color: textColor`) illisible sur le thème
+                    // sombre du dialogue. Fond explicite pour le contraste.
+                    background: Rectangle {
+                        color: backgroundColor
+                        radius: 8
+                        border.color: textMutedColor
+                        border.width: 1
+                    }
                 }
 
                 Button {
                     text: qsTr("Copy")
                     visible: !fullLogDialog.uploadInProgress && fullLogDialog.uploadUrl.length > 0
+                    height: 32
+
+                    background: Rectangle {
+                        radius: 8
+                        color: parent.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
+                        border.color: textMutedColor
+                        border.width: 1
+                    }
+
+                    contentItem: Text {
+                        text: parent.text
+                        font.pixelSize: 13
+                        color: textColor
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
                     onClicked: {
                         uploadUrlField.selectAll()
                         uploadUrlField.copy()

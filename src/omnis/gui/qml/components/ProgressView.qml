@@ -75,12 +75,28 @@ Item {
 
             Item { Layout.preferredHeight: 16 }
 
-            // Progress section
-            ColumnLayout {
+            // Progress section - défile verticalement si le contenu dépasse
+            // l'espace disponible (petites fenêtres / redimensionnement) afin
+            // que la carte "Installation Log" reste toujours atteignable et
+            // ne soit jamais repoussée hors écran / coupée.
+            Flickable {
+                id: cardsFlickable
                 Layout.fillWidth: true
-                Layout.alignment: Qt.AlignHCenter
-                Layout.maximumWidth: 800
-                spacing: 24
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: width
+                contentHeight: cardsColumn.implicitHeight
+                boundsBehavior: Flickable.StopAtBounds
+
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                }
+
+                ColumnLayout {
+                    id: cardsColumn
+                    width: Math.min(parent.width, 800)
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 24
 
                 // Overall progress card
                 Rectangle {
@@ -566,9 +582,8 @@ Item {
                         }
                     }
                 }
+                }
             }
-
-            Item { Layout.fillHeight: true }
 
             // Info text
             Text {

@@ -187,30 +187,31 @@ class TestConfigurationGeneration:
 
 
 class TestLuksInjection:
-    """Tests for boot.initrd.luks.devices injection."""
+    """The job must NOT emit boot.initrd.luks.devices for the root device.
+
+    ``nixos-generate-config`` detects the LUKS-wrapped root and writes the device
+    (by-uuid) into ``hardware-configuration.nix``. Emitting it in
+    ``configuration.nix`` as well produced a fatal "conflicting definition
+    values" error in ``nixos-install``, so the job stays silent.
+    """
 
     def test_no_luks_when_encryption_disabled(self) -> None:
         job = NixosJob()
         cfg = job._build_configuration(_context(encryption=False))
         assert "boot.initrd.luks.devices" not in cfg
 
-    def test_luks_injected_when_encryption_enabled(self) -> None:
+    def test_no_manual_luks_when_encryption_enabled(self) -> None:
+        # Root LUKS is owned by nixos-generate-config; a manual block here would
+        # double-define the option and abort nixos-install.
         job = NixosJob()
         cfg = job._build_configuration(_context(encryption=True, root_partition="/dev/sda2"))
-        assert 'boot.initrd.luks.devices."cryptroot".device = "/dev/sda2";' in cfg
+        assert "boot.initrd.luks.devices" not in cfg
 
-    def test_luks_custom_mapper(self) -> None:
+    def test_no_manual_luks_custom_mapper(self) -> None:
         job = NixosJob()
         cfg = job._build_configuration(
             _context(encryption=True, root_partition="/dev/nvme0n1p2", luks_mapper_name="glfroot")
         )
-        assert 'boot.initrd.luks.devices."glfroot".device = "/dev/nvme0n1p2";' in cfg
-
-    def test_luks_omitted_when_root_partition_unknown(self) -> None:
-        # Safety: without a resolved RAW partition we must NOT emit a device (the
-        # /dev/mapper alias is the decrypted device and would break boot).
-        job = NixosJob()
-        cfg = job._build_configuration(_context(encryption=True, root_partition=""))
         assert "boot.initrd.luks.devices" not in cfg
 
 

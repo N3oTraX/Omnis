@@ -430,31 +430,27 @@ class NixosJob(BaseJob):
         output = proc.stdout if isinstance(proc.stdout, str) else ""
         return gpu_config.render(output)
 
-    def _luks_config(self, context: JobContext) -> str:
+    def _luks_config(self, _context: JobContext) -> str:
         """
-        Build the ``boot.initrd.luks.devices`` snippet for an encrypted root.
+        Root LUKS is owned by ``nixos-generate-config`` — emit nothing here.
 
-        The partition job LUKS-wraps the root partition (mapper ``cryptroot``)
-        and mounts ``/dev/mapper/cryptroot``. NixOS' ``nixos-generate-config``
-        does not always detect the underlying LUKS device, so we inject it
-        explicitly, pointing at the raw root partition.
+        The partition job opens the LUKS-wrapped root as the ``cryptroot`` mapper
+        and mounts it BEFORE the nixos job runs. ``nixos-generate-config`` then
+        detects the underlying LUKS container and writes
+        ``boot.initrd.luks.devices."cryptroot".device = "/dev/disk/by-uuid/…";``
+        (a stable by-uuid path) into ``hardware-configuration.nix``.
 
-        Returns an empty string when encryption is disabled.
+        Emitting our own ``boot.initrd.luks.devices.<mapper>.device`` (pointing at
+        the raw ``/dev/vdaX``) produced a SECOND definition of the same option, so
+        ``nixos-install`` aborted with "The option
+        `boot.initrd.luks.devices.cryptroot.device' has conflicting definition
+        values". This mirrors the GLF Calamares module, which only injects LUKS
+        for *swap* and lets ``nixos-generate-config`` own the root device.
 
-        SECURITY: the passphrase is never referenced here — only the device
-        path (which is not secret) is written.
+        Returns an empty string in all cases (kept as the injection point for a
+        future encrypted-swap block).
         """
-        s = context.selections
-        if not bool(s.get("encryption", False)):
-            return ""
-
-        mapper = str(s.get("luks_mapper_name", self._luks_mapper_name))
-        # partition BRUTE, jamais l'alias /dev/mapper (device dechiffre -> non amorcable)
-        root_part = str(s.get("root_partition", "") or "")
-        if not root_part:
-            logger.warning("Encryption enabled but root_partition unknown; skipping LUKS block")
-            return ""
-        return f'  boot.initrd.luks.devices."{mapper}".device = "{root_part}";\n\n'
+        return ""
 
     # -------------------------------------------------------------------------
     # Password hashing (declarative NixOS approach)
