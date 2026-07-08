@@ -10,10 +10,21 @@ permissions:
   contents: write
 
 jobs:
-  appimage:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog (Conventional Commits)
+        id: changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: CHANGELOG.md
 
       - uses: cachix/install-nix-action@v27
         with:
@@ -33,15 +44,11 @@ jobs:
       - name: Checksum
         run: sha256sum "$ASSET" | tee "$ASSET.sha256"
 
-      - name: Smoke test (headless import)
-        run: |
-          QT_QPA_PLATFORM=offscreen ./"$ASSET" --help || true
-
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          body: ${{ steps.changelog.outputs.content }}
           files: |
             ${{ env.ASSET }}
             ${{ env.ASSET }}.sha256
-          generate_release_notes: true

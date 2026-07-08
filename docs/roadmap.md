@@ -1,29 +1,34 @@
 # Omnis Installer - Roadmap de Versioning
 
 **Document cree**: 2025-12-08
-**Derniere mise a jour**: 2025-12-08
+**Derniere mise a jour**: 2026-07-08 (v0.5.0)
 **Objectif v1.0.0**: Installation GLFOS fonctionnelle
 **Objectif v2.0.0**: Installeur universel multi-distribution (comme Calamares)
 
 ---
 
-## Etat Actuel (v0.4.1 → v0.4.2)
+## Etat Actuel (v0.5.0)
+
+Installation NixOS de bout en bout implementee ; validation E2E sur ISO GLF-OS en cours.
 
 ### Vues QML Integrees dans Main.qml
 
-| Step | Vue | Etat | Validation |
-|------|-----|------|------------|
-| 0 | WelcomeView | Complete | Requirements, i18n |
-| 1 | LocaleView | Complete | i18n, keyboard variants |
-| 2 | UsersView | En cours | Validation + icons en cours |
-| 3 | PartitionView | Basique | Necessite polish |
-| 4 | SummaryView | Basique | Necessite polish |
-| 5 | ProgressView | Basique | Necessite polish |
-| 6 | FinishedView | Basique | Necessite polish |
+| Step | Vue | Etat |
+|------|-----|------|
+| 0 | WelcomeView | Complete |
+| 1 | LocaleView | Complete (i18n auto boot+GeoIP, override) |
+| 2 | UsersView | Complete (autologin cable) |
+| 3 | PartitionView | Editeur manuel type GParted (Apply live, GPT auto) |
+| 4 | SummaryView | Complete |
+| 5 | ProgressView | Progression reelle (parse nix internal-json) |
+| 6 | FinishedView | Complete (boutons, journal, upload logs) |
 
-### Jobs Implementes (10 jobs)
+### Acquis v0.5.0
 
-welcome, requirements, locale, partition, users, packages, gpu, install, bootloader, finished
+- Job `nixos` : configuration.nix + nixos-generate-config + nixos-install (systemd-boot, LUKS chiffre/non-chiffre, GPU multi-vendor, durcissement perms nix).
+- Editeur de partition manuel (create/delete/format/resize/flags, chemins /dev, numeros reels via parted, etiquette GPT auto, blocage bios_grub).
+- Copie NetworkManager (wifi+filaire), xdg-user-dirs (glf-os).
+- Livrable AppImage standalone (Nix bundle) + CI release. Voir `etude-packaging-standalone.md`.
 
 ---
 

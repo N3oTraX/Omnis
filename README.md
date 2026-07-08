@@ -1,6 +1,9 @@
 # Omnis Installer
 
 [![CI](https://github.com/N3oTraX/Omnis/actions/workflows/ci.yml/badge.svg)](https://github.com/N3oTraX/Omnis/actions/workflows/ci.yml)
+[![Release AppImage](https://github.com/N3oTraX/Omnis/actions/workflows/release.yml/badge.svg)](https://github.com/N3oTraX/Omnis/actions/workflows/release.yml)
+[![Release](https://img.shields.io/github/v/release/N3oTraX/Omnis?sort=semver)](https://github.com/N3oTraX/Omnis/releases)
+[![Downloads](https://img.shields.io/github/downloads/N3oTraX/Omnis/total.svg)](https://github.com/N3oTraX/Omnis/releases)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
@@ -10,11 +13,11 @@
 
 | Métrique | Valeur |
 |----------|--------|
-| Version | `0.4.2` (en cours) |
+| Version | `0.5.0` |
 | Python | `>=3.11` |
 | GUI | PySide6 (Qt6) + QML |
-| IPC | Unix Socket + JSON |
-| Tests | 599 tests unitaires |
+| Livrable | AppImage standalone (Nix bundle, CI sur tag) |
+| Tests | 801 tests unitaires |
 | i18n | 37 locales supportées |
 | Licence | GPL-3.0-or-later |
 
@@ -130,7 +133,7 @@ cd Omnis
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-# Lancer les tests (599 tests)
+# Lancer les tests (801 tests)
 pytest
 
 # Démarrer l'installeur GLF OS (mode développement)
@@ -142,6 +145,23 @@ Output attendu :
 Using config: config/examples/glfos.yaml
 Theme base: /path/to/Omnis/config/themes/glfos
 ```
+
+---
+
+## Livrable standalone (AppImage)
+
+Omnis se distribue aussi en **exécutable unique** (AppImage), généré par la CI sur chaque tag `v*` et reproductible (Nix bundle épinglé au tag). L'UI et le partitionnement sont portables ; l'installation réelle de GLF-OS reste liée à l'environnement live NixOS (`nixos-install`).
+
+```bash
+# Construire l'AppImage localement (nécessite Nix)
+nix bundle .#omnis                      # -> ./omnis (AppImage unique)
+
+# Ou récupérer la dernière release publiée
+# https://github.com/N3oTraX/Omnis/releases
+./omnis-<version>-x86_64.AppImage
+```
+
+Étude complète : [`docs/etude-packaging-standalone.md`](docs/etude-packaging-standalone.md).
 
 ---
 
@@ -227,7 +247,7 @@ python -c "from omnis.core.engine import Engine; print('OK')"
 ### Commandes Développement
 
 ```bash
-# Lancer tous les tests (599 tests)
+# Lancer tous les tests (801 tests)
 pytest -v
 
 # Tests IPC uniquement
@@ -318,9 +338,18 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 
 ## État du Projet
 
-### v0.4.2 - Stabilisation (En cours)
+### v0.5.0 - Install NixOS, éditeur de partition, packaging (validation E2E en cours)
 
-- [ ] Polish UI et animations
+- [x] Job d'installation NixOS complet : `configuration.nix`, `nixos-generate-config`, `nixos-install`, LUKS chiffré/non-chiffré, GPU multi-vendor, systemd-boot
+- [x] Éditeur de partition manuel type GParted (create/delete/format/resize/flags, Apply live, table GPT auto)
+- [x] Barre de progression réelle pendant `nixos-install` (parse nix internal-json)
+- [x] Copie NetworkManager (wifi + filaire), i18n auto (boot GRUB + GeoIP, override manuel), durcissement permissions nix
+- [x] Livrable **AppImage standalone** + CI de release (Nix bundle)
+- [ ] Validation installation de bout en bout (ISO GLF-OS)
+
+### v0.4.2 - Stabilisation ✅
+
+- [x] Polish UI et animations
 - [ ] Tests d'intégration end-to-end
 - [ ] Documentation utilisateur
 
@@ -450,13 +479,22 @@ Roadmap détaillé : [`docs/roadmap.md`](docs/roadmap.md)
 
 ## Contribuer
 
-1. Fork le projet
-2. Créer une branche (`git checkout -b feature/ma-feature`)
-3. Commit (`git commit -m 'Add: ma feature'`)
-4. Push (`git push origin feature/ma-feature`)
-5. Ouvrir une Pull Request
+Le projet suit un **flux GitOps** classique à deux branches longues :
 
-**Standards** : Code typé, testé, conforme à ruff.
+- **`develop`** : branche d'intégration — tout le développement s'y fait (features, fixes).
+- **`main`** : branche stable — reçoit `develop` par Pull Request ; les releases y sont taguées (`v*`).
+
+```
+feature/*  ──PR──►  develop  ──PR──►  main  ──tag vX.Y.Z──►  CI release (AppImage + changelog)
+```
+
+1. Partir de `develop` (`git switch develop`)
+2. Créer une branche `feature/ma-feature` (ou committer sur `develop`)
+3. Commits **Conventional Commits** (`feat:`, `fix:`, `docs:`…) — ils alimentent le changelog auto
+4. Ouvrir une **PR vers `develop`**
+5. Une PR **`develop` → `main`** puis un **tag `vX.Y.Z`** déclenchent la publication de la release
+
+**Standards** : code typé (mypy strict), testé (pytest), conforme à ruff, commentaires minimaux.
 
 ---
 
