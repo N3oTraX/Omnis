@@ -406,7 +406,7 @@ Item {
                                 anchors.margins: 16
                                 text: errorMessage || qsTr("An unknown error occurred during installation")
                                 font.pixelSize: 14
-                                font.family: "monospace"
+                                font.family: branding.fontMonospace
                                 color: textColor
                                 wrapMode: Text.Wrap
                             }

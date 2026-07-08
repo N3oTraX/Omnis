@@ -250,6 +250,22 @@ def create_application(branding: BrandingConfig) -> QGuiApplication:
     return app
 
 
+def _register_theme_fonts(theme_base: Path) -> None:
+    fonts_dir = theme_base / "fonts"
+    if not fonts_dir.is_dir():
+        return
+
+    from PySide6.QtGui import QFontDatabase
+
+    for font_file in sorted(fonts_dir.iterdir()):
+        if font_file.suffix.lower() not in (".ttf", ".otf", ".ttc"):
+            continue
+        if QFontDatabase.addApplicationFont(str(font_file)) < 0:
+            logger.warning("Police de thème non chargée: %s", font_file.name)
+        else:
+            logger.debug("Police de thème chargée: %s", font_file.name)
+
+
 def run_ui_mode(
     config_path: Path,
     socket_path: Path | None,
@@ -320,6 +336,10 @@ def run_ui_mode(
     try:
         # Create Qt application
         app = create_application(branding)
+
+        # Register fonts hand-placed in <theme>/fonts so the families named in
+        # theme.yaml (primary/display/monospace) resolve off-host (AppImage).
+        _register_theme_fonts(theme_base)
 
         # Set up QML engine
         qml_engine = QQmlApplicationEngine()

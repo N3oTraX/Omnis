@@ -411,6 +411,18 @@ class BrandingProxy(QObject):
         """Error / failure status color."""
         return self._branding.colors.error
 
+    @Property(str, constant=True)
+    def fontPrimary(self) -> str:
+        return self._branding.fonts.primary
+
+    @Property(str, constant=True)
+    def fontDisplay(self) -> str:
+        return self._branding.fonts.display
+
+    @Property(str, constant=True)
+    def fontMonospace(self) -> str:
+        return self._branding.fonts.monospace
+
     @Property(str, notify=brandingChanged)
     def welcomeTitle(self) -> str:
         """Welcome screen title with i18n interpolation."""

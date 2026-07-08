@@ -427,7 +427,7 @@ Item {
                                     readOnly: true
                                     selectByMouse: true
                                     wrapMode: TextArea.Wrap
-                                    font.family: "monospace"
+                                    font.family: branding.fontMonospace
                                     font.pixelSize: 12
                                     color: textColor
                                     // Source unique du journal live : property throttlée
