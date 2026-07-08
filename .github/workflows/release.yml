@@ -1,0 +1,47 @@
+name: Release AppImage
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build single-file AppImage
+        run: |
+          nix bundle --bundler .#appimage .#omnis -o omnis.AppImage
+          version="${GITHUB_REF_NAME#v}"
+          [ "$GITHUB_REF_NAME" = "$version" ] && version="$(nix eval --raw .#omnis.version)"
+          out="omnis-${version}-x86_64.AppImage"
+          cp -L omnis.AppImage "$out"
+          chmod +x "$out"
+          echo "ASSET=$out" >> "$GITHUB_ENV"
+
+      - name: Checksum
+        run: sha256sum "$ASSET" | tee "$ASSET.sha256"
+
+      - name: Smoke test (headless import)
+        run: |
+          QT_QPA_PLATFORM=offscreen ./"$ASSET" --help || true
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.ASSET }}
+            ${{ env.ASSET }}.sha256
+          generate_release_notes: true

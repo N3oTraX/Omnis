@@ -2,7 +2,30 @@
   lib,
   python3Packages,
   qt6,
+  gptfdisk,
+  parted,
+  e2fsprogs,
+  dosfstools,
+  btrfs-progs,
+  cryptsetup,
+  util-linux,
+  pciutils,
 }:
+
+let
+  # Partition toolchain shelled out by the partition job. Bundled so the editor
+  # works off the GLF ISO too (nixos-install stays live-only, unbundlable).
+  runtimeTools = [
+    gptfdisk
+    parted
+    e2fsprogs
+    dosfstools
+    btrfs-progs
+    cryptsetup
+    util-linux
+    pciutils
+  ];
+in
 
 # Omnis - modular GLF-OS installer (PySide6/QML). Packaged as a Qt-wrapped
 # Python application so QML imports and Qt platform plugins resolve at runtime.
@@ -25,6 +48,7 @@ python3Packages.buildPythonApplication {
     qt6.qtbase
     qt6.qtdeclarative
     qt6.qtsvg
+    qt6.qtwayland
   ];
 
   # wrapQtAppsHook wraps the entry point but does NOT inject the QML import
@@ -34,6 +58,7 @@ python3Packages.buildPythonApplication {
   # (mirrors the working dev launcher run-omnis.sh).
   makeWrapperArgs = [
     "--prefix QML2_IMPORT_PATH : ${qt6.qtdeclarative}/lib/qt-6/qml"
+    "--prefix PATH : ${lib.makeBinPath runtimeTools}"
   ];
 
   dependencies = with python3Packages; [
