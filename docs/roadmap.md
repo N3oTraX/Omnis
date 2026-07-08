@@ -1,15 +1,15 @@
 # Omnis Installer - Roadmap de Versioning
 
 **Document cree**: 2025-12-08
-**Derniere mise a jour**: 2026-07-08 (v0.5.0)
+**Derniere mise a jour**: 2026-07-08 (v0.5.1)
 **Objectif v1.0.0**: Installation GLFOS fonctionnelle
 **Objectif v2.0.0**: Installeur universel multi-distribution (comme Calamares)
 
 ---
 
-## Etat Actuel (v0.5.0)
+## Etat Actuel (v0.5.1)
 
-Installation NixOS de bout en bout implementee ; validation E2E sur ISO GLF-OS en cours.
+Installation NixOS de bout en bout implementee ; AppImage standalone reellement lançable ; validation E2E sur ISO GLF-OS en cours.
 
 ### Vues QML Integrees dans Main.qml
 
@@ -29,6 +29,10 @@ Installation NixOS de bout en bout implementee ; validation E2E sur ISO GLF-OS e
 - Editeur de partition manuel (create/delete/format/resize/flags, chemins /dev, numeros reels via parted, etiquette GPT auto, blocage bios_grub).
 - Copie NetworkManager (wifi+filaire), xdg-user-dirs (glf-os).
 - Livrable AppImage standalone (Nix bundle) + CI release. Voir `etude-packaging-standalone.md`.
+
+### Acquis v0.5.1
+
+- Resolution de la config embarquee hors du CWD : lance depuis n'importe quel dossier (AppImage, install Nix), Omnis localise `share/omnis/config` au lieu de quitter sur `No configuration file found`. Premier AppImage reellement lançable.
 
 ---
 

@@ -13,7 +13,7 @@
 
 | Métrique | Valeur |
 |----------|--------|
-| Version | `0.5.0` |
+| Version | `0.5.1` |
 | Python | `>=3.11` |
 | GUI | PySide6 (Qt6) + QML |
 | Livrable | AppImage standalone (Nix bundle, CI sur tag) |
@@ -338,6 +338,11 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 
 ## État du Projet
 
+### v0.5.1 - AppImage lançable ✅
+
+- [x] Correction de la résolution de configuration hors du répertoire courant : lancé depuis n'importe quel dossier (AppImage, install Nix), Omnis localise la config embarquée (`share/omnis/config`) au lieu de quitter sur `No configuration file found`
+- [x] Premier AppImage réellement lançable en dehors de l'arbre source (thème + i18n + QML résolus depuis le bundle)
+
 ### v0.5.0 - Install NixOS, éditeur de partition, packaging (validation E2E en cours)
 
 - [x] Job d'installation NixOS complet : `configuration.nix`, `nixos-generate-config`, `nixos-install`, LUKS chiffré/non-chiffré, GPU multi-vendor, systemd-boot
@@ -461,17 +466,13 @@ Thèmes :
 | v0.3.0 | WelcomeJob + Requirements | ✅ Terminé |
 | v0.4.0 | Jobs de base + Phase 1 UI | ✅ Terminé |
 | v0.4.1 | i18n + Locale Detection | ✅ Terminé |
-| v0.4.2 | UsersView Integration | 🔄 En cours |
-| v0.4.3 | PartitionView Polish | 🔲 À faire |
-| v0.4.4 | SummaryView Polish | 🔲 À faire |
-| v0.4.5 | ProgressView Polish | 🔲 À faire |
-| v0.4.6 | FinishedView Polish | 🔲 À faire |
-| v0.5.0 | E2E Integration Tests | 🔲 À faire |
-| v0.6.0 | IPC Production Ready | 🔲 À faire |
-| v0.7.0 | UI Complete Validation | 🔲 Milestone |
-| v0.8.0 | GLFOS Module Integration | 🔲 À faire |
-| v0.9.0 | Production Hardening | 🔲 À faire |
-| v1.0.0 | First Stable Release | 🔲 Release |
+| v0.4.2 | Stabilisation UI | ✅ Terminé |
+| v0.5.0 | Install NixOS + éditeur partition + packaging AppImage | ✅ Terminé |
+| v0.5.1 | AppImage lançable (fix résolution config) | ✅ Actuel |
+| v0.6.0 | Validation installation E2E (ISO GLF-OS) | 🔲 À faire |
+| v0.7.0 | Slimming AppImage + intégration module GLF-OS | 🔲 À faire |
+| v0.8.0 | Durcissement production (Polkit, IPC) | 🔲 À faire |
+| v1.0.0 | Première release stable | 🔲 Release |
 
 Roadmap détaillé : [`docs/roadmap.md`](docs/roadmap.md)
 
