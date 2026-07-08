@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -146,6 +147,10 @@ def print_platform_info() -> None:
 
     print("\n" + "=" * 60)
     app.quit()
+
+
+def _running_in_appimage() -> bool:
+    return bool(os.environ.get("APPIMAGE") or os.environ.get("APPDIR"))
 
 
 def find_config_file(explicit_path: Path | None = None) -> Path:
@@ -417,13 +422,25 @@ def main() -> int:
             dry_run=args.dry_run,
         )
 
-    # UI mode: run graphical interface
+    # UI mode: run graphical interface. A bundled AppImage cannot fork a
+    # privileged engine: pkexec re-executes the bundled store path in the host
+    # namespace where it does not exist, so the engine dies. Run integrated.
+    no_fork = args.no_fork
+    if not no_fork and _running_in_appimage():
+        logger.info("AppImage détecté : moteur intégré (--no-fork)")
+        no_fork = True
+        if hasattr(os, "geteuid") and os.geteuid() != 0:
+            logger.warning(
+                "Non-root : les étapes privilégiées (partitionnement, install) "
+                "nécessitent de lancer l'AppImage avec les droits root"
+            )
+
     return run_ui_mode(
         config_path=config_path,
         socket_path=args.socket,
         debug=args.debug,
         dry_run=args.dry_run,
-        no_fork=args.no_fork,
+        no_fork=no_fork,
         skip_requirements=args.skip_requirements,
     )
 
