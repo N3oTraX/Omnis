@@ -23,16 +23,28 @@ nix bundle --bundler .#appimage .#omnis -o "$OUT"
 sha256sum "$OUT" | tee "${OUT}.sha256"
 ls -lh "$OUT"
 
-echo "==> Warm-up + binaire lancable (--version)"
-timeout 180 "./$OUT" --version
+APP_ABS="$ROOT/$OUT"
 
-echo "==> Smoke test (offscreen)"
+echo "==> Warm-up + binaire lancable (--version)"
+VER_OUT="$(timeout 180 "$APP_ABS" --version)"
+echo "$VER_OUT"
+case "$VER_OUT" in
+  *"$VERSION"*) ;;
+  *) echo "ATTENTION: --version ($VER_OUT) ne correspond pas au build ($VERSION) : __version__ desynchronise" ;;
+esac
+
+# Run the smoke test from an empty directory so the AppImage is forced to use
+# its bundled config (mimics launching from ~/Downloads). Running from the repo
+# would silently fall back to ./config and mask a bundled-config regression.
+echo "==> Smoke test (offscreen, hors arbre source)"
+TESTDIR="$(mktemp -d)"
 LOG="$(mktemp)"
 set +e
-QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software LIBGL_ALWAYS_SOFTWARE=1 \
-  timeout 40 "./$OUT" --debug >"$LOG" 2>&1
+( cd "$TESTDIR" && QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software LIBGL_ALWAYS_SOFTWARE=1 \
+  timeout 40 "$APP_ABS" --debug ) >"$LOG" 2>&1
 rc=$?
 set -e
+rmdir "$TESTDIR" 2>/dev/null || true
 
 echo "--- journal (extrait) ---"
 grep -iE "config|theme|engine|qml|error|died|traceback" "$LOG" | head -30 || true
