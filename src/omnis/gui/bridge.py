@@ -13,7 +13,7 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import Property, QObject, QThread, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, QThread, QTimer, QUrl, Signal, Slot
 
 from omnis.i18n.translator import get_translator
 from omnis.jobs.base import JobStatus
@@ -681,12 +681,26 @@ class EngineBridge(QObject):
         self._redactor = SecretRedactor()
         self._log_path = resolve_log_path()
         self._log_handler = BridgeLogHandler(
-            self._redactor, self._log_path, on_line=self._emit_log_line
+            self._redactor, self._log_path, on_line=self._mark_log_dirty
         )
         self._log_handler.setLevel(logging.DEBUG)
+        # Attach ONLY to the "omnis" logger. Adding it to the root logger as well
+        # made every ``omnis.*`` record fire the handler twice (it also
+        # propagates to root) — doubling both the file and the UI-refresh load.
         logging.getLogger("omnis").addHandler(self._log_handler)
         logging.getLogger("omnis").setLevel(logging.DEBUG)
-        logging.getLogger().addHandler(self._log_handler)
+
+        # Throttle live log refresh. nixos-install emits thousands of lines; a
+        # per-line Qt signal + full re-render floods the GUI thread and freezes
+        # the window ("application not responding"). Instead each captured line
+        # just flips a dirty flag (cheap, called from the worker thread) and a
+        # GUI-thread timer coalesces refreshes to a few per second.
+        self._log_dirty = False
+        self._log_flush_timer = QTimer(self)
+        self._log_flush_timer.setInterval(200)
+        self._log_flush_timer.timeout.connect(self._flush_log)
+        self._log_flush_timer.start()
+
         self._log_upload_thread: QThread | None = None
         self._log_upload_worker: LogUploadWorker | None = None
 
@@ -1353,19 +1367,36 @@ class EngineBridge(QObject):
         self.progressChanged.emit()
         self.errorOccurred.emit(job_name, error)
 
-    def _emit_log_line(self, line: str) -> None:
-        """Forward a captured (already redacted) log line to QML.
+    def _mark_log_dirty(self, _line: str) -> None:
+        """Flag that new log line(s) arrived (called from the worker thread).
 
-        May be invoked from the installation QThread worker; Qt signal
-        delivery across threads is queued-connection safe by default.
+        Intentionally cheap — NO Qt signal here. Emitting one signal per line
+        (nixos-install produces >10k lines) floods the GUI thread's event queue
+        and freezes the window. ``_flush_log`` (a GUI-thread timer) coalesces the
+        refreshes into a few per second instead.
         """
-        self.logMessageAppended.emit(line)
+        self._log_dirty = True
+
+    def _flush_log(self) -> None:
+        """Emit a single coalesced log refresh when new lines have arrived."""
+        if not self._log_dirty:
+            return
+        self._log_dirty = False
         self.logChanged.emit()
 
     @Property(str, notify=logChanged)
     def installationLog(self) -> str:
         """Get the full captured (redacted) installation log text."""
         return self._log_handler.get_text()
+
+    @Property(str, notify=logChanged)
+    def logTail(self) -> str:
+        """Recent captured log lines for the live in-progress view (bounded).
+
+        Only the tail is joined so each refresh stays cheap even when the full
+        buffer holds thousands of lines.
+        """
+        return self._log_handler.get_tail(300)
 
     @Slot()
     def uploadInstallLog(self) -> None:

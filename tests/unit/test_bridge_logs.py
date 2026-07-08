@@ -60,7 +60,7 @@ def bridge(qapp: QApplication) -> Iterator[EngineBridge]:
 
 
 class TestInstallationLogProperty:
-    """installationLog / logChanged / logMessageAppended reflect captured logs."""
+    """installationLog / logTail / throttled logChanged reflect captured logs."""
 
     def test_logged_message_appears_in_installation_log(self, bridge: EngineBridge) -> None:
         logger = logging.getLogger("omnis.test_bridge_logs")
@@ -68,23 +68,32 @@ class TestInstallationLogProperty:
 
         assert "hello from a job" in bridge.installationLog
 
-    def test_log_message_appended_signal_fires(self, bridge: EngineBridge) -> None:
-        seen: list[str] = []
-        bridge.logMessageAppended.connect(seen.append)
-
+    def test_logged_line_appears_in_log_tail(self, bridge: EngineBridge) -> None:
         logger = logging.getLogger("omnis.test_bridge_logs")
         logger.info("a distinct live line")
 
-        assert any("a distinct live line" in line for line in seen)
+        assert "a distinct live line" in bridge.logTail
 
-    def test_log_changed_signal_fires(self, bridge: EngineBridge) -> None:
+    def test_flush_emits_log_changed_when_dirty(self, bridge: EngineBridge) -> None:
+        # Live refresh is throttled: logging flags the buffer dirty; the
+        # coalescing timer (here driven manually) emits a single logChanged.
         changed = []
         bridge.logChanged.connect(lambda: changed.append(True))
 
         logger = logging.getLogger("omnis.test_bridge_logs")
         logger.info("triggers logChanged")
+        bridge._flush_log()
 
         assert changed
+
+    def test_flush_is_noop_when_no_new_lines(self, bridge: EngineBridge) -> None:
+        bridge._flush_log()  # drain any pending dirty state from setup
+        changed = []
+        bridge.logChanged.connect(lambda: changed.append(True))
+
+        bridge._flush_log()
+
+        assert not changed
 
 
 class TestSecretsNeverLeakIntoLog:

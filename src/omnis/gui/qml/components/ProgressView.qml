@@ -4,8 +4,7 @@
  * Displays:
  * - Overall progress bar
  * - Current job name and progress
- * - Job list with status indicators
- * - Log output area (collapsible)
+ * - Live installation log (auto-following, main content)
  * - Installation animation
  */
 
@@ -22,9 +21,17 @@ Item {
     property string currentJobName: ""
     property int currentJobProgress: 0  // 0-100
     property string currentJobMessage: ""
+    // Non utilisée par la vue (la carte "Installation Steps" a été retirée,
+    // redondante avec la carte du job courant) : conservée uniquement pour
+    // compatibilité binaire avec Main.qml qui lie encore `jobsList:
+    // engine.jobsList` — une property inutilisée assignée ne casse rien.
     property var jobsList: []  // Array of {name, status: "pending"|"running"|"completed"|"failed"}
-    property var logMessages: []  // Array of log message strings
-    property bool showLog: false
+    // Idem : conservée pour compatibilité avec Main.qml (onRetryClicked fait
+    // `progressView.logMessages = []`). Le contenu du journal live vient
+    // désormais directement de `engine.logTail` (voir carte "Installation
+    // Log" plus bas), ce tableau n'est plus lu ni peuplé.
+    property var logMessages: []  // Array of log message strings (legacy, unused)
+    property bool showLog: true
     property string installationStatus: "idle"  // idle, running, success, failed
     property string errorMessage: ""
 
@@ -300,179 +307,27 @@ Item {
                     }
                 }
 
-                // Jobs list card
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: Math.min(jobsColumn.implicitHeight + 48, 400)
-                    radius: 16
-                    color: surfaceColor
-
-                    Column {
-                        id: jobsColumn
-                        anchors.fill: parent
-                        anchors.margins: 24
-                        spacing: 16
-
-                        Row {
-                            width: parent.width
-                            spacing: 12
-
-                            Text {
-                                text: "\u{1F4CB}"  // Clipboard
-                                font.pixelSize: 24
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-
-                            Text {
-                                text: qsTr("Installation Steps")
-                                font.pixelSize: 20
-                                font.bold: true
-                                color: textColor
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                        }
-
-                        ScrollView {
-                            id: jobsScrollView
-                            width: parent.width
-                            height: Math.min(jobsListView.contentHeight, 280)
-                            clip: true
-
-                            // Improve wheel scroll speed (3x faster)
-                            WheelHandler {
-                                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                                onWheel: function(event) {
-                                    var flickable = jobsScrollView.contentItem
-                                    var multiplier = 3.0
-                                    var deltaY = event.angleDelta.y * multiplier
-                                    var newY = flickable.contentY - (deltaY / 120.0 * 40)
-                                    flickable.contentY = Math.max(0, Math.min(flickable.contentHeight - flickable.height, newY))
-                                    event.accepted = true
-                                }
-                            }
-
-                            ListView {
-                                id: jobsListView
-                                width: parent.width
-                                spacing: 8
-                                model: jobsList
-
-                                delegate: Row {
-                                    width: parent.width
-                                    spacing: 12
-                                    height: 32
-
-                                    // Status indicator
-                                    Rectangle {
-                                        width: 24
-                                        height: 24
-                                        radius: 12
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        color: {
-                                            switch(modelData.status) {
-                                                case "completed": return successColor;
-                                                case "running": return accentColor;
-                                                case "failed": return errorColor;
-                                                default: return Qt.darker(surfaceColor, 1.3);
-                                            }
-                                        }
-
-                                        Behavior on color {
-                                            ColorAnimation { duration: 200 }
-                                        }
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: {
-                                                switch(modelData.status) {
-                                                    case "completed": return "\u2713";
-                                                    case "running": return "";
-                                                    case "failed": return "\u2717";
-                                                    default: return "";
-                                                }
-                                            }
-                                            font.pixelSize: 14
-                                            font.bold: true
-                                            color: textColor
-                                        }
-
-                                        // Animated ring for running status
-                                        Rectangle {
-                                            anchors.fill: parent
-                                            radius: parent.radius
-                                            color: "transparent"
-                                            border.color: Qt.lighter(accentColor, 1.3)
-                                            border.width: 2
-                                            visible: modelData.status === "running"
-
-                                            SequentialAnimation on scale {
-                                                running: modelData.status === "running"
-                                                loops: Animation.Infinite
-                                                NumberAnimation { from: 1.0; to: 1.3; duration: 800 }
-                                                NumberAnimation { from: 1.3; to: 1.0; duration: 800 }
-                                            }
-
-                                            SequentialAnimation on opacity {
-                                                running: modelData.status === "running"
-                                                loops: Animation.Infinite
-                                                NumberAnimation { from: 1.0; to: 0.0; duration: 800 }
-                                                NumberAnimation { from: 0.0; to: 1.0; duration: 800 }
-                                            }
-                                        }
-                                    }
-
-                                    Text {
-                                        text: modelData.name
-                                        font.pixelSize: 14
-                                        color: {
-                                            switch(modelData.status) {
-                                                case "completed": return textColor;
-                                                case "running": return textColor;
-                                                case "failed": return errorColor;
-                                                default: return textMutedColor;
-                                            }
-                                        }
-                                        font.bold: modelData.status === "running"
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Log viewer (collapsible)
+                // Installation Log — contenu principal de la vue de progression.
+                // La carte "Installation Steps" (liste des jobs) a été retirée :
+                // elle était redondante avec la carte "job courant" ci-dessus et
+                // n'affichait en pratique qu'une seule entrée ("welcome"). Le
+                // journal live devient l'élément principal, en grand, et suit
+                // automatiquement l'installation (voir TextArea plus bas).
                 Rectangle {
                     Layout.fillWidth: true
                     // Hauteur FIXE en mode déplié (le ScrollView interne gère le
-                    // défilement) : l'ancien calcul `logColumn.implicitHeight + 48`
-                    // faisait grandir la carte avec le contenu du journal, ce qui la
-                    // faisait déborder de la fenêtre et rendait le ScrollView interne
-                    // inutile (rien ne défilait, le texte était simplement tronqué).
-                    Layout.preferredHeight: showLog ? 400 : 60
+                    // défilement) : un calcul basé sur `logColumn.implicitHeight`
+                    // ferait grandir la carte avec le contenu du journal, ce qui la
+                    // ferait déborder de la fenêtre et rendrait le ScrollView interne
+                    // inutile (rien ne défilerait, le texte serait simplement tronqué).
+                    // Carte volontairement grande : c'est le contenu principal de la vue.
+                    Layout.preferredHeight: showLog ? 480 : 60
                     radius: 16
                     color: surfaceColor
                     clip: true
 
                     Behavior on Layout.preferredHeight {
                         NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
-                    }
-
-                    // Alimentation live du journal pendant l'installation. Le backend
-                    // émet une ligne redigée à la fois via logMessageAppended(line);
-                    // on l'ajoute au tableau existant et on force la notification
-                    // (les mutations de tableau JS ne déclenchent pas les bindings
-                    // QML automatiquement).
-                    Connections {
-                        target: engine
-                        function onLogMessageAppended(line) {
-                            root.logMessages.push(line)
-                            // Borne la mémoire : conserve les 2000 dernières lignes
-                            if (root.logMessages.length > 2000) {
-                                root.logMessages = root.logMessages.slice(root.logMessages.length - 2000)
-                            }
-                            root.logMessagesChanged()
-                        }
                     }
 
                     Column {
@@ -503,7 +358,7 @@ Item {
                             Item { Layout.fillWidth: true }
 
                             Button {
-                                text: showLog ? "\u25B2" : "\u25BC"
+                                text: showLog ? "▲" : "▼"
                                 width: 32
                                 height: 32
                                 anchors.verticalCenter: parent.verticalCenter
@@ -531,7 +386,7 @@ Item {
                         ScrollView {
                             id: logScroll
                             width: parent.width
-                            height: 300
+                            height: 380
                             clip: true
                             visible: showLog
 
@@ -556,28 +411,23 @@ Item {
                                 font.family: "monospace"
                                 font.pixelSize: 12
                                 color: textColor
-                                text: logMessages.join("\n")
+                                // Source unique du journal live : property throttlée
+                                // (~5x/s) exposée par le moteur, contenant les ~300
+                                // dernières lignes. L'ancien signal per-ligne
+                                // logMessageAppended n'est plus émis (il saturait le
+                                // thread GUI sur les flux >10k lignes).
+                                text: engine.logTail
 
                                 background: Rectangle {
                                     color: backgroundColor
                                     radius: 8
                                 }
 
-                                // Auto-suivi du bas UNIQUEMENT si l'utilisateur y
-                                // est déjà : il peut remonter lire les lignes
-                                // précédentes sans être ramené en bas à chaque
-                                // nouvelle ligne (ce qui donnait "ne scroll pas").
-                                property bool pinnedToBottom: true
-                                onTextChanged: if (pinnedToBottom) cursorPosition = length
-                            }
-
-                            // Détecte si l'utilisateur a fait défiler vers le haut.
-                            Connections {
-                                target: logScroll.ScrollBar.vertical
-                                function onPositionChanged() {
-                                    var vbar = logScroll.ScrollBar.vertical
-                                    logTextArea.pinnedToBottom = (vbar.position + vbar.size >= 0.98)
-                                }
+                                // Auto-suivi systématique du bas : le tail affiche
+                                // toujours les dernières lignes du journal, donc on
+                                // se replace en bas à chaque mise à jour, sans
+                                // condition (pas de pin-to-bottom conditionnel).
+                                onTextChanged: cursorPosition = length
                             }
                         }
                     }

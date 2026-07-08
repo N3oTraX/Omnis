@@ -126,6 +126,18 @@ class BridgeLogHandler(logging.Handler):
         with self._lock:
             return "\n".join(self._buffer)
 
+    def get_tail(self, max_lines: int) -> str:
+        """Return the last ``max_lines`` buffered lines, newline-joined.
+
+        Used for the live in-progress view: joining only the tail keeps the
+        per-refresh cost bounded even when the full buffer holds thousands of
+        lines (nixos-install is extremely verbose).
+        """
+        with self._lock:
+            if max_lines >= len(self._buffer):
+                return "\n".join(self._buffer)
+            return "\n".join(list(self._buffer)[-max_lines:])
+
     def clear(self) -> None:
         """Clear the in-memory ring buffer."""
         with self._lock:

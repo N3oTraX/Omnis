@@ -579,6 +579,7 @@ Item {
                     visible: success
 
                     Button {
+                        id: rebootButton
                         text: qsTr("Reboot Now")
                         Layout.fillWidth: true
                         Layout.preferredHeight: 56
@@ -609,22 +610,37 @@ Item {
                             }
                         }
 
-                        contentItem: Row {
-                            spacing: 8
-                            anchors.centerIn: parent
+                        // contentItem est positionné/dimensionné par le Control
+                        // (x/y/width/height liés à padding + availableWidth/Height).
+                        // Un Row utilisé DIRECTEMENT comme contentItem ne doit pas
+                        // porter `anchors.centerIn: parent` : cela entre en
+                        // conflit avec les bindings internes du Control sur x/y,
+                        // d'où le texte/icône mal centrés observés. On enveloppe
+                        // donc le Row dans un Item neutre (qui reçoit les
+                        // bindings du Control sans conflit) et on centre le Row
+                        // à l'intérieur de cet Item.
+                        contentItem: Item {
+                            implicitWidth: rebootContentRow.implicitWidth
+                            implicitHeight: rebootContentRow.implicitHeight
 
-                            Text {
-                                text: "\u{1F504}"  // Counterclockwise arrows
-                                font.pixelSize: 20
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
+                            Row {
+                                id: rebootContentRow
+                                anchors.centerIn: parent
+                                spacing: 8
 
-                            Text {
-                                text: parent.parent.text
-                                font: parent.parent.font
-                                color: textColor
-                                verticalAlignment: Text.AlignVCenter
-                                anchors.verticalCenter: parent.verticalCenter
+                                Text {
+                                    text: "\u{1F504}"  // Counterclockwise arrows
+                                    font.pixelSize: 20
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                Text {
+                                    text: rebootButton.text
+                                    font: rebootButton.font
+                                    color: textColor
+                                    verticalAlignment: Text.AlignVCenter
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                             }
                         }
 
@@ -632,6 +648,7 @@ Item {
                     }
 
                     Button {
+                        id: shutdownButton
                         text: qsTr("Shutdown")
                         Layout.fillWidth: true
                         Layout.preferredHeight: 56
@@ -648,22 +665,28 @@ Item {
                             }
                         }
 
-                        contentItem: Row {
-                            spacing: 8
-                            anchors.centerIn: parent
+                        contentItem: Item {
+                            implicitWidth: shutdownContentRow.implicitWidth
+                            implicitHeight: shutdownContentRow.implicitHeight
 
-                            Text {
-                                text: "\u{23FB}"  // Power symbol
-                                font.pixelSize: 20
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
+                            Row {
+                                id: shutdownContentRow
+                                anchors.centerIn: parent
+                                spacing: 8
 
-                            Text {
-                                text: parent.parent.text
-                                font: parent.parent.font
-                                color: textColor
-                                verticalAlignment: Text.AlignVCenter
-                                anchors.verticalCenter: parent.verticalCenter
+                                Text {
+                                    text: "\u{23FB}"  // Power symbol
+                                    font.pixelSize: 20
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                Text {
+                                    text: shutdownButton.text
+                                    font: shutdownButton.font
+                                    color: textColor
+                                    verticalAlignment: Text.AlignVCenter
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                             }
                         }
 
@@ -671,6 +694,7 @@ Item {
                     }
 
                     Button {
+                        id: continueButton
                         text: qsTr("Continue")
                         Layout.fillWidth: true
                         Layout.preferredHeight: 56
@@ -687,22 +711,28 @@ Item {
                             }
                         }
 
-                        contentItem: Row {
-                            spacing: 8
-                            anchors.centerIn: parent
+                        contentItem: Item {
+                            implicitWidth: continueContentRow.implicitWidth
+                            implicitHeight: continueContentRow.implicitHeight
 
-                            Text {
-                                text: "\u{1F5D7}"  // Desktop computer
-                                font.pixelSize: 20
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
+                            Row {
+                                id: continueContentRow
+                                anchors.centerIn: parent
+                                spacing: 8
 
-                            Text {
-                                text: parent.parent.text
-                                font: parent.parent.font
-                                color: textColor
-                                verticalAlignment: Text.AlignVCenter
-                                anchors.verticalCenter: parent.verticalCenter
+                                Text {
+                                    text: "\u{1F5D7}"  // Desktop computer
+                                    font.pixelSize: 20
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                Text {
+                                    text: continueButton.text
+                                    font: continueButton.font
+                                    color: textColor
+                                    verticalAlignment: Text.AlignVCenter
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                             }
                         }
 
@@ -717,6 +747,7 @@ Item {
                     visible: !success
 
                     Button {
+                        id: retryButton
                         text: qsTr("Retry Installation")
                         Layout.fillWidth: true
                         Layout.preferredHeight: 56
@@ -738,22 +769,28 @@ Item {
                             }
                         }
 
-                        contentItem: Row {
-                            spacing: 8
-                            anchors.centerIn: parent
+                        contentItem: Item {
+                            implicitWidth: retryContentRow.implicitWidth
+                            implicitHeight: retryContentRow.implicitHeight
 
-                            Text {
-                                text: "\u{1F504}"  // Counterclockwise arrows
-                                font.pixelSize: 20
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
+                            Row {
+                                id: retryContentRow
+                                anchors.centerIn: parent
+                                spacing: 8
 
-                            Text {
-                                text: parent.parent.text
-                                font: parent.parent.font
-                                color: textColor
-                                verticalAlignment: Text.AlignVCenter
-                                anchors.verticalCenter: parent.verticalCenter
+                                Text {
+                                    text: "\u{1F504}"  // Counterclockwise arrows
+                                    font.pixelSize: 20
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                Text {
+                                    text: retryButton.text
+                                    font: retryButton.font
+                                    color: textColor
+                                    verticalAlignment: Text.AlignVCenter
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                             }
                         }
 

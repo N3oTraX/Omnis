@@ -104,6 +104,10 @@ CFG_LOCALE = """  # Select internationalisation properties.
 """
 
 CFG_KEYMAP = """  # Configure keymap
+  # earlySetup pushes the console keymap into the initrd so the LUKS passphrase
+  # prompt (stage-1 boot) follows the chosen layout — without it, useXkbConfig
+  # only applies to the stage-2 console and the LUKS prompt stays QWERTY/US.
+  console.earlySetup = true;
   console.useXkbConfig = true;
   services.xserver.xkb = {{
     layout = "{layout}";

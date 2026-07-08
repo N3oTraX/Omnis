@@ -162,6 +162,9 @@ class TestConfigurationGeneration:
         assert 'i18n.defaultLocale = "fr_FR.UTF-8";' in cfg
         assert 'time.timeZone = "Europe/Paris";' in cfg
         assert 'layout = "fr";' in cfg
+        # earlySetup is required so the LUKS passphrase prompt (initrd) follows
+        # the chosen keyboard layout instead of defaulting to QWERTY/US.
+        assert "console.earlySetup = true;" in cfg
 
     def test_locale_utf8_normalised(self) -> None:
         job = NixosJob()
