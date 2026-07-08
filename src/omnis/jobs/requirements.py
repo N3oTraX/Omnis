@@ -699,6 +699,9 @@ class SystemRequirementsChecker:
         availability = cfg.get("availability", ["AMD", "INTEL", "NVIDIA"])
         require_dedicated = cfg.get("require_dedicated", False)
         overrides = cfg.get("overrides", {})
+        # GPU is advisory by default (WARN) so GPU-less / virtual machines can
+        # install; set gpu.required=true to make a compatible GPU mandatory.
+        require_gpu = cfg.get("required", False)
 
         try:
             detector = GPUDetector()
@@ -730,7 +733,7 @@ class SystemRequirementsChecker:
                 status = RequirementStatus.WARN
                 details = message or extra_info or "GPU compatibility warning"
             else:  # fail
-                status = RequirementStatus.FAIL
+                status = RequirementStatus.FAIL if require_gpu else RequirementStatus.WARN
                 details = message or "No compatible GPU detected"
 
             # Build recommended value string

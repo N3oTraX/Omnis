@@ -4,8 +4,7 @@
  * Displays:
  * - Overall progress bar
  * - Current job name and progress
- * - Job list with status indicators
- * - Log output area (collapsible)
+ * - Live installation log (auto-following, main content)
  * - Installation animation
  */
 
@@ -22,9 +21,17 @@ Item {
     property string currentJobName: ""
     property int currentJobProgress: 0  // 0-100
     property string currentJobMessage: ""
+    // Non utilisée par la vue (la carte "Installation Steps" a été retirée,
+    // redondante avec la carte du job courant) : conservée uniquement pour
+    // compatibilité binaire avec Main.qml qui lie encore `jobsList:
+    // engine.jobsList` — une property inutilisée assignée ne casse rien.
     property var jobsList: []  // Array of {name, status: "pending"|"running"|"completed"|"failed"}
-    property var logMessages: []  // Array of log message strings
-    property bool showLog: false
+    // Idem : conservée pour compatibilité avec Main.qml (onRetryClicked fait
+    // `progressView.logMessages = []`). Le contenu du journal live vient
+    // désormais directement de `engine.logTail` (voir carte "Installation
+    // Log" plus bas), ce tableau n'est plus lu ni peuplé.
+    property var logMessages: []  // Array of log message strings (legacy, unused)
+    property bool showLog: true
     property string installationStatus: "idle"  // idle, running, success, failed
     property string errorMessage: ""
 
@@ -75,17 +82,33 @@ Item {
 
             Item { Layout.preferredHeight: 16 }
 
-            // Progress section
-            ColumnLayout {
+            // Progress section - défile verticalement si le contenu dépasse
+            // l'espace disponible (petites fenêtres / redimensionnement) afin
+            // que la carte "Installation Log" reste toujours atteignable et
+            // ne soit jamais repoussée hors écran / coupée.
+            Flickable {
+                id: cardsFlickable
                 Layout.fillWidth: true
-                Layout.alignment: Qt.AlignHCenter
-                Layout.maximumWidth: 800
-                spacing: 24
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: width
+                contentHeight: cardsColumn.implicitHeight
+                boundsBehavior: Flickable.StopAtBounds
+
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                }
+
+                ColumnLayout {
+                    id: cardsColumn
+                    width: Math.min(parent.width, 800)
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 24
 
                 // Overall progress card
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: overallProgressColumn.height + 48
+                    Layout.preferredHeight: overallProgressColumn.implicitHeight + 48
                     radius: 16
                     color: surfaceColor
 
@@ -136,6 +159,7 @@ Item {
                                 height: parent.height
                                 radius: parent.radius
                                 color: primaryColor
+                                clip: true  // keep the shimmer inside the filled bar
 
                                 Behavior on width {
                                     NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
@@ -183,7 +207,7 @@ Item {
                 // Current job card
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: currentJobColumn.height + 48
+                    Layout.preferredHeight: currentJobColumn.implicitHeight + 48
                     radius: 16
                     color: surfaceColor
                     visible: currentJobName.length > 0
@@ -283,151 +307,21 @@ Item {
                     }
                 }
 
-                // Jobs list card
+                // Installation Log — contenu principal de la vue de progression.
+                // La carte "Installation Steps" (liste des jobs) a été retirée :
+                // elle était redondante avec la carte "job courant" ci-dessus et
+                // n'affichait en pratique qu'une seule entrée ("welcome"). Le
+                // journal live devient l'élément principal, en grand, et suit
+                // automatiquement l'installation (voir TextArea plus bas).
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Math.min(jobsColumn.height + 48, 400)
-                    radius: 16
-                    color: surfaceColor
-
-                    Column {
-                        id: jobsColumn
-                        anchors.fill: parent
-                        anchors.margins: 24
-                        spacing: 16
-
-                        Row {
-                            width: parent.width
-                            spacing: 12
-
-                            Text {
-                                text: "\u{1F4CB}"  // Clipboard
-                                font.pixelSize: 24
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-
-                            Text {
-                                text: qsTr("Installation Steps")
-                                font.pixelSize: 20
-                                font.bold: true
-                                color: textColor
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                        }
-
-                        ScrollView {
-                            id: jobsScrollView
-                            width: parent.width
-                            height: Math.min(jobsListView.contentHeight, 280)
-                            clip: true
-
-                            // Improve wheel scroll speed (3x faster)
-                            WheelHandler {
-                                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                                onWheel: function(event) {
-                                    var flickable = jobsScrollView.contentItem
-                                    var multiplier = 3.0
-                                    var deltaY = event.angleDelta.y * multiplier
-                                    var newY = flickable.contentY - (deltaY / 120.0 * 40)
-                                    flickable.contentY = Math.max(0, Math.min(flickable.contentHeight - flickable.height, newY))
-                                    event.accepted = true
-                                }
-                            }
-
-                            ListView {
-                                id: jobsListView
-                                width: parent.width
-                                spacing: 8
-                                model: jobsList
-
-                                delegate: Row {
-                                    width: parent.width
-                                    spacing: 12
-                                    height: 32
-
-                                    // Status indicator
-                                    Rectangle {
-                                        width: 24
-                                        height: 24
-                                        radius: 12
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        color: {
-                                            switch(modelData.status) {
-                                                case "completed": return successColor;
-                                                case "running": return accentColor;
-                                                case "failed": return errorColor;
-                                                default: return Qt.darker(surfaceColor, 1.3);
-                                            }
-                                        }
-
-                                        Behavior on color {
-                                            ColorAnimation { duration: 200 }
-                                        }
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: {
-                                                switch(modelData.status) {
-                                                    case "completed": return "\u2713";
-                                                    case "running": return "";
-                                                    case "failed": return "\u2717";
-                                                    default: return "";
-                                                }
-                                            }
-                                            font.pixelSize: 14
-                                            font.bold: true
-                                            color: textColor
-                                        }
-
-                                        // Animated ring for running status
-                                        Rectangle {
-                                            anchors.fill: parent
-                                            radius: parent.radius
-                                            color: "transparent"
-                                            border.color: Qt.lighter(accentColor, 1.3)
-                                            border.width: 2
-                                            visible: modelData.status === "running"
-
-                                            SequentialAnimation on scale {
-                                                running: modelData.status === "running"
-                                                loops: Animation.Infinite
-                                                NumberAnimation { from: 1.0; to: 1.3; duration: 800 }
-                                                NumberAnimation { from: 1.3; to: 1.0; duration: 800 }
-                                            }
-
-                                            SequentialAnimation on opacity {
-                                                running: modelData.status === "running"
-                                                loops: Animation.Infinite
-                                                NumberAnimation { from: 1.0; to: 0.0; duration: 800 }
-                                                NumberAnimation { from: 0.0; to: 1.0; duration: 800 }
-                                            }
-                                        }
-                                    }
-
-                                    Text {
-                                        text: modelData.name
-                                        font.pixelSize: 14
-                                        color: {
-                                            switch(modelData.status) {
-                                                case "completed": return textColor;
-                                                case "running": return textColor;
-                                                case "failed": return errorColor;
-                                                default: return textMutedColor;
-                                            }
-                                        }
-                                        font.bold: modelData.status === "running"
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Log viewer (collapsible)
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: showLog ? logColumn.height + 48 : 60
+                    // Hauteur FIXE en mode déplié (le ScrollView interne gère le
+                    // défilement) : un calcul basé sur `logColumn.implicitHeight`
+                    // ferait grandir la carte avec le contenu du journal, ce qui la
+                    // ferait déborder de la fenêtre et rendrait le ScrollView interne
+                    // inutile (rien ne défilerait, le texte serait simplement tronqué).
+                    // Carte volontairement grande : c'est le contenu principal de la vue.
+                    Layout.preferredHeight: showLog ? 480 : 60
                     radius: 16
                     color: surfaceColor
                     clip: true
@@ -436,96 +330,129 @@ Item {
                         NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
                     }
 
-                    Column {
-                        id: logColumn
-                        anchors.fill: parent
-                        anchors.margins: 24
-                        spacing: 16
+                        // ColumnLayout (et non Column) : le Column précédent
+                        // était `anchors.fill: parent` avec une hauteur de
+                        // ScrollView FIXE (380). Le total header+spacing+380
+                        // ne correspondait pas exactement à la hauteur
+                        // disponible (héritée de Layout.preferredHeight de la
+                        // carte), laissant une marge basse incohérente avec
+                        // la marge haute — la bordure arrondie du bas de la
+                        // carte se retrouvait masquée par le rectangle sombre
+                        // du journal. Avec ColumnLayout + Layout.fillHeight
+                        // sur le ScrollView, celui-ci occupe exactement
+                        // l'espace restant après le header, garantissant une
+                        // marge bas identique à la marge haut (24px) quelle
+                        // que soit la hauteur réelle du header.
+                        ColumnLayout {
+                            id: logColumn
+                            anchors.fill: parent
+                            anchors.margins: 24
+                            spacing: 16
 
-                        // Header
-                        Row {
-                            width: parent.width
-                            spacing: 12
+                            // Header
+                            Row {
+                                Layout.fillWidth: true
+                                spacing: 12
 
-                            Text {
-                                text: "\u{1F4DD}"  // Memo
-                                font.pixelSize: 24
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-
-                            Text {
-                                text: qsTr("Installation Log")
-                                font.pixelSize: 20
-                                font.bold: true
-                                color: textColor
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-
-                            Item { Layout.fillWidth: true }
-
-                            Button {
-                                text: showLog ? "\u25B2" : "\u25BC"
-                                width: 32
-                                height: 32
-                                anchors.verticalCenter: parent.verticalCenter
-
-                                background: Rectangle {
-                                    radius: 8
-                                    color: parent.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
-                                    border.color: textMutedColor
-                                    border.width: 1
+                                Text {
+                                    text: "\u{1F4DD}"  // Memo
+                                    font.pixelSize: 24
+                                    anchors.verticalCenter: parent.verticalCenter
                                 }
 
-                                contentItem: Text {
-                                    text: parent.text
-                                    font.pixelSize: 16
+                                Text {
+                                    text: qsTr("Installation Log")
+                                    font.pixelSize: 20
+                                    font.bold: true
                                     color: textColor
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
+                                    anchors.verticalCenter: parent.verticalCenter
                                 }
 
-                                onClicked: showLog = !showLog
-                            }
-                        }
+                                Item { Layout.fillWidth: true }
 
-                        // Log content
-                        ScrollView {
-                            width: parent.width
-                            height: 300
-                            clip: true
-                            visible: showLog
+                                Button {
+                                    text: showLog ? "▲" : "▼"
+                                    width: 32
+                                    height: 32
+                                    anchors.verticalCenter: parent.verticalCenter
 
-                            opacity: showLog ? 1 : 0
-                            Behavior on opacity {
-                                NumberAnimation { duration: 200 }
-                            }
+                                    background: Rectangle {
+                                        radius: 8
+                                        color: parent.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
+                                        border.color: textMutedColor
+                                        border.width: 1
+                                    }
 
-                            TextArea {
-                                id: logTextArea
-                                readOnly: true
-                                selectByMouse: true
-                                wrapMode: TextArea.Wrap
-                                font.family: "monospace"
-                                font.pixelSize: 12
-                                color: textColor
-                                text: logMessages.join("\n")
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.pixelSize: 16
+                                        color: textColor
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
 
-                                background: Rectangle {
-                                    color: backgroundColor
-                                    radius: 8
-                                }
-
-                                // Auto-scroll to bottom
-                                onTextChanged: {
-                                    cursorPosition = text.length
+                                    onClicked: showLog = !showLog
                                 }
                             }
-                        }
+
+                            // Log content — occupe tout l'espace restant sous le
+                            // header (Layout.fillHeight) au lieu d'une hauteur
+                            // fixe : garantit une marge basse strictement égale à
+                            // la marge haute (anchors.margins: 24 sur logColumn),
+                            // donc la bordure arrondie basse de la carte reste
+                            // toujours visible quelle que soit la hauteur réelle
+                            // du header.
+                            ScrollView {
+                                id: logScroll
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                visible: showLog
+
+                                // Défilement vertical seul : la TextArea est bornée
+                                // en largeur (availableWidth) pour que wrapMode enroule
+                                // le texte au lieu de déborder horizontalement — cause
+                                // de l'illisibilité et du "scroll cassé".
+                                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                                ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+                                opacity: showLog ? 1 : 0
+                                Behavior on opacity {
+                                    NumberAnimation { duration: 200 }
+                                }
+
+                                TextArea {
+                                    id: logTextArea
+                                    width: logScroll.availableWidth
+                                    readOnly: true
+                                    selectByMouse: true
+                                    wrapMode: TextArea.Wrap
+                                    font.family: "monospace"
+                                    font.pixelSize: 12
+                                    color: textColor
+                                    // Source unique du journal live : property throttlée
+                                    // (~5x/s) exposée par le moteur, contenant les ~300
+                                    // dernières lignes. L'ancien signal per-ligne
+                                    // logMessageAppended n'est plus émis (il saturait le
+                                    // thread GUI sur les flux >10k lignes).
+                                    text: engine.logTail
+
+                                    background: Rectangle {
+                                        color: backgroundColor
+                                        radius: 8
+                                    }
+
+                                    // Auto-suivi systématique du bas : le tail affiche
+                                    // toujours les dernières lignes du journal, donc on
+                                    // se replace en bas à chaque mise à jour, sans
+                                    // condition (pas de pin-to-bottom conditionnel).
+                                    onTextChanged: cursorPosition = length
+                                }
+                            }
                     }
                 }
+                }
             }
-
-            Item { Layout.fillHeight: true }
 
             // Info text
             Text {

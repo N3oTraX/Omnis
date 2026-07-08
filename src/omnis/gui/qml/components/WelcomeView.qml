@@ -115,7 +115,7 @@ Item {
                         visible: status === Image.Ready
 
                         // Subtle glow effect
-                        layer.enabled: true
+                        layer.enabled: !engine.softwareRendering
                         layer.effect: MultiEffect {
                             shadowEnabled: true
                             shadowColor: primaryColor
@@ -157,7 +157,7 @@ Item {
                         color: textColor
 
                         // Text shadow for readability
-                        layer.enabled: true
+                        layer.enabled: !engine.softwareRendering
                         layer.effect: MultiEffect {
                             shadowEnabled: true
                             shadowColor: Qt.rgba(0, 0, 0, 0.6)
@@ -176,7 +176,7 @@ Item {
                         color: textColor
                         visible: brandingCodename !== ""
 
-                        layer.enabled: true
+                        layer.enabled: !engine.softwareRendering
                         layer.effect: MultiEffect {
                             shadowEnabled: true
                             shadowColor: Qt.rgba(0, 0, 0, 0.6)

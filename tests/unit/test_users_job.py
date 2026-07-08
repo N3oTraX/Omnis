@@ -587,3 +587,71 @@ class TestRunMethod:
 
         assert result.success is False
         assert result.error_code == 11  # validation error code
+
+
+class TestUnderscoreFirstPosition:
+    """
+    Lot 2 : un underscore en première position est autorisé.
+
+    UsersJob.USERNAME_PATTERN vaut ^[a-z_][a-z0-9_-]*$ et le QML a été aligné
+    sur ce motif. On garde un test explicite documentant ce choix.
+    """
+
+    def test_underscore_first_is_valid(self) -> None:
+        """Le job doit accepter un username commençant par underscore."""
+        job = UsersJob()
+        assert job._validate_username("_system") is True
+
+        context = JobContext(
+            selections={
+                "username": "_system",
+                "password": "secret123",
+            }
+        )
+        result = job.validate(context)
+        assert result.success is True
+
+
+class TestPasswordNeverInLogs:
+    """SECURITY : le mot de passe ne doit jamais apparaître dans les logs."""
+
+    @patch("omnis.jobs.users.subprocess.run")
+    def test_password_never_appears_in_logs(
+        self, mock_subprocess: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """
+        Forcer un CalledProcessError sur chpasswd et vérifier qu'aucun message
+        loggué ne contient le mot de passe, même si chpasswd renvoyait la ligne
+        'username:password' dans stderr.
+        """
+        import logging
+        import subprocess
+
+        caplog.set_level(logging.DEBUG)
+
+        job = UsersJob()
+        test_password = "SuperSecretPassword123!"
+        leaky_stderr = f"chpasswd: line: john:{test_password}"
+
+        # _create_user réussit, _set_password échoue avec un stderr qui
+        # contiendrait le mot de passe si on le logguait.
+        mock_subprocess.side_effect = subprocess.CalledProcessError(
+            returncode=1,
+            cmd=["arch-chroot", "/mnt", "chpasswd"],
+            stderr=leaky_stderr,
+        )
+
+        result = job._set_password(
+            target_root="/mnt",
+            username="john",
+            password=test_password,
+        )
+
+        assert result.success is False
+        assert result.error_code == 23
+        assert test_password not in result.message
+
+        for record in caplog.records:
+            assert test_password not in record.getMessage()
+            assert test_password not in record.message
+            assert test_password not in str(record.args)

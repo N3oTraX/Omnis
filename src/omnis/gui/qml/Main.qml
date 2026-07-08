@@ -8,10 +8,11 @@
  * 0 - Welcome (requirements check)
  * 1 - Locale (language, timezone, keyboard)
  * 2 - Users (username, password, options)
- * 3 - Partition (disk selection)
- * 4 - Summary (review selections)
- * 5 - Progress (installation)
- * 6 - Finished (reboot/shutdown)
+ * 3 - Environment (desktop environment + edition/flavor)
+ * 4 - Partition (disk selection)
+ * 5 - Summary (review selections)
+ * 6 - Progress (installation)
+ * 7 - Finished (reboot/shutdown)
  */
 
 import QtQuick
@@ -38,6 +39,12 @@ ApplicationWindow {
     // Apply font globally to the window (empty string = system default)
     font.family: needsUnicodeFont && systemFontFamily ? systemFontFamily : ""
 
+    // Le style Fusion rend le texte des champs via palette.text (noir par
+    // défaut) en ignorant la propriété color. On force un gris clair lisible
+    // sur le thème sombre, propagé à tous les TextField de l'application.
+    palette.text: "#d1d5db"
+    palette.placeholderText: "#9CA3AF"
+
     // React to font changes when locale changes
     Connections {
         target: engine
@@ -60,8 +67,8 @@ ApplicationWindow {
 
     // Wizard state
     property int currentStep: 0
-    readonly property int totalSteps: 7  // 0-6
-    readonly property var stepNames: ["Welcome", "Locale", "Users", "Partition", "Summary", "Installing", "Finished"]
+    readonly property int totalSteps: 8  // 0-7
+    readonly property var stepNames: ["Welcome", "Locale", "Users", "Desktop", "Partition", "Summary", "Installing", "Finished"]
 
     // Installation state
     property bool isInstalling: false
@@ -105,7 +112,7 @@ ApplicationWindow {
         RowLayout {
             Layout.fillWidth: true
             spacing: 16
-            visible: currentStep > 0 && currentStep < 6
+            visible: currentStep > 0 && currentStep < 6  // hidden on Welcome, Progress(6), Finished(7)
 
             // Logo
             Item {
@@ -155,13 +162,13 @@ ApplicationWindow {
                 }
             }
 
-            // Step indicator (steps 1-4 only)
+            // Step indicator (steps 1-5 only)
             Row {
                 spacing: 8
-                visible: currentStep >= 1 && currentStep <= 4
+                visible: currentStep >= 1 && currentStep <= 5
 
                 Repeater {
-                    model: 4  // Steps 1-4
+                    model: 5  // Steps 1-5
 
                     Rectangle {
                         width: 40
@@ -247,10 +254,9 @@ ApplicationWindow {
                 timezonesModel: engine.timezonesModel
                 keymapsModel: engine.keymapsModel
                 keyboardVariantsModel: engine.keyboardVariantsModel
-                selectedLocale: engine.selectedLocale
-                selectedTimezone: engine.selectedTimezone
-                selectedKeymap: engine.selectedKeymap
-                selectedKeyboardVariant: engine.selectedKeyboardVariant
+                // Les sélections (selectedLocale/Timezone/Keymap/Variant) sont
+                // désormais lues directement depuis engine par la vue (miroirs
+                // readonly), plus besoin de les passer ici.
 
                 primaryColor: root.primaryColor
                 backgroundColor: root.backgroundColor
@@ -305,11 +311,13 @@ ApplicationWindow {
                 visible: currentStep === 2
                 opacity: visible ? 1 : 0
 
-                username: engine.username
-                fullName: engine.fullName
-                hostname: engine.hostname
-                autoLogin: engine.autoLogin
-                isAdmin: engine.isAdmin
+                branding: branding
+
+                // Source de vérité unique : la vue lit/écrit directement via
+                // `engine.*` (setUsername/setFullName/…). Plus de propriétés
+                // miroir ni de handlers onXChanged ici, qui cassaient le binding
+                // descendant dès la première saisie. Les mots de passe restent
+                // write-only côté vue (aucun binding descendant depuis engine).
 
                 primaryColor: root.primaryColor
                 backgroundColor: root.backgroundColor
@@ -320,28 +328,53 @@ ApplicationWindow {
                 errorColor: root.errorColor
                 successColor: root.successColor
 
-                onUsernameChanged: engine.setUsername(username)
-                onFullNameChanged: engine.setFullName(fullName)
-                onHostnameChanged: engine.setHostname(hostname)
-                onPasswordChanged: engine.setPassword(password)
-                onAutoLoginChanged: engine.setAutoLogin(autoLogin)
-                onIsAdminChanged: engine.setIsAdmin(isAdmin)
+                Behavior on opacity {
+                    NumberAnimation { duration: 300 }
+                }
+            }
+
+            // Step 3: Environment (desktop environment + edition/flavor)
+            EnvironmentView {
+                id: environmentView
+                anchors.fill: parent
+                visible: currentStep === 3
+                opacity: visible ? 1 : 0
+
+                desktopEnvironmentsModel: engine.desktopEnvironmentsModel
+                editionsModel: engine.editionsModel
+                // selectedDesktopEnvironment / selectedEdition are read directly
+                // from engine by the view (readonly mirrors).
+
+                primaryColor: root.primaryColor
+                backgroundColor: root.backgroundColor
+                surfaceColor: root.surfaceColor
+                textColor: root.textColor
+                textMutedColor: root.textMutedColor
+                accentColor: root.accentColor
+
+                onDesktopEnvironmentSelected: function(environmentId) {
+                    engine.setDesktopEnvironment(environmentId)
+                }
+                onEditionSelected: function(editionId) {
+                    engine.setEdition(editionId)
+                }
 
                 Behavior on opacity {
                     NumberAnimation { duration: 300 }
                 }
             }
 
-            // Step 3: Partition
+            // Step 4: Partition
             PartitionView {
                 id: partitionView
                 anchors.fill: parent
-                visible: currentStep === 3
+                visible: currentStep === 4
                 opacity: visible ? 1 : 0
 
                 disksModel: engine.disksModel
-                selectedDisk: engine.selectedDisk
-                partitionMode: engine.partitionMode
+                // selectedDisk / partitionMode / filesystem / swapStrategy /
+                // encryption sont lus directement depuis engine par la vue
+                // (miroirs readonly), plus besoin de les passer ici.
 
                 primaryColor: root.primaryColor
                 backgroundColor: root.backgroundColor
@@ -358,20 +391,56 @@ ApplicationWindow {
                 onModeSelected: function(mode) {
                     engine.setPartitionMode(mode)
                 }
+                onFilesystemSelected: function(fs) {
+                    engine.setFilesystem(fs)
+                }
+                onSwapStrategySelected: function(strategy) {
+                    engine.setSwapStrategy(strategy)
+                }
+                onEncryptionToggled: function(enabled) {
+                    engine.setEncryption(enabled)
+                }
+                onEncryptionPassphraseSet: function(passphrase) {
+                    engine.setEncryptionPassphrase(passphrase)
+                }
+                onEfiSizeChanged: function(sizeMb) {
+                    engine.setEfiSizeMb(sizeMb)
+                }
 
                 Behavior on opacity {
                     NumberAnimation { duration: 300 }
                 }
             }
 
-            // Step 4: Summary
+            // Step 5: Summary
             SummaryView {
                 id: summaryView
                 anchors.fill: parent
-                visible: currentStep === 4
+                visible: currentStep === 5
                 opacity: visible ? 1 : 0
 
-                selections: engine.selections
+                // Bind chaque champ du résumé aux getters SCALAIRES notifiés du
+                // bridge (propagation fiable sur selectionsChanged) plutôt qu'au
+                // dict engine.selections dont les sous-propriétés ne se
+                // ré-évaluaient pas dans QML (fix persistance du résumé).
+                localeValue: engine.selectedLocale
+                timezoneValue: engine.selectedTimezone
+                keymapValue: engine.selectedKeymap
+                usernameValue: engine.username
+                fullNameValue: engine.fullName
+                hostnameValue: engine.hostname
+                autoLoginValue: engine.autoLogin
+                isAdminValue: engine.isAdmin
+                desktopEnvironmentValue: engine.desktopEnvironment
+                editionValue: engine.edition
+                diskValue: engine.selectedDisk
+                diskSizeValue: engine.selectedDiskSize
+                partitionModeValue: engine.partitionMode
+
+                // ITEM 2: reflète et arme la confirmation finale.
+                confirmed: engine.confirmed
+                onConfirmedToggled: function(value) { engine.setConfirmed(value) }
+
                 distroName: branding.name
                 distroVersion: branding.version
                 distroLogo: branding.logoSmallUrl
@@ -386,18 +455,19 @@ ApplicationWindow {
 
                 onEditLocale: currentStep = 1
                 onEditUsers: currentStep = 2
-                onEditPartition: currentStep = 3
+                onEditEnvironment: currentStep = 3
+                onEditPartition: currentStep = 4
 
                 Behavior on opacity {
                     NumberAnimation { duration: 300 }
                 }
             }
 
-            // Step 5: Progress
+            // Step 6: Progress
             ProgressView {
                 id: progressView
                 anchors.fill: parent
-                visible: currentStep === 5
+                visible: currentStep === 6
                 opacity: visible ? 1 : 0
 
                 overallProgress: engine.overallProgress
@@ -425,11 +495,11 @@ ApplicationWindow {
                 }
             }
 
-            // Step 6: Finished
+            // Step 7: Finished
             FinishedView {
                 id: finishedView
                 anchors.fill: parent
-                visible: currentStep === 6
+                visible: currentStep === 7
                 opacity: visible ? 1 : 0
 
                 success: installationSuccess
@@ -453,6 +523,14 @@ ApplicationWindow {
                 onRebootClicked: engine.executeFinishAction("reboot")
                 onShutdownClicked: engine.executeFinishAction("shutdown")
                 onContinueClicked: Qt.quit()
+                onViewLogsClicked: fullLogDialog.open()
+                onRetryClicked: {
+                    // Repart d'un état propre : réinitialise le moteur/journal
+                    // puis relance l'installation depuis le début.
+                    engine.resetInstallation()
+                    progressView.logMessages = []
+                    startInstallation()
+                }
 
                 Behavior on opacity {
                     NumberAnimation { duration: 300 }
@@ -464,7 +542,7 @@ ApplicationWindow {
         RowLayout {
             Layout.fillWidth: true
             spacing: 16
-            visible: currentStep >= 1 && currentStep <= 4
+            visible: currentStep >= 1 && currentStep <= 5
 
             Text {
                 text: qsTr("Powered by Omnis Installer")
@@ -500,7 +578,8 @@ ApplicationWindow {
 
             // Next/Install button
             Button {
-                text: currentStep === 4 ? qsTr("Install") : qsTr("Next")
+                objectName: "nextInstallButton"
+                text: currentStep === 5 ? qsTr("Install") : qsTr("Next")
                 enabled: canProceedToNext()
 
                 background: Rectangle {
@@ -561,7 +640,7 @@ ApplicationWindow {
 
     // Navigation functions
     function navigateBack() {
-        if (currentStep > 0 && currentStep <= 4) {
+        if (currentStep > 0 && currentStep <= 5) {
             if (currentStep === 1) {
                 currentStep = 0  // Back to Welcome
             } else {
@@ -571,19 +650,21 @@ ApplicationWindow {
     }
 
     function navigateNext() {
-        if (currentStep === 4) {
+        if (currentStep === 5) {
             // Start installation
             startInstallation()
-        } else if (currentStep < 4) {
+        } else if (currentStep < 5) {
             // Load data for next step if needed
-            if (currentStep === 2) {
-                engine.refreshDisks()  // Load disks before partition step
+            if (currentStep === 3) {
+                engine.refreshDisks()  // Load disks before partition step (step 4)
             }
             currentStep++
         }
     }
 
     function canProceedToNext() {
+        if (engine.skipValidation)
+            return true
         switch (currentStep) {
             case 1:  // Locale
                 return engine.selectedLocale !== "" &&
@@ -591,10 +672,15 @@ ApplicationWindow {
                        engine.selectedKeymap !== ""
             case 2:  // Users
                 return usersView.isValid
-            case 3:  // Partition
+            case 3:  // Environment (DE + edition) — defaults always set
+                return engine.desktopEnvironment !== "" &&
+                       engine.edition !== ""
+            case 4:  // Partition
                 return engine.selectedDisk !== ""
-            case 4:  // Summary
-                return true  // Always can install from summary
+            case 5:  // Summary
+                // ITEM 2: n'arme l'installation que si l'utilisateur a coché la
+                // case de confirmation (garde-fou destructif côté backend aussi).
+                return engine.confirmed
             default:
                 return true
         }
@@ -602,7 +688,7 @@ ApplicationWindow {
 
     function startInstallation() {
         engine.applySelectionsToContext()
-        currentStep = 5
+        currentStep = 6  // Progress view
         isInstalling = true
         engine.startInstallation()
     }
@@ -623,7 +709,7 @@ ApplicationWindow {
         function onInstallationFinished(success) {
             isInstalling = false
             installationSuccess = success
-            currentStep = 6  // Go to Finished view
+            currentStep = 7  // Go to Finished view
         }
 
         function onJobProgress(jobName, percent, message) {
@@ -654,13 +740,13 @@ ApplicationWindow {
     // Keyboard shortcuts
     Shortcut {
         sequence: "Escape"
-        enabled: currentStep > 0 && currentStep <= 4
+        enabled: currentStep > 0 && currentStep <= 5
         onActivated: navigateBack()
     }
 
     Shortcut {
         sequence: "Return"
-        enabled: currentStep >= 1 && currentStep <= 4 && canProceedToNext()
+        enabled: currentStep >= 1 && currentStep <= 5 && canProceedToNext()
         onActivated: navigateNext()
     }
 
@@ -672,6 +758,204 @@ ApplicationWindow {
         onTriggered: {
             console.log("Rechecking internet connectivity...")
             engine.recheckInternetStatus()
+        }
+    }
+
+    // Full installation log dialog (opened from FinishedView "View Full Logs")
+    Dialog {
+        id: fullLogDialog
+
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: parent ? parent.width * 0.9 : 900
+        height: parent ? parent.height * 0.9 : 650
+        modal: true
+        focus: true
+        padding: 20
+        title: qsTr("Installation Logs")
+
+        // Upload state, local to this dialog
+        property bool uploadInProgress: false
+        property string uploadUrl: ""
+        property string uploadError: ""
+
+        background: Rectangle {
+            color: surfaceColor
+            radius: 12
+            border.color: textMutedColor
+            border.width: 1
+        }
+
+        header: Rectangle {
+            color: "transparent"
+            implicitHeight: dialogTitle.implicitHeight + 24
+
+            Text {
+                id: dialogTitle
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: 24
+                text: fullLogDialog.title
+                font.pixelSize: 20
+                font.bold: true
+                color: textColor
+            }
+        }
+
+        onOpened: {
+            uploadUrl = ""
+            uploadError = ""
+            uploadInProgress = false
+        }
+
+        Connections {
+            target: engine
+            function onLogUploadFinished(url, ok, error) {
+                fullLogDialog.uploadInProgress = false
+                if (ok) {
+                    fullLogDialog.uploadUrl = url
+                    fullLogDialog.uploadError = ""
+                } else {
+                    fullLogDialog.uploadUrl = ""
+                    fullLogDialog.uploadError = error
+                }
+            }
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 16
+
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+
+                TextArea {
+                    id: fullLogTextArea
+                    readOnly: true
+                    selectByMouse: true
+                    wrapMode: TextArea.Wrap
+                    font.family: "monospace"
+                    font.pixelSize: 12
+                    color: textColor
+                    text: engine.installationLog
+
+                    background: Rectangle {
+                        color: backgroundColor
+                        radius: 8
+                    }
+                }
+            }
+
+            // Upload result (URL sélectionnable + copie), affiché sous le journal
+            RowLayout {
+                Layout.fillWidth: true
+                visible: fullLogDialog.uploadInProgress || fullLogDialog.uploadUrl.length > 0 || fullLogDialog.uploadError.length > 0
+                spacing: 8
+
+                Text {
+                    visible: fullLogDialog.uploadInProgress
+                    text: qsTr("Sending…")
+                    color: textMutedColor
+                    font.pixelSize: 13
+                }
+
+                TextField {
+                    id: uploadUrlField
+                    Layout.fillWidth: true
+                    visible: !fullLogDialog.uploadInProgress && fullLogDialog.uploadUrl.length > 0
+                    readOnly: true
+                    selectByMouse: true
+                    text: fullLogDialog.uploadUrl
+                    color: textColor
+                    font.pixelSize: 13
+
+                    // Le style Fusion par défaut affiche un fond clair pour
+                    // les TextField (palette embossée), ce qui rend le texte
+                    // clair (`color: textColor`) illisible sur le thème
+                    // sombre du dialogue. Fond explicite pour le contraste.
+                    background: Rectangle {
+                        color: backgroundColor
+                        radius: 8
+                        border.color: textMutedColor
+                        border.width: 1
+                    }
+                }
+
+                Button {
+                    text: qsTr("Copy")
+                    visible: !fullLogDialog.uploadInProgress && fullLogDialog.uploadUrl.length > 0
+                    height: 32
+
+                    background: Rectangle {
+                        radius: 8
+                        color: parent.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
+                        border.color: textMutedColor
+                        border.width: 1
+                    }
+
+                    contentItem: Text {
+                        text: parent.text
+                        font.pixelSize: 13
+                        color: textColor
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    onClicked: {
+                        uploadUrlField.selectAll()
+                        uploadUrlField.copy()
+                        uploadUrlField.deselect()
+                    }
+                }
+
+                Text {
+                    visible: !fullLogDialog.uploadInProgress && fullLogDialog.uploadError.length > 0
+                    text: qsTr("Sending failed: ") + fullLogDialog.uploadError
+                    color: errorColor
+                    font.pixelSize: 13
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+            }
+        }
+
+        footer: Item {
+            implicitHeight: footerRow.implicitHeight + 24
+
+            RowLayout {
+                id: footerRow
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 12
+
+                Button {
+                    text: qsTr("Copy")
+                    onClicked: {
+                        fullLogTextArea.selectAll()
+                        fullLogTextArea.copy()
+                        fullLogTextArea.deselect()
+                    }
+                }
+
+                Button {
+                    text: qsTr("Send Logs")
+                    enabled: !fullLogDialog.uploadInProgress
+                    onClicked: {
+                        fullLogDialog.uploadInProgress = true
+                        fullLogDialog.uploadUrl = ""
+                        fullLogDialog.uploadError = ""
+                        engine.uploadInstallLog()
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Button {
+                    text: qsTr("Close")
+                    onClicked: fullLogDialog.close()
+                }
+            }
         }
     }
 

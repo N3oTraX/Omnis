@@ -10,6 +10,7 @@ import logging
 import subprocess
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 from omnis.jobs.base import BaseJob, JobContext, JobResult
 
@@ -242,26 +243,21 @@ class LocaleJob(BaseJob):
         Returns:
             List of timezone names (e.g., "Europe/Paris")
         """
-        zoneinfo_path = Path("/usr/share/zoneinfo")
-        if not zoneinfo_path.exists():
-            logger.warning("Zoneinfo directory not found, using fallback list")
-            return [
-                "UTC",
-                "Europe/Paris",
-                "Europe/London",
-                "America/New_York",
-                "America/Los_Angeles",
-            ]
+        # stdlib zoneinfo is backed by the system tz database or the bundled
+        # ``tzdata`` package, so this works on FHS and non-FHS systems (NixOS,
+        # the GLF live ISO) alike, unlike probing /usr/share/zoneinfo.
+        zones = available_timezones()
+        if zones:
+            return sorted(zones)
 
-        timezones = []
-        # Scan common timezone directories
-        for region_dir in zoneinfo_path.iterdir():
-            if region_dir.is_dir() and region_dir.name[0].isupper():
-                for zone_file in region_dir.iterdir():
-                    if zone_file.is_file():
-                        timezones.append(f"{region_dir.name}/{zone_file.name}")
-
-        return sorted(timezones) if timezones else ["UTC"]
+        logger.warning("No tz database available, using fallback list")
+        return [
+            "UTC",
+            "Europe/Paris",
+            "Europe/London",
+            "America/New_York",
+            "America/Los_Angeles",
+        ]
 
     def _validate_locale(self, locale: str) -> bool:
         """
@@ -293,7 +289,11 @@ class LocaleJob(BaseJob):
 
     def _validate_timezone(self, timezone: str) -> bool:
         """
-        Validate timezone exists in zoneinfo.
+        Validate a timezone against the IANA database.
+
+        Uses :class:`zoneinfo.ZoneInfo` rather than probing
+        ``/usr/share/zoneinfo`` so validation works on non-FHS systems (NixOS,
+        the GLF live ISO) where that path does not exist.
 
         Args:
             timezone: Timezone name (e.g., "Europe/Paris")
@@ -304,8 +304,11 @@ class LocaleJob(BaseJob):
         if not timezone:
             return False
 
-        zoneinfo_path = Path("/usr/share/zoneinfo") / timezone
-        return zoneinfo_path.exists() and zoneinfo_path.is_file()
+        try:
+            ZoneInfo(timezone)
+        except (ZoneInfoNotFoundError, ValueError):
+            return False
+        return True
 
     def _validate_keymap(self, keymap: str) -> bool:
         """

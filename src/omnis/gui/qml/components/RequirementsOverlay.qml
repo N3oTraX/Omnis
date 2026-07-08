@@ -59,7 +59,7 @@ Rectangle {
     border.width: 1
 
     // Drop shadow effect
-    layer.enabled: true
+    layer.enabled: !engine.softwareRendering
     layer.effect: MultiEffect {
         shadowEnabled: true
         shadowColor: Qt.rgba(0, 0, 0, 0.4)

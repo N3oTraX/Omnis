@@ -1,6 +1,5 @@
 """Unit tests for PartitionJob."""
 
-import json
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -15,6 +14,7 @@ try:
         PartitionJob,
         PartitionLayout,
         PartitionMode,
+        part_path,
     )
 
     HAS_PARTITION_JOB = True
@@ -115,115 +115,70 @@ class TestFormatSize:
 
 
 class TestListDisks:
-    """Tests for _list_disks() method."""
+    """Tests for _list_disks() method (delegates to disk_detector)."""
 
-    @patch("omnis.jobs.partition.subprocess.run")
-    def test_list_disks_success(self, mock_subprocess: MagicMock) -> None:
-        """_list_disks should parse lsblk JSON output."""
+    @patch("omnis.jobs.partition.disk_detector.list_disks")
+    def test_list_disks_adapts_detector_output(self, mock_list: MagicMock) -> None:
+        """_list_disks should adapt detector dicts into DiskInfo dataclasses."""
         job = PartitionJob()
 
-        # Mock lsblk output
-        lsblk_output = {
-            "blockdevices": [
-                {
-                    "name": "sda",
-                    "size": str(256 * 1024**3),
-                    "type": "disk",
-                    "model": "Samsung SSD",
-                    "rm": "0",
-                    "children": [
-                        {
-                            "name": "sda1",
-                            "size": str(512 * 1024**2),
-                            "type": "part",
-                            "fstype": "vfat",
-                            "mountpoint": None,
-                        },
-                        {
-                            "name": "sda2",
-                            "size": str(255 * 1024**3),
-                            "type": "part",
-                            "fstype": "ext4",
-                            "mountpoint": "/",
-                        },
-                    ],
-                },
-                {
-                    "name": "loop0",
-                    "size": str(100 * 1024**2),
-                    "type": "loop",
-                },
-            ]
-        }
-
-        mock_subprocess.return_value = MagicMock(
-            stdout=json.dumps(lsblk_output),
-            returncode=0,
-        )
+        mock_list.return_value = [
+            {
+                "name": "sda",
+                "model": "Samsung SSD",
+                "size": "256.0 GB",
+                "sizeBytes": 256 * 1024**3,
+                "type": "SSD",
+                "removable": False,
+                "partitions": [
+                    {
+                        "name": "sda1",
+                        "sizeBytes": 512 * 1024**2,
+                        "fstype": "vfat",
+                        "partType": "efi",
+                    },
+                    {
+                        "name": "sda2",
+                        "sizeBytes": 255 * 1024**3,
+                        "fstype": "ext4",
+                        "partType": "linux",
+                    },
+                ],
+            }
+        ]
 
         disks = job._list_disks()
 
-        # Should only return disk type (not loop)
         assert len(disks) == 1
         assert disks[0].name == "sda"
         assert disks[0].path == "/dev/sda"
         assert disks[0].model == "Samsung SSD"
+        assert disks[0].size == 256 * 1024**3
         assert disks[0].has_partitions is True
         assert len(disks[0].partitions) == 2
 
-        # Check partition details
+        # Check partition adaptation
         assert disks[0].partitions[0].name == "sda1"
+        assert disks[0].partitions[0].path == "/dev/sda1"
         assert disks[0].partitions[0].fstype == "vfat"
         assert disks[0].partitions[0].has_data is True  # has fstype
 
-    @patch("omnis.jobs.partition.subprocess.run")
-    def test_list_disks_filters_removable(self, mock_subprocess: MagicMock) -> None:
-        """_list_disks should filter out removable disks for safety."""
-        job = PartitionJob()
-
-        lsblk_output = {
-            "blockdevices": [
-                {
-                    "name": "sdb",
-                    "size": str(64 * 1024**3),
-                    "type": "disk",
-                    "model": "USB Drive",
-                    "rm": "1",  # Removable - should be filtered out for safety
-                }
-            ]
-        }
-
-        mock_subprocess.return_value = MagicMock(
-            stdout=json.dumps(lsblk_output),
-            returncode=0,
-        )
-
-        disks = job._list_disks()
-
-        # Removable disks are filtered out for safety (prevent accidental USB wipe)
-        assert len(disks) == 0
-
-    @patch("omnis.jobs.partition.subprocess.run")
-    def test_list_disks_handles_no_partitions(self, mock_subprocess: MagicMock) -> None:
+    @patch("omnis.jobs.partition.disk_detector.list_disks")
+    def test_list_disks_handles_no_partitions(self, mock_list: MagicMock) -> None:
         """_list_disks should handle disks with no partitions."""
         job = PartitionJob()
 
-        lsblk_output = {
-            "blockdevices": [
-                {
-                    "name": "sda",
-                    "size": str(256 * 1024**3),
-                    "type": "disk",
-                    "model": "Empty Disk",
-                    "rm": "0",
-                }
-            ]
-        }
-
-        mock_subprocess.return_value = MagicMock(
-            stdout=json.dumps(lsblk_output),
-            returncode=0,
-        )
+        mock_list.return_value = [
+            {
+                "name": "sda",
+                "model": "Empty Disk",
+                "size": "256.0 GB",
+                "sizeBytes": 256 * 1024**3,
+                "type": "SSD",
+                "removable": False,
+                "partitions": [],
+            }
+        ]
 
         disks = job._list_disks()
 
@@ -640,7 +595,8 @@ class TestPartitionAuto:
             context=context,
             disk="/dev/sda",
             filesystem="ext4",
-            swap_size_gb=0,
+            selections={"swap_strategy": "none"},
+            passphrase="",
             dry_run=True,
         )
 
@@ -650,7 +606,7 @@ class TestPartitionAuto:
         assert job._layout is not None
         assert job._layout.efi_partition == "/dev/sda1"
         assert job._layout.root_partition == "/dev/sda2"
-        assert job._layout.swap_partition == ""  # No swap
+        assert job._layout.swap_partition == ""  # No swap partition
 
         # Verify GPT creation was called
         calls = mock_run_cmd.call_args_list
@@ -660,13 +616,13 @@ class TestPartitionAuto:
     @patch("omnis.jobs.partition.PartitionJob._mount_partitions")
     @patch("omnis.jobs.partition.PartitionJob._format_partitions")
     @patch("omnis.jobs.partition.PartitionJob._run_partitioning_command")
-    def test_partition_auto_with_swap(
+    def test_partition_auto_legacy_swap_partition(
         self,
         mock_run_cmd: MagicMock,
         mock_format: MagicMock,
         mock_mount: MagicMock,
     ) -> None:
-        """_partition_auto should create swap partition when requested."""
+        """_partition_auto should create a swap PARTITION for legacy swap_size."""
         job = PartitionJob()
 
         mock_run_cmd.return_value = JobResult.ok()
@@ -679,7 +635,8 @@ class TestPartitionAuto:
             context=context,
             disk="/dev/sda",
             filesystem="ext4",
-            swap_size_gb=8,  # 8 GB swap
+            selections={"swap_size": 8},  # legacy GB partition path
+            passphrase="",
             dry_run=True,
         )
 
@@ -707,7 +664,8 @@ class TestPartitionAuto:
             context=context,
             disk="/dev/sda",
             filesystem="ext4",
-            swap_size_gb=0,
+            selections={"swap_strategy": "none"},
+            passphrase="",
             dry_run=True,
         )
 
@@ -844,7 +802,7 @@ class TestMountPartitions:
     def test_mount_partitions_creates_efi_mountpoint(
         self, mock_run_cmd: MagicMock, mock_path: MagicMock
     ) -> None:
-        """_mount_partitions should create /boot/efi directory."""
+        """_mount_partitions should create the ESP mount point (/boot for NixOS)."""
         job = PartitionJob()
         job._layout = PartitionLayout(
             efi_partition="/dev/sda1",
@@ -853,9 +811,9 @@ class TestMountPartitions:
 
         mock_run_cmd.return_value = JobResult.ok()
 
-        # Mock Path to track mkdir call
+        # ESP is now mounted on <target_root>/boot (single path join).
         mock_efi_mount = MagicMock()
-        mock_path.return_value.__truediv__.return_value.__truediv__.return_value = mock_efi_mount
+        mock_path.return_value.__truediv__.return_value = mock_efi_mount
 
         context = JobContext(target_root="/mnt")
         result = job._mount_partitions(context, dry_run=False)
@@ -1024,31 +982,6 @@ class TestRunMethod:
 
     @patch("omnis.jobs.partition.PartitionJob._partition_auto")
     @patch("omnis.jobs.partition.PartitionJob.validate")
-    def test_run_manual_mode_not_implemented(
-        self, mock_validate: MagicMock, _mock_partition: MagicMock
-    ) -> None:
-        """run should fail for manual mode (not yet implemented)."""
-        job = PartitionJob()
-
-        mock_validate.return_value = JobResult.ok()
-
-        context = JobContext(
-            selections={
-                "disk": "/dev/sda",
-                "mode": "manual",
-                "dry_run": False,
-                "confirmed": True,
-            }
-        )
-
-        result = job.run(context)
-
-        assert result.success is False
-        assert result.error_code == 39
-        assert "Manual partitioning mode not yet implemented" in result.message
-
-    @patch("omnis.jobs.partition.PartitionJob._partition_auto")
-    @patch("omnis.jobs.partition.PartitionJob.validate")
     def test_run_auto_mode_success(
         self, mock_validate: MagicMock, mock_partition: MagicMock
     ) -> None:
@@ -1080,3 +1013,523 @@ class TestRunMethod:
         assert result.data["disk"] == "/dev/sda"
         assert result.data["layout"]["efi"] == "/dev/sda1"
         assert result.data["layout"]["root"] == "/dev/sda2"
+
+
+class TestPartPath:
+    """Tests for the part_path() helper (NVMe/eMMC separator handling)."""
+
+    def test_sata_disk(self) -> None:
+        """SATA/SCSI disks have no 'p' separator."""
+        assert part_path("/dev/sda", 1) == "/dev/sda1"
+        assert part_path("/dev/sda", 2) == "/dev/sda2"
+
+    def test_nvme_disk(self) -> None:
+        """NVMe disks (name ends with digit) require a 'p' separator."""
+        assert part_path("/dev/nvme0n1", 1) == "/dev/nvme0n1p1"
+        assert part_path("/dev/nvme0n1", 3) == "/dev/nvme0n1p3"
+
+    def test_emmc_disk(self) -> None:
+        """eMMC disks require a 'p' separator."""
+        assert part_path("/dev/mmcblk0", 1) == "/dev/mmcblk0p1"
+
+    def test_loop_disk(self) -> None:
+        """Loop devices end with a digit -> 'p' separator."""
+        assert part_path("/dev/loop0", 1) == "/dev/loop0p1"
+
+
+class TestPartitionAutoSequence:
+    """Tests for the AUTO partitioning command ordering and ESP mount target."""
+
+    @patch("omnis.jobs.partition.PartitionJob._mount_partitions")
+    @patch("omnis.jobs.partition.PartitionJob._format_partitions")
+    @patch("omnis.jobs.partition.PartitionJob._run_partitioning_command")
+    def test_wipe_label_settle_order(
+        self,
+        mock_run_cmd: MagicMock,
+        mock_format: MagicMock,
+        mock_mount: MagicMock,
+    ) -> None:
+        """wipefs -> sgdisk --zap-all -> mklabel -> mkpart -> partprobe -> settle."""
+        job = PartitionJob()
+        mock_run_cmd.return_value = JobResult.ok()
+        mock_format.return_value = JobResult.ok()
+        mock_mount.return_value = JobResult.ok()
+
+        result = job._partition_auto(
+            context=JobContext(),
+            disk="/dev/sda",
+            filesystem="ext4",
+            selections={"swap_strategy": "none"},
+            passphrase="",
+            dry_run=True,
+        )
+        assert result.success is True
+
+        # Flatten the issued command lines in order.
+        issued = [list(c.args[0]) for c in mock_run_cmd.call_args_list]
+
+        def index_of(token: str) -> int:
+            for i, cmd in enumerate(issued):
+                if token in cmd or any(token in part for part in cmd):
+                    return i
+            return -1
+
+        i_wipefs = index_of("wipefs")
+        i_sgdisk = index_of("--zap-all")
+        i_mklabel = index_of("mklabel")
+        i_mkpart = index_of("mkpart")
+        i_partprobe = index_of("partprobe")
+        i_settle = index_of("settle")
+
+        assert -1 not in (i_wipefs, i_sgdisk, i_mklabel, i_mkpart, i_partprobe, i_settle)
+        assert i_wipefs < i_sgdisk < i_mklabel < i_mkpart < i_partprobe < i_settle
+
+        # _format_partitions (mkfs) must run only AFTER settle.
+        assert mock_format.called
+
+    @patch("omnis.jobs.partition.PartitionJob._run_partitioning_command")
+    def test_esp_mounted_on_boot(self, mock_run_cmd: MagicMock) -> None:
+        """ESP must be mounted to a path ending in /boot (not /boot/efi)."""
+        job = PartitionJob()
+        job._layout = PartitionLayout(
+            efi_partition="/dev/sda1",
+            root_partition="/dev/sda2",
+        )
+        mock_run_cmd.return_value = JobResult.ok()
+
+        result = job._mount_partitions(JobContext(target_root="/mnt"), dry_run=True)
+        assert result.success is True
+
+        # Find the mount command that targets the EFI partition.
+        efi_mounts = [
+            list(c.args[0])
+            for c in mock_run_cmd.call_args_list
+            if "mount" in c.args[0] and "/dev/sda1" in c.args[0]
+        ]
+        assert len(efi_mounts) == 1
+        target = efi_mounts[0][-1]
+        assert target.endswith("/boot")
+        assert not target.endswith("/boot/efi")
+
+
+class TestSwapStrategy:
+    """Tests for swap_strategy handling (none/file/hibernate)."""
+
+    @patch("omnis.jobs.partition.PartitionJob._mount_partitions")
+    @patch("omnis.jobs.partition.PartitionJob._format_partitions")
+    @patch("omnis.jobs.partition.PartitionJob._run_partitioning_command")
+    def test_swap_none_creates_nothing(
+        self,
+        mock_run_cmd: MagicMock,
+        mock_format: MagicMock,
+        mock_mount: MagicMock,
+    ) -> None:
+        """swap_strategy=none: no swap partition and no swapfile."""
+        job = PartitionJob()
+        mock_run_cmd.return_value = JobResult.ok()
+        mock_format.return_value = JobResult.ok()
+        mock_mount.return_value = JobResult.ok()
+
+        result = job._partition_auto(
+            context=JobContext(),
+            disk="/dev/sda",
+            filesystem="ext4",
+            selections={"swap_strategy": "none"},
+            passphrase="",
+            dry_run=True,
+        )
+        assert result.success is True
+        assert job._layout is not None
+        assert job._layout.swap_partition == ""
+
+        issued = [str(c) for c in mock_run_cmd.call_args_list]
+        assert not any("linux-swap" in c for c in issued)
+        assert not any("swapfile" in c for c in issued)
+
+    @patch("omnis.jobs.partition.PartitionJob._mount_partitions")
+    @patch("omnis.jobs.partition.PartitionJob._format_partitions")
+    @patch("omnis.jobs.partition.PartitionJob._run_partitioning_command")
+    def test_swap_file_creates_swapfile(
+        self,
+        mock_run_cmd: MagicMock,
+        mock_format: MagicMock,
+        mock_mount: MagicMock,
+    ) -> None:
+        """swap_strategy=file: a swapfile is allocated, formatted and activated."""
+        job = PartitionJob()
+        mock_run_cmd.return_value = JobResult.ok()
+        mock_format.return_value = JobResult.ok()
+        mock_mount.return_value = JobResult.ok()
+
+        result = job._partition_auto(
+            context=JobContext(target_root="/mnt"),
+            disk="/dev/sda",
+            filesystem="ext4",
+            selections={"swap_strategy": "file"},
+            passphrase="",
+            dry_run=True,
+        )
+        assert result.success is True
+
+        issued = [list(c.args[0]) for c in mock_run_cmd.call_args_list]
+        flat = [" ".join(cmd) for cmd in issued]
+        # No swap partition.
+        assert not any("linux-swap" in line for line in flat)
+        # Swapfile lifecycle present.
+        assert any("dd" in cmd and any("swapfile" in p for p in cmd) for cmd in issued)
+        assert any("mkswap" in cmd for cmd in issued)
+        assert any("swapon" in cmd for cmd in issued)
+
+    @patch("omnis.jobs.partition.PartitionJob._mount_partitions")
+    @patch("omnis.jobs.partition.PartitionJob._format_partitions")
+    @patch("omnis.jobs.partition.PartitionJob._run_partitioning_command")
+    def test_swap_hibernate_creates_swapfile(
+        self,
+        mock_run_cmd: MagicMock,
+        mock_format: MagicMock,
+        mock_mount: MagicMock,
+    ) -> None:
+        """swap_strategy=hibernate: a swapfile is created via the same path."""
+        job = PartitionJob()
+        mock_run_cmd.return_value = JobResult.ok()
+        mock_format.return_value = JobResult.ok()
+        mock_mount.return_value = JobResult.ok()
+
+        result = job._partition_auto(
+            context=JobContext(target_root="/mnt"),
+            disk="/dev/sda",
+            filesystem="ext4",
+            selections={"swap_strategy": "hibernate"},
+            passphrase="",
+            dry_run=True,
+        )
+        assert result.success is True
+        issued = [list(c.args[0]) for c in mock_run_cmd.call_args_list]
+        assert any("mkswap" in cmd for cmd in issued)
+        assert any("swapon" in cmd for cmd in issued)
+
+
+class TestEncryption:
+    """Tests for LUKS encryption of the root partition."""
+
+    @patch("omnis.jobs.partition.PartitionJob._mount_partitions")
+    @patch("omnis.jobs.partition.PartitionJob._run_secret_command")
+    @patch("omnis.jobs.partition.PartitionJob._run_partitioning_command")
+    def test_encryption_uses_luks_and_mapper(
+        self,
+        mock_run_cmd: MagicMock,
+        mock_secret: MagicMock,
+        mock_mount: MagicMock,
+    ) -> None:
+        """encryption=True: luksFormat + luksOpen called; mkfs targets the mapper."""
+        job = PartitionJob()
+        mock_run_cmd.return_value = JobResult.ok()
+        mock_secret.return_value = JobResult.ok()
+        mock_mount.return_value = JobResult.ok()
+
+        result = job._partition_auto(
+            context=JobContext(target_root="/mnt"),
+            disk="/dev/sda",
+            filesystem="ext4",
+            selections={"swap_strategy": "none", "encryption": True},
+            passphrase="S3cretPass!",
+            dry_run=False,
+        )
+        assert result.success is True
+        assert job._layout is not None
+        assert job._layout.encrypted is True
+
+        # cryptsetup luksFormat AND luksOpen were issued via the secret runner.
+        secret_cmds = [list(c.args[0]) for c in mock_secret.call_args_list]
+        assert any("luksFormat" in cmd for cmd in secret_cmds)
+        assert any("luksOpen" in cmd for cmd in secret_cmds)
+
+        # The format/mount target is the mapper device.
+        assert job._layout.root_target == "/dev/mapper/cryptroot"
+
+        # mkfs.ext4 (real format runs since _format_partitions is NOT mocked here?)
+        # _format_partitions is real; verify it formatted the mapper.
+        format_cmds = [list(c.args[0]) for c in mock_run_cmd.call_args_list]
+        assert any("mkfs.ext4" in cmd and "/dev/mapper/cryptroot" in cmd for cmd in format_cmds)
+
+    @patch("omnis.jobs.partition.PartitionJob._mount_partitions")
+    @patch("omnis.jobs.partition.PartitionJob._run_partitioning_command")
+    def test_passphrase_never_logged(
+        self,
+        mock_run_cmd: MagicMock,
+        mock_mount: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """SECURITY: the LUKS passphrase must never appear in any log record."""
+        import logging
+
+        sentinel = "S3cretPass!"
+        job = PartitionJob()
+        mock_run_cmd.return_value = JobResult.ok()
+        mock_mount.return_value = JobResult.ok()
+
+        # Patch subprocess.run inside _run_secret_command so cryptsetup is not
+        # actually invoked, but the real (secret-safe) logging path runs.
+        with (
+            caplog.at_level(logging.DEBUG),
+            patch("omnis.jobs.partition.subprocess.run") as mock_sub,
+        ):
+            mock_sub.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            result = job._partition_auto(
+                context=JobContext(target_root="/mnt"),
+                disk="/dev/sda",
+                filesystem="ext4",
+                selections={"swap_strategy": "none", "encryption": True},
+                passphrase=sentinel,
+                dry_run=False,
+            )
+
+        assert result.success is True
+        for record in caplog.records:
+            assert sentinel not in record.getMessage()
+
+
+class TestRunEncryptionValidation:
+    """Tests for encryption validation in validate()."""
+
+    @patch("omnis.jobs.partition.PartitionJob._list_disks")
+    @patch("omnis.jobs.partition.Path")
+    def test_validate_encryption_requires_passphrase(
+        self, mock_path: MagicMock, mock_list_disks: MagicMock
+    ) -> None:
+        """validate should fail (46) when encryption is on but passphrase empty."""
+        job = PartitionJob()
+        mock_path.return_value.exists.return_value = True
+        mock_list_disks.return_value = [
+            DiskInfo(
+                name="sda",
+                path="/dev/sda",
+                size=256 * 1024**3,
+                size_human="256.0 GB",
+            )
+        ]
+
+        context = JobContext(
+            selections={
+                "disk": "/dev/sda",
+                "encryption": True,
+                "encryption_passphrase": "",
+            }
+        )
+        result = job.validate(context)
+        assert result.success is False
+        assert result.error_code == 46
+        # SECURITY: message must not leak any passphrase (there is none here).
+        assert "passphrase" in result.message.lower()
+
+
+class TestManualPartitioning:
+    """Tests for manual mode (_partition_manual): assign existing partitions."""
+
+    @staticmethod
+    def _ctx(assignments: list[dict[str, object]]) -> JobContext:
+        return JobContext(
+            target_root="/mnt/target",
+            selections={"partition_assignments": assignments},
+        )
+
+    @staticmethod
+    def _assign(
+        name: str, mountpoint: str, fmt: bool = False, fstype: str = ""
+    ) -> dict[str, object]:
+        return {
+            "name": name,
+            "path": f"/dev/{name}",
+            "mountpoint": mountpoint,
+            "format": fmt,
+            "fstype": fstype,
+        }
+
+    def test_requires_at_least_one_assignment(self) -> None:
+        job = PartitionJob()
+        result = job._partition_manual(
+            context=self._ctx([]), disk="/dev/sdb", selections={}, dry_run=True
+        )
+        assert result.success is False
+        assert result.error_code == 48
+
+    def test_requires_exactly_one_root(self) -> None:
+        job = PartitionJob()
+        assignments = [self._assign("sdb1", "/boot")]
+        result = job._partition_manual(
+            context=self._ctx(assignments),
+            disk="/dev/sdb",
+            selections={"partition_assignments": assignments},
+            dry_run=True,
+        )
+        assert result.success is False
+        assert result.error_code == 49
+
+    def test_rejects_duplicate_mount_point(self) -> None:
+        job = PartitionJob()
+        assignments = [
+            self._assign("sdb1", "/"),
+            self._assign("sdb2", "/home"),
+            self._assign("sdb3", "/home"),
+        ]
+        result = job._partition_manual(
+            context=self._ctx(assignments),
+            disk="/dev/sdb",
+            selections={"partition_assignments": assignments},
+            dry_run=True,
+        )
+        assert result.success is False
+        assert result.error_code == 50
+
+    def test_formats_and_mounts_dry_run(self) -> None:
+        job = PartitionJob()
+        assignments = [
+            self._assign("sdb1", "/boot", fmt=True, fstype="vfat"),
+            self._assign("sdb2", "/", fmt=True, fstype="ext4"),
+        ]
+        with patch.object(job, "_run_partitioning_command") as mock_cmd:
+            mock_cmd.return_value = JobResult.ok()
+            result = job._partition_manual(
+                context=self._ctx(assignments),
+                disk="/dev/sdb",
+                selections={"partition_assignments": assignments},
+                dry_run=True,
+            )
+
+        assert result.success is True
+        assert job._layout is not None
+        assert job._layout.root_partition == "/dev/sdb2"
+        assert job._layout.efi_partition == "/dev/sdb1"
+
+        commands = [call.args[0] for call in mock_cmd.call_args_list]
+        assert ["mkfs.fat", "-F32", "/dev/sdb1"] in commands
+        assert ["mkfs.ext4", "-F", "/dev/sdb2"] in commands
+        # Root must mount before /boot (shallowest path first).
+        mount_cmds = [c for c in commands if c[0] == "mount"]
+        assert mount_cmds[0] == ["mount", "/dev/sdb2", "/mnt/target"]
+        assert mount_cmds[1] == ["mount", "/dev/sdb1", "/mnt/target/boot"]
+
+    def test_does_not_format_when_flag_absent(self) -> None:
+        job = PartitionJob()
+        assignments = [self._assign("sdb2", "/", fmt=False, fstype="ext4")]
+        with patch.object(job, "_run_partitioning_command") as mock_cmd:
+            mock_cmd.return_value = JobResult.ok()
+            result = job._partition_manual(
+                context=self._ctx(assignments),
+                disk="/dev/sdb",
+                selections={"partition_assignments": assignments},
+                dry_run=True,
+            )
+        assert result.success is True
+        commands = [call.args[0] for call in mock_cmd.call_args_list]
+        assert not any(c[0].startswith("mkfs") or c[0] == "mkswap" for c in commands)
+
+    def test_mkfs_command_mapping(self) -> None:
+        assert PartitionJob._mkfs_command("ext4", "/dev/x") == ["mkfs.ext4", "-F", "/dev/x"]
+        assert PartitionJob._mkfs_command("btrfs", "/dev/x") == ["mkfs.btrfs", "-f", "/dev/x"]
+        assert PartitionJob._mkfs_command("vfat", "/dev/x") == ["mkfs.fat", "-F32", "/dev/x"]
+        assert PartitionJob._mkfs_command("swap", "/dev/x") == ["mkswap", "/dev/x"]
+        assert PartitionJob._mkfs_command("reiserfs", "/dev/x") is None
+
+    def test_run_routes_manual_mode(self) -> None:
+        job = PartitionJob()
+        with (
+            patch.object(job, "validate") as mock_validate,
+            patch.object(job, "_partition_manual") as mock_manual,
+        ):
+            mock_validate.return_value = JobResult.ok()
+            mock_manual.return_value = JobResult.ok()
+            context = JobContext(
+                selections={"disk": "/dev/sdb", "partition_mode": "manual", "dry_run": True}
+            )
+            job.run(context)
+            assert mock_manual.called
+
+
+class TestManualOperationsIntegration:
+    """Manual mode routing between the legacy M1 assignments and the M2 ops."""
+
+    def test_operations_present_routes_to_apply_operations(self) -> None:
+        """When partition_operations is present, _apply_operations drives it."""
+        job = PartitionJob()
+        with patch.object(job, "_apply_operations") as mock_apply:
+            mock_apply.return_value = JobResult.ok()
+            selections = {
+                "partition_operations": [
+                    {"type": "delete", "target": "/dev/sdb2", "params": {"number": 2}}
+                ]
+            }
+            context = JobContext(selections=selections)
+            result = job._partition_manual(
+                context=context, disk="/dev/sdb", selections=selections, dry_run=True
+            )
+        assert result.success is True
+        assert mock_apply.called
+
+    def test_operations_absent_uses_legacy_assignment_path(self) -> None:
+        """Without partition_operations, the legacy assignment path is used."""
+        job = PartitionJob()
+        with patch.object(job, "_apply_operations") as mock_apply:
+            assignments = [
+                {
+                    "name": "sdb2",
+                    "path": "/dev/sdb2",
+                    "mountpoint": "/",
+                    "format": False,
+                    "fstype": "ext4",
+                }
+            ]
+            selections = {"partition_assignments": assignments}
+            context = JobContext(
+                target_root="/mnt/target",
+                selections=selections,
+            )
+            with patch.object(job, "_run_partitioning_command") as mock_cmd:
+                mock_cmd.return_value = JobResult.ok()
+                result = job._partition_manual(
+                    context=context, disk="/dev/sdb", selections=selections, dry_run=True
+                )
+        assert result.success is True
+        # The M2 path must NOT have been taken.
+        mock_apply.assert_not_called()
+
+
+class TestCleanupHandoff:
+    """cleanup() must keep the target mounted on success (hand-off to nixos)."""
+
+    def test_cleanup_skips_unmount_on_success(self) -> None:
+        """On success the mounts are a deliverable for the nixos job: no umount."""
+        job = PartitionJob()
+        job._layout = PartitionLayout(root_partition="/dev/sda2", encrypted=True)
+        job._succeeded = True
+        context = JobContext(target_root="/mnt/target")
+
+        with patch("omnis.jobs.partition.subprocess.run") as mock_run:
+            job.cleanup(context)
+
+        mock_run.assert_not_called()
+
+    def test_cleanup_unmounts_on_failure(self) -> None:
+        """On failure the mounts (and LUKS mapper) are torn down."""
+        job = PartitionJob()
+        job._layout = PartitionLayout(root_partition="/dev/sda2", encrypted=True)
+        job._succeeded = False
+        context = JobContext(target_root="/mnt/target")
+
+        with patch("omnis.jobs.partition.subprocess.run") as mock_run:
+            job.cleanup(context)
+
+        cmds = [call.args[0] for call in mock_run.call_args_list]
+        assert ["umount", "/mnt/target"] in cmds
+        assert any(cmd[:2] == ["cryptsetup", "luksClose"] for cmd in cmds)
+
+    def test_run_resets_succeeded_flag(self) -> None:
+        """A fresh run() clears a stale hand-off flag so retries are safe."""
+        job = PartitionJob()
+        job._succeeded = True
+        # Empty selections → validate() fails fast, before any mounting.
+        context = JobContext(selections={})
+
+        job.run(context)
+
+        assert job._succeeded is False

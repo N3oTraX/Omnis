@@ -279,7 +279,45 @@ class TestCmdlineDetection:
         assert result.timezone == "Europe/Paris"
         assert result.keymap == "fr"
         assert result.source == "cmdline"
-        assert result.confidence == 0.7
+        assert result.confidence == 0.9
+
+    def test_cmdline_glf_iso_kbd_params(self) -> None:
+        """GLF ISO GRUB params: kbd.locale + kbd.layout drive the selection;
+        kbd.keymap (a console keymap like de-latin1) must be ignored."""
+        cmdline = (
+            "BOOT_IMAGE=/boot/vmlinuz kbd.layout=de kbd.keymap=de-latin1 kbd.locale=de_DE.UTF-8"
+        )
+
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "read_text", return_value=cmdline),
+        ):
+            detector = LocaleDetector()
+            result = detector._detect_cmdline()
+
+        assert result is not None
+        assert result.language == "de_DE.UTF-8"
+        assert result.keymap == "de"  # kbd.layout, NOT "de-latin1"
+        assert result.confidence == 0.9
+
+    def test_prefer_local_cmdline_wins_over_geoip(self) -> None:
+        """override_mode=prefer_local: the GRUB cmdline choice wins over GeoIP,
+        which must not even be queried."""
+        cmdline = "BOOT_IMAGE=/boot/vmlinuz kbd.layout=fr kbd.locale=fr_FR.UTF-8"
+        config = LocaleDetectorConfig(override_mode="prefer_local")
+
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "read_text", return_value=cmdline),
+            patch("urllib.request.urlopen") as mock_urlopen,
+        ):
+            detector = LocaleDetector(config)
+            result = detector.detect()
+
+        mock_urlopen.assert_not_called()
+        assert result.source == "cmdline"
+        assert result.keymap == "fr"
+        assert result.language == "fr_FR.UTF-8"
 
     def test_cmdline_detection_partial(self) -> None:
         """Cmdline detection should work with partial parameters."""

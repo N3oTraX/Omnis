@@ -20,7 +20,7 @@ from omnis import __version__
 from omnis.core.engine import ConfigurationError
 
 if TYPE_CHECKING:
-    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtGui import QGuiApplication, QIcon
 
     from omnis.core.engine import BrandingConfig
 
@@ -84,6 +84,13 @@ def parse_args() -> argparse.Namespace:
         "--no-fork",
         action="store_true",
         help="Run without forking engine process (for development/testing)",
+    )
+
+    parser.add_argument(
+        "--skip-requirements",
+        action="store_true",
+        help="Dev: bypass requirements and per-screen validation "
+        "(navigate all screens freely for design testing)",
     )
 
     return parser.parse_args()
@@ -192,6 +199,27 @@ def find_qml_file() -> Path:
     raise FileNotFoundError("Main.qml not found. Check installation.")
 
 
+def _resolve_app_icon() -> QIcon:
+    """Locate the Omnis app icon across dev and packaged layouts.
+
+    Dev checkout: ``<repo>/data/icons/org.glfos.omnis.svg``. Packaged builds
+    ship it in the hicolor theme under ``<prefix>/share/icons/...``. Fall back
+    to the icon theme name if no concrete file is found.
+    """
+    from PySide6.QtGui import QIcon
+
+    here = Path(__file__).resolve()
+    name = "org.glfos.omnis.svg"
+    candidates = [here.parents[2] / "data" / "icons" / name]
+    candidates += [
+        p / "share" / "icons" / "hicolor" / "scalable" / "apps" / name for p in here.parents
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return QIcon(str(candidate))
+    return QIcon.fromTheme("org.glfos.omnis")
+
+
 def create_application(branding: BrandingConfig) -> QGuiApplication:
     """Create and configure Qt application."""
     from PySide6.QtGui import QGuiApplication
@@ -203,6 +231,11 @@ def create_application(branding: BrandingConfig) -> QGuiApplication:
     app.setApplicationVersion(branding.version)
     app.setOrganizationName("Omnis")
 
+    # Wayland associates the window with its .desktop file (app_id) to pick up
+    # the taskbar/dock icon; setWindowIcon covers X11 and other compositors.
+    app.setDesktopFileName("omnis")
+    app.setWindowIcon(_resolve_app_icon())
+
     return app
 
 
@@ -212,6 +245,7 @@ def run_ui_mode(
     debug: bool,
     dry_run: bool,
     no_fork: bool,
+    skip_requirements: bool = False,
 ) -> int:
     """
     Run the UI process.
@@ -282,11 +316,23 @@ def run_ui_mode(
         # Create bridge between QML and Python engine
         # In fork mode, bridge uses IPC; in no-fork mode, uses direct engine
         if no_fork:
-            bridge = EngineBridge(engine, theme_base, debug=debug, dry_run=dry_run)
+            bridge = EngineBridge(
+                engine,
+                theme_base,
+                debug=debug,
+                dry_run=dry_run,
+                skip_requirements=skip_requirements,
+            )
         else:
             # TODO: Create IPC-based bridge for v0.2.0
             # For now, fall back to direct bridge
-            bridge = EngineBridge(engine, theme_base, debug=debug, dry_run=dry_run)
+            bridge = EngineBridge(
+                engine,
+                theme_base,
+                debug=debug,
+                dry_run=dry_run,
+                skip_requirements=skip_requirements,
+            )
 
         # Create translator proxy for live language switching
         translator_proxy = TranslatorProxy(engine=qml_engine)
@@ -372,6 +418,7 @@ def main() -> int:
         debug=args.debug,
         dry_run=args.dry_run,
         no_fork=args.no_fork,
+        skip_requirements=args.skip_requirements,
     )
 
 

@@ -55,13 +55,23 @@ class TestConfigurationSecurity:
             content = config_file.read_text()
             for pattern in password_patterns:
                 matches = re.findall(pattern, content, re.IGNORECASE)
-                # Filter out placeholder values
+                # Filter out placeholder values and asset paths
                 real_matches = [
                     m
                     for m in matches
                     if not any(
                         placeholder in m.lower()
-                        for placeholder in ["example", "changeme", "xxx", "your_", "<", ">"]
+                        for placeholder in [
+                            "example",
+                            "changeme",
+                            "xxx",
+                            "your_",
+                            "<",
+                            ">",
+                            ".svg",  # icon asset paths
+                            ".png",  # image asset paths
+                            "icon_",  # icon configuration keys
+                        ]
                     )
                 ]
                 assert not real_matches, (
@@ -206,13 +216,21 @@ class TestCodeSecurity:
             r'token\s*=\s*["\'][a-zA-Z0-9]{20,}["\']',
         ]
 
+        # Placeholder values that are provably NOT credentials: format-string
+        # / template markers such as ``{hash}`` or ``<hash>`` used to render
+        # config files (e.g. the NixOS ``hashedPassword = "{hash}";`` template).
+        placeholder_re = re.compile(r'["\'][<{][^"\']*[>}]["\']')
+
         for py_file in python_files:
             content = py_file.read_text()
             for pattern in credential_patterns:
                 matches = re.findall(pattern, content, re.IGNORECASE)
-                # Filter test files and obvious non-credentials
+                # Filter test files and obvious non-credentials (template markers).
+                real_matches = [m for m in matches if not placeholder_re.search(m)]
                 if "test" not in str(py_file).lower():
-                    assert not matches, f"Potential hardcoded credential in {py_file}: {matches}"
+                    assert not real_matches, (
+                        f"Potential hardcoded credential in {py_file}: {real_matches}"
+                    )
 
 
 @pytest.mark.skipif(not HAS_OMNIS, reason="omnis package not available")

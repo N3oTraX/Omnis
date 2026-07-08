@@ -57,11 +57,14 @@ Item {
         return names.length > 0 ? names : localesModel
     }
 
-    // Current selections
-    property string selectedLocale: ""
-    property string selectedTimezone: ""
-    property string selectedKeymap: ""
-    property string selectedKeyboardVariant: ""
+    // Sélections courantes : miroirs descendants (lecture seule) de la source
+    // de vérité `engine`. Jamais réassignés impérativement (les handlers
+    // émettent des signaux consommés par Main.qml qui appelle engine.setX),
+    // donc ces bindings restent vivants et reflètent toujours l'état courant.
+    readonly property string selectedLocale: engine.selectedLocale
+    readonly property string selectedTimezone: engine.selectedTimezone
+    readonly property string selectedKeymap: engine.selectedKeymap
+    readonly property string selectedKeyboardVariant: engine.selectedKeyboardVariant
 
     // Theme colors
     property color primaryColor: "#5597e6"
@@ -142,7 +145,7 @@ Item {
                         radius: 10
                         color: surfaceColor
 
-                        layer.enabled: true
+                        layer.enabled: !engine.softwareRendering
                         layer.effect: MultiEffect {
                             shadowEnabled: true
                             shadowColor: Qt.rgba(0, 0, 0, 0.2)
@@ -199,9 +202,11 @@ Item {
                                 textMutedColor: root.textMutedColor
 
                                 onValueSelected: function(nativeName) {
-                                    // Convert native name back to locale code
+                                    // Convert native name back to locale code.
+                                    // On n'assigne PAS selectedLocale (miroir
+                                    // readonly=engine) : Main.qml relaie vers
+                                    // engine.setSelectedLocale via localeSelected.
                                     var localeCode = getLocaleCodeForNativeName(nativeName)
-                                    selectedLocale = localeCode
                                     localeSelected(localeCode)
                                 }
                             }
@@ -216,7 +221,7 @@ Item {
                         radius: 10
                         color: surfaceColor
 
-                        layer.enabled: true
+                        layer.enabled: !engine.softwareRendering
                         layer.effect: MultiEffect {
                             shadowEnabled: true
                             shadowColor: Qt.rgba(0, 0, 0, 0.2)
@@ -273,7 +278,6 @@ Item {
                                 textMutedColor: root.textMutedColor
 
                                 onValueSelected: function(value) {
-                                    selectedTimezone = value
                                     timezoneSelected(value)
                                 }
                             }
@@ -288,7 +292,7 @@ Item {
                         radius: 10
                         color: surfaceColor
 
-                        layer.enabled: true
+                        layer.enabled: !engine.softwareRendering
                         layer.effect: MultiEffect {
                             shadowEnabled: true
                             shadowColor: Qt.rgba(0, 0, 0, 0.2)
@@ -363,7 +367,6 @@ Item {
                                         textMutedColor: root.textMutedColor
 
                                         onValueSelected: function(value) {
-                                            selectedKeymap = value
                                             keymapSelected(value)
                                         }
                                     }
@@ -444,7 +447,6 @@ Item {
 
                                         onActivated: function(index) {
                                             const variant = keyboardVariantsModel[index]
-                                            selectedKeyboardVariant = variant
                                             keyboardVariantSelected(variant)
                                         }
                                     }

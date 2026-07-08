@@ -48,6 +48,25 @@ Item {
     property color warningColor: "#F59E0B"
     property color errorColor: "#EF4444"
 
+    // Log upload state (bouton "Send Logs" en état échec)
+    property bool logUploadInProgress: false
+    property string logUploadUrl: ""
+    property string logUploadError: ""
+
+    Connections {
+        target: engine
+        function onLogUploadFinished(url, ok, error) {
+            root.logUploadInProgress = false
+            if (ok) {
+                root.logUploadUrl = url
+                root.logUploadError = ""
+            } else {
+                root.logUploadUrl = ""
+                root.logUploadError = error
+            }
+        }
+    }
+
     // Content container
     Rectangle {
         anchors.fill: parent
@@ -75,7 +94,7 @@ Item {
                            Qt.rgba(successColor.r, successColor.g, successColor.b, 0.2) :
                            Qt.rgba(errorColor.r, errorColor.g, errorColor.b, 0.2)
 
-                    layer.enabled: true
+                    layer.enabled: !engine.softwareRendering
                     layer.effect: MultiEffect {
                         shadowEnabled: true
                         shadowColor: success ? successColor : errorColor
@@ -203,7 +222,7 @@ Item {
                     color: textColor
                     anchors.horizontalCenter: parent.horizontalCenter
 
-                    layer.enabled: true
+                    layer.enabled: !engine.softwareRendering
                     layer.effect: MultiEffect {
                         shadowEnabled: true
                         shadowColor: Qt.rgba(0, 0, 0, 0.4)
@@ -231,7 +250,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.alignment: Qt.AlignHCenter
                 Layout.maximumWidth: 700
-                Layout.preferredHeight: detailsColumn.height + 48
+                Layout.preferredHeight: detailsColumn.implicitHeight + 48
                 radius: 16
                 color: surfaceColor
 
@@ -282,7 +301,7 @@ Item {
                                 }
 
                                 Text {
-                                    text: installationSummary.distroName || "Linux"
+                                    text: installationSummary.distribution || installationSummary.distroName || "GLF OS"
                                     font.pixelSize: 14
                                     font.bold: true
                                     color: textColor
@@ -393,27 +412,154 @@ Item {
                             }
                         }
 
-                        Button {
-                            text: qsTr("View Full Logs")
+                        Row {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            height: 36
+                            spacing: 12
 
-                            background: Rectangle {
-                                radius: 8
-                                color: parent.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
-                                border.color: textMutedColor
-                                border.width: 1
+                            Button {
+                                text: qsTr("View Full Logs")
+                                height: 36
+
+                                background: Rectangle {
+                                    radius: 8
+                                    color: parent.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
+                                    border.color: textMutedColor
+                                    border.width: 1
+                                }
+
+                                contentItem: Text {
+                                    text: parent.text
+                                    font.pixelSize: 14
+                                    color: textColor
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+
+                                onClicked: root.viewLogsClicked()
                             }
 
-                            contentItem: Text {
-                                text: parent.text
-                                font.pixelSize: 14
-                                color: textColor
+                            Button {
+                                text: qsTr("Send Logs")
+                                height: 36
+                                enabled: !root.logUploadInProgress
+
+                                background: Rectangle {
+                                    radius: 8
+                                    color: {
+                                        if (!parent.enabled) return Qt.darker(errorColor, 1.4)
+                                        if (parent.pressed) return Qt.darker(errorColor, 1.2)
+                                        if (parent.hovered) return Qt.lighter(errorColor, 1.1)
+                                        return errorColor
+                                    }
+                                    border.color: Qt.lighter(errorColor, 1.3)
+                                    border.width: 1
+                                }
+
+                                contentItem: Text {
+                                    text: parent.text
+                                    font.pixelSize: 14
+                                    color: textColor
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+
+                                onClicked: {
+                                    root.logUploadInProgress = true
+                                    root.logUploadUrl = ""
+                                    root.logUploadError = ""
+                                    engine.uploadInstallLog()
+                                }
+                            }
+                        }
+
+                        // Avertissement discret : le journal part vers un service
+                        // de collage public (pas de stockage local persistant).
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: qsTr("The log will be sent to a public paste service.")
+                            font.pixelSize: 12
+                            font.italic: true
+                            color: textMutedColor
+                            wrapMode: Text.WordWrap
+                            width: 400
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+
+                        // Résultat de l'envoi : en cours, URL sélectionnable + copie, ou erreur
+                        Column {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            spacing: 8
+                            visible: root.logUploadInProgress || root.logUploadUrl.length > 0 || root.logUploadError.length > 0
+
+                            Text {
+                                visible: root.logUploadInProgress
+                                text: qsTr("Sending…")
+                                font.pixelSize: 13
+                                color: textMutedColor
+                            }
+
+                            Row {
+                                visible: !root.logUploadInProgress && root.logUploadUrl.length > 0
+                                spacing: 8
+
+                                TextField {
+                                    id: logUploadUrlField
+                                    width: 320
+                                    readOnly: true
+                                    selectByMouse: true
+                                    text: root.logUploadUrl
+                                    color: textColor
+                                    font.pixelSize: 13
+
+                                    // Le style Fusion par défaut rend le champ
+                                    // avec un fond clair (palette embossée),
+                                    // ce qui rend `color: textColor` (texte
+                                    // clair) illisible sur thème sombre. Fond
+                                    // explicite pour garantir le contraste.
+                                    background: Rectangle {
+                                        color: backgroundColor
+                                        radius: 8
+                                        border.color: textMutedColor
+                                        border.width: 1
+                                    }
+                                }
+
+                                Button {
+                                    text: qsTr("Copy")
+                                    height: 36
+
+                                    background: Rectangle {
+                                        radius: 8
+                                        color: parent.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
+                                        border.color: textMutedColor
+                                        border.width: 1
+                                    }
+
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.pixelSize: 14
+                                        color: textColor
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+
+                                    onClicked: {
+                                        logUploadUrlField.selectAll()
+                                        logUploadUrlField.copy()
+                                        logUploadUrlField.deselect()
+                                    }
+                                }
+                            }
+
+                            Text {
+                                visible: !root.logUploadInProgress && root.logUploadError.length > 0
+                                text: qsTr("Sending failed: ") + root.logUploadError
+                                font.pixelSize: 13
+                                color: errorColor
+                                wrapMode: Text.WordWrap
+                                width: 400
                                 horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
                             }
-
-                            onClicked: root.viewLogsClicked()
                         }
                     }
                 }
@@ -433,6 +579,7 @@ Item {
                     visible: success
 
                     Button {
+                        id: rebootButton
                         text: qsTr("Reboot Now")
                         Layout.fillWidth: true
                         Layout.preferredHeight: 56
@@ -463,22 +610,37 @@ Item {
                             }
                         }
 
-                        contentItem: Row {
-                            spacing: 8
-                            anchors.centerIn: parent
+                        // contentItem est positionné/dimensionné par le Control
+                        // (x/y/width/height liés à padding + availableWidth/Height).
+                        // Un Row utilisé DIRECTEMENT comme contentItem ne doit pas
+                        // porter `anchors.centerIn: parent` : cela entre en
+                        // conflit avec les bindings internes du Control sur x/y,
+                        // d'où le texte/icône mal centrés observés. On enveloppe
+                        // donc le Row dans un Item neutre (qui reçoit les
+                        // bindings du Control sans conflit) et on centre le Row
+                        // à l'intérieur de cet Item.
+                        contentItem: Item {
+                            implicitWidth: rebootContentRow.implicitWidth
+                            implicitHeight: rebootContentRow.implicitHeight
 
-                            Text {
-                                text: "\u{1F504}"  // Counterclockwise arrows
-                                font.pixelSize: 20
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
+                            Row {
+                                id: rebootContentRow
+                                anchors.centerIn: parent
+                                spacing: 8
 
-                            Text {
-                                text: parent.parent.text
-                                font: parent.parent.font
-                                color: textColor
-                                verticalAlignment: Text.AlignVCenter
-                                anchors.verticalCenter: parent.verticalCenter
+                                Text {
+                                    text: "\u{1F504}"  // Counterclockwise arrows
+                                    font.pixelSize: 20
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                Text {
+                                    text: rebootButton.text
+                                    font: rebootButton.font
+                                    color: textColor
+                                    verticalAlignment: Text.AlignVCenter
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                             }
                         }
 
@@ -486,6 +648,7 @@ Item {
                     }
 
                     Button {
+                        id: shutdownButton
                         text: qsTr("Shutdown")
                         Layout.fillWidth: true
                         Layout.preferredHeight: 56
@@ -502,22 +665,34 @@ Item {
                             }
                         }
 
-                        contentItem: Row {
-                            spacing: 8
-                            anchors.centerIn: parent
+                        contentItem: Item {
+                            implicitWidth: shutdownContentRow.implicitWidth
+                            implicitHeight: shutdownContentRow.implicitHeight
 
-                            Text {
-                                text: "\u{23FB}"  // Power symbol
-                                font.pixelSize: 20
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
+                            Row {
+                                id: shutdownContentRow
+                                anchors.centerIn: parent
+                                spacing: 8
 
-                            Text {
-                                text: parent.parent.text
-                                font: parent.parent.font
-                                color: textColor
-                                verticalAlignment: Text.AlignVCenter
-                                anchors.verticalCenter: parent.verticalCenter
+                                Text {
+                                    // Glyphe monochrome (dingbat, pas un emoji
+                                    // couleur) : sans `color:` explicite il
+                                    // hérite du noir par défaut de Text et
+                                    // devient invisible sur fond sombre. Rouge
+                                    // sémantique "éteindre".
+                                    text: "\u{23FB}"  // Power symbol
+                                    font.pixelSize: 20
+                                    color: errorColor
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                Text {
+                                    text: shutdownButton.text
+                                    font: shutdownButton.font
+                                    color: textColor
+                                    verticalAlignment: Text.AlignVCenter
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                             }
                         }
 
@@ -525,6 +700,7 @@ Item {
                     }
 
                     Button {
+                        id: continueButton
                         text: qsTr("Continue")
                         Layout.fillWidth: true
                         Layout.preferredHeight: 56
@@ -541,22 +717,35 @@ Item {
                             }
                         }
 
-                        contentItem: Row {
-                            spacing: 8
-                            anchors.centerIn: parent
+                        contentItem: Item {
+                            implicitWidth: continueContentRow.implicitWidth
+                            implicitHeight: continueContentRow.implicitHeight
 
-                            Text {
-                                text: "\u{1F5D7}"  // Desktop computer
-                                font.pixelSize: 20
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
+                            Row {
+                                id: continueContentRow
+                                anchors.centerIn: parent
+                                spacing: 8
 
-                            Text {
-                                text: parent.parent.text
-                                font: parent.parent.font
-                                color: textColor
-                                verticalAlignment: Text.AlignVCenter
-                                anchors.verticalCenter: parent.verticalCenter
+                                Text {
+                                    // L'ancien glyphe (U+1F5D7) n'est pas un
+                                    // caractère Unicode assigné : il s'affichait
+                                    // comme un glyphe manquant tout noir. Flèche
+                                    // simple, colorée (vert "continuer"), fiable
+                                    // même sans police d'emoji couleur.
+                                    text: "\u{2192}"  // Rightwards arrow
+                                    font.pixelSize: 22
+                                    font.bold: true
+                                    color: successColor
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                Text {
+                                    text: continueButton.text
+                                    font: continueButton.font
+                                    color: textColor
+                                    verticalAlignment: Text.AlignVCenter
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                             }
                         }
 
@@ -571,6 +760,7 @@ Item {
                     visible: !success
 
                     Button {
+                        id: retryButton
                         text: qsTr("Retry Installation")
                         Layout.fillWidth: true
                         Layout.preferredHeight: 56
@@ -592,22 +782,28 @@ Item {
                             }
                         }
 
-                        contentItem: Row {
-                            spacing: 8
-                            anchors.centerIn: parent
+                        contentItem: Item {
+                            implicitWidth: retryContentRow.implicitWidth
+                            implicitHeight: retryContentRow.implicitHeight
 
-                            Text {
-                                text: "\u{1F504}"  // Counterclockwise arrows
-                                font.pixelSize: 20
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
+                            Row {
+                                id: retryContentRow
+                                anchors.centerIn: parent
+                                spacing: 8
 
-                            Text {
-                                text: parent.parent.text
-                                font: parent.parent.font
-                                color: textColor
-                                verticalAlignment: Text.AlignVCenter
-                                anchors.verticalCenter: parent.verticalCenter
+                                Text {
+                                    text: "\u{1F504}"  // Counterclockwise arrows
+                                    font.pixelSize: 20
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                Text {
+                                    text: retryButton.text
+                                    font: retryButton.font
+                                    color: textColor
+                                    verticalAlignment: Text.AlignVCenter
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                             }
                         }
 

@@ -113,6 +113,23 @@ class UsersJob(BaseJob):
         shell = context.selections.get("shell", "/bin/bash")
         target_root = context.target_root
 
+        # Mot de passe root : la décision est désormais tranchée.
+        #
+        # Sur la cible GLF OS (NixOS), les mots de passe utilisateur ET root
+        # sont posés DÉCLARATIVEMENT par le job `nixos`
+        # (users.users.<name>.hashedPassword, hash SHA-512 via mkpasswd/openssl).
+        # C'est l'unique source de vérité pour NixOS : `chpasswd`/`arch-chroot`
+        # y sont inadaptés (arch-chroot n'existe pas, et l'état système est
+        # reconstruit depuis la configuration Nix à chaque activation).
+        #
+        # Ce job `users` reste la voie IMPÉRATIVE pour les cibles non-NixOS
+        # (Arch, Debian, …) : useradd + chpasswd via arch-chroot. Il n'exploite
+        # donc volontairement PAS `root_password` / `root_same_as_user` — ces
+        # clés (normalisées par EngineBridge.applySelectionsToContext) sont
+        # consommées côté NixOS uniquement. SÉCURITÉ : si un futur backend
+        # impératif gère root ici, ne jamais logger `root_password` (même
+        # posture que `password`).
+
         try:
             # Step 1: Create user account
             context.report_progress(20, f"Creating user account '{username}'...")
@@ -135,9 +152,6 @@ class UsersJob(BaseJob):
             )
             if not password_result.success:
                 return password_result
-
-            # Clear password from memory
-            password = ""
 
             # Step 3: Configure hostname (if provided)
             if hostname:
@@ -169,6 +183,10 @@ class UsersJob(BaseJob):
                 f"Unexpected error: {e}",
                 error_code=21,
             )
+        finally:
+            # SECURITY: Clear password from memory in all cases (success, failure,
+            # or unexpected exception), never leaving it referenced.
+            password = ""  # noqa: F841
 
     def _create_user(
         self,
@@ -286,20 +304,22 @@ class UsersJob(BaseJob):
                 check=True,
             )
 
-            # Clear password from memory immediately
-            password_input = ""
-
             # SECURITY: Do NOT log that password was set successfully with any details
             logger.info(f"Password configured for user '{username}'")
             return JobResult.ok("Password set")
 
-        except subprocess.CalledProcessError as e:
-            # SECURITY: Do NOT include password or password_input in error messages
-            logger.error(f"Failed to set password: {e.stderr}")
+        except subprocess.CalledProcessError:
+            # SECURITY: chpasswd peut renvoyer la ligne "username:password" dans
+            # e.stderr. On logue une chaîne statique pour garantir zéro fuite,
+            # quelle que soit la verbosité du logger.
+            logger.error("password change failed")
             return JobResult.fail(
                 "Failed to set user password",
                 error_code=23,
             )
+        finally:
+            # SECURITY: Clear password material from memory in all cases.
+            password_input = ""  # noqa: F841
 
     def _set_hostname(self, target_root: str, hostname: str) -> JobResult:
         """

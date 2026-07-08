@@ -16,27 +16,44 @@ Item {
     id: root
 
     // Signals
-    signal installClicked()
-    signal previousClicked()
     signal editSection(string section)
     signal editLocale()
     signal editUsers()
+    signal editEnvironment()
     signal editPartition()
 
-    // External properties - selections from previous steps
-    property var selections: ({
-        "locale": "en_US.UTF-8",
-        "timezone": "UTC",
-        "keymap": "us",
-        "username": "",
-        "fullName": "",
-        "hostname": "",
-        "autoLogin": false,
-        "isAdmin": true,
-        "disk": "",
-        "diskSize": "",
-        "partitionMode": "auto"
-    })
+    // Final confirmation gate (ITEM 2): emitted when the user (dis)arms the
+    // destructive installation via the confirmation checkbox. Main.qml wires
+    // this to engine.setConfirmed() and only enables "Install" when checked.
+    signal confirmedToggled(bool confirmed)
+
+    // Two-way reflectable state of the confirmation checkbox. Bound in Main.qml
+    // to engine.confirmed so the gate survives navigation back/forth.
+    property bool confirmed: false
+
+    // External properties - selections from previous steps.
+    //
+    // NOTE (fix persistance résumé): ces valeurs sont exposées comme des
+    // propriétés SCALAIRES individuelles et bindées dans Main.qml directement
+    // aux getters notifiés du bridge (engine.username, engine.hostname, ...).
+    // On N'utilise PLUS un unique `property var selections` (dict) : un
+    // @Property(object) renvoie une nouvelle copie de dict à chaque lecture, si
+    // bien que les bindings `text: selections.X` ne se ré-évaluaient jamais sur
+    // selectionsChanged (les sous-propriétés d'un objet JS ne sont pas suivies
+    // par QML). Des propriétés scalaires notifiées se propagent de façon fiable.
+    property string localeValue: "en_US.UTF-8"
+    property string timezoneValue: "UTC"
+    property string keymapValue: "us"
+    property string usernameValue: ""
+    property string fullNameValue: ""
+    property string hostnameValue: ""
+    property bool autoLoginValue: false
+    property bool isAdminValue: true
+    property string desktopEnvironmentValue: "gnome"
+    property string editionValue: "standard"
+    property string diskValue: ""
+    property string diskSizeValue: ""
+    property string partitionModeValue: "auto"
 
     // Distro info
     property string distroName: ""
@@ -117,7 +134,7 @@ Item {
                     // System section
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: systemColumn.height + 48
+                        Layout.preferredHeight: systemColumn.implicitHeight + 48
                         radius: 16
                         color: surfaceColor
 
@@ -166,7 +183,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.hostname || qsTr("Not set")
+                                            text: hostnameValue || qsTr("Not set")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -200,7 +217,7 @@ Item {
                                         verticalAlignment: Text.AlignVCenter
                                     }
 
-                                    onClicked: root.editSection("users")
+                                    onClicked: root.editUsers()
                                 }
                             }
                         }
@@ -209,7 +226,7 @@ Item {
                     // Locale section
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: localeColumn.height + 48
+                        Layout.preferredHeight: localeColumn.implicitHeight + 48
                         radius: 16
                         color: surfaceColor
 
@@ -258,7 +275,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.locale || qsTr("Not set")
+                                            text: localeValue || qsTr("Not set")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -278,7 +295,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.timezone || qsTr("Not set")
+                                            text: timezoneValue || qsTr("Not set")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -298,7 +315,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.keymap || qsTr("Not set")
+                                            text: keymapValue || qsTr("Not set")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -332,7 +349,7 @@ Item {
                                         verticalAlignment: Text.AlignVCenter
                                     }
 
-                                    onClicked: root.editSection("locale")
+                                    onClicked: root.editLocale()
                                 }
                             }
                         }
@@ -341,7 +358,7 @@ Item {
                     // User section
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: userColumn.height + 48
+                        Layout.preferredHeight: userColumn.implicitHeight + 48
                         radius: 16
                         color: surfaceColor
 
@@ -390,7 +407,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.username || qsTr("Not set")
+                                            text: usernameValue || qsTr("Not set")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -401,7 +418,7 @@ Item {
                                     Row {
                                         spacing: 12
                                         width: parent.width
-                                        visible: (selections.fullName || "").length > 0
+                                        visible: (fullNameValue || "").length > 0
 
                                         Text {
                                             text: qsTr("Full Name:")
@@ -411,7 +428,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.fullName || ""
+                                            text: fullNameValue || ""
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -434,13 +451,13 @@ Item {
                                             spacing: 6
 
                                             Text {
-                                                text: selections.isAdmin ? "\u2713" : "\u2717"
+                                                text: isAdminValue ? "\u2713" : "\u2717"
                                                 font.pixelSize: 14
-                                                color: selections.isAdmin ? successColor : textMutedColor
+                                                color: isAdminValue ? successColor : textMutedColor
                                             }
 
                                             Text {
-                                                text: selections.isAdmin ? qsTr("Yes") : qsTr("No")
+                                                text: isAdminValue ? qsTr("Yes") : qsTr("No")
                                                 font.pixelSize: 14
                                                 font.bold: true
                                                 color: textColor
@@ -464,13 +481,13 @@ Item {
                                             spacing: 6
 
                                             Text {
-                                                text: selections.autoLogin ? "\u2713" : "\u2717"
+                                                text: autoLoginValue ? "\u2713" : "\u2717"
                                                 font.pixelSize: 14
-                                                color: selections.autoLogin ? successColor : textMutedColor
+                                                color: autoLoginValue ? successColor : textMutedColor
                                             }
 
                                             Text {
-                                                text: selections.autoLogin ? qsTr("Enabled") : qsTr("Disabled")
+                                                text: autoLoginValue ? qsTr("Enabled") : qsTr("Disabled")
                                                 font.pixelSize: 14
                                                 font.bold: true
                                                 color: textColor
@@ -505,7 +522,119 @@ Item {
                                         verticalAlignment: Text.AlignVCenter
                                     }
 
-                                    onClicked: root.editSection("users")
+                                    onClicked: root.editUsers()
+                                }
+                            }
+                        }
+                    }
+
+                    // Desktop environment & edition section
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: environmentColumn.implicitHeight + 48
+                        radius: 16
+                        color: surfaceColor
+
+                        Column {
+                            id: environmentColumn
+                            anchors.fill: parent
+                            anchors.margins: 24
+                            spacing: 16
+
+                            Row {
+                                width: parent.width
+                                spacing: 12
+
+                                Column {
+                                    width: parent.width - editEnvironmentButton.width - 12
+                                    spacing: 12
+
+                                    Row {
+                                        spacing: 12
+
+                                        Text {
+                                            text: "\u{1F5A5}\u{FE0F}"
+                                            font.pixelSize: 24
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+
+                                        Text {
+                                            text: qsTr("Desktop & Edition")
+                                            font.pixelSize: 20
+                                            font.bold: true
+                                            color: textColor
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+                                    }
+
+                                    // Desktop environment
+                                    Row {
+                                        spacing: 12
+                                        width: parent.width
+
+                                        Text {
+                                            text: qsTr("Desktop Environment:")
+                                            font.pixelSize: 14
+                                            color: textMutedColor
+                                            width: 160
+                                        }
+
+                                        Text {
+                                            text: desktopEnvironmentValue || qsTr("Not set")
+                                            font.pixelSize: 14
+                                            font.bold: true
+                                            color: textColor
+                                        }
+                                    }
+
+                                    // Edition
+                                    Row {
+                                        spacing: 12
+                                        width: parent.width
+
+                                        Text {
+                                            text: qsTr("Edition:")
+                                            font.pixelSize: 14
+                                            color: textMutedColor
+                                            width: 160
+                                        }
+
+                                        Text {
+                                            text: editionValue || qsTr("Not set")
+                                            font.pixelSize: 14
+                                            font.bold: true
+                                            color: textColor
+                                        }
+                                    }
+                                }
+
+                                Button {
+                                    id: editEnvironmentButton
+                                    text: qsTr("Edit")
+                                    width: 80
+                                    height: 36
+                                    anchors.verticalCenter: parent.verticalCenter
+
+                                    background: Rectangle {
+                                        radius: 8
+                                        color: parent.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
+                                        border.color: accentColor
+                                        border.width: 1
+
+                                        Behavior on color {
+                                            ColorAnimation { duration: 150 }
+                                        }
+                                    }
+
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.pixelSize: 13
+                                        color: textColor
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+
+                                    onClicked: root.editEnvironment()
                                 }
                             }
                         }
@@ -514,7 +643,7 @@ Item {
                     // Storage section
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: storageColumn.height + 48
+                        Layout.preferredHeight: storageColumn.implicitHeight + 48
                         radius: 16
                         color: surfaceColor
 
@@ -563,7 +692,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.disk || qsTr("Not set")
+                                            text: diskValue || qsTr("Not set")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -574,7 +703,7 @@ Item {
                                     Row {
                                         spacing: 12
                                         width: parent.width
-                                        visible: (selections.diskSize || "").length > 0
+                                        visible: (diskSizeValue || "").length > 0
 
                                         Text {
                                             text: qsTr("Size:")
@@ -584,7 +713,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.diskSize || qsTr("Unknown")
+                                            text: diskSizeValue || qsTr("Unknown")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -604,7 +733,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: selections.partitionMode === "auto" ? qsTr("Automatic") : qsTr("Manual")
+                                            text: partitionModeValue === "auto" ? qsTr("Automatic") : qsTr("Manual")
                                             font.pixelSize: 14
                                             font.bold: true
                                             color: textColor
@@ -638,7 +767,7 @@ Item {
                                         verticalAlignment: Text.AlignVCenter
                                     }
 
-                                    onClicked: root.editSection("partition")
+                                    onClicked: root.editPartition()
                                 }
                             }
                         }
@@ -650,7 +779,7 @@ Item {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignHCenter
                     Layout.maximumWidth: 800
-                    Layout.preferredHeight: finalWarningColumn.height + 32
+                    Layout.preferredHeight: finalWarningColumn.implicitHeight + 32
                     radius: 12
                     color: Qt.rgba(warningColor.r, warningColor.g, warningColor.b, 0.15)
                     border.color: warningColor
@@ -687,100 +816,50 @@ Item {
                             wrapMode: Text.WordWrap
                             width: parent.width
                         }
-                    }
-                }
 
-                Item { Layout.preferredHeight: 16 }
+                        // ITEM 2: mandatory confirmation checkbox. The "Install"
+                        // action stays disabled until this is checked.
+                        CheckBox {
+                            id: confirmCheckBox
+                            width: parent.width
+                            checked: root.confirmed
+                            onToggled: root.confirmedToggled(checked)
+                            spacing: 8
 
-                // Navigation buttons
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.maximumWidth: 800
-                    spacing: 16
+                            // Explicit indicator pinned top-left: the default one
+                            // is vertically centred over the wrapped (2-line) label,
+                            // which lands the box in the middle of the text.
+                            indicator: Rectangle {
+                                implicitWidth: 22
+                                implicitHeight: 22
+                                x: 0
+                                y: 0
+                                radius: 4
+                                color: "transparent"
+                                border.color: confirmCheckBox.checked ? successColor : textMutedColor
+                                border.width: 2
 
-                    Button {
-                        text: qsTr("Previous")
-                        Layout.preferredWidth: 150
-                        Layout.preferredHeight: 48
-                        font.pixelSize: 16
-
-                        background: Rectangle {
-                            radius: 8
-                            color: parent.pressed ? Qt.darker(surfaceColor, 1.2) : surfaceColor
-                            border.color: textMutedColor
-                            border.width: 1
-
-                            Behavior on color {
-                                ColorAnimation { duration: 150 }
-                            }
-                        }
-
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: textColor
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-
-                        onClicked: root.previousClicked()
-                    }
-
-                    Item { Layout.fillWidth: true }
-
-                    Button {
-                        text: qsTr("Install Now")
-                        Layout.preferredWidth: 200
-                        Layout.preferredHeight: 56
-                        font.pixelSize: 18
-                        font.bold: true
-
-                        background: Rectangle {
-                            radius: 12
-                            color: {
-                                if (parent.pressed) return Qt.darker(successColor, 1.3)
-                                if (parent.hovered) return Qt.lighter(successColor, 1.15)
-                                return successColor
-                            }
-                            border.color: Qt.lighter(successColor, 1.3)
-                            border.width: 2
-
-                            Behavior on color {
-                                ColorAnimation { duration: 150 }
-                            }
-
-                            // Gradient overlay
-                            Rectangle {
-                                anchors.fill: parent
-                                radius: parent.radius
-                                gradient: Gradient {
-                                    GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.15) }
-                                    GradientStop { position: 0.5; color: "transparent" }
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: confirmCheckBox.checked
+                                    text: "✓"
+                                    color: successColor
+                                    font.pixelSize: 15
+                                    font.bold: true
                                 }
                             }
-                        }
 
-                        contentItem: Row {
-                            spacing: 12
-                            anchors.centerIn: parent
-
-                            Text {
-                                text: parent.parent.text
-                                font: parent.parent.font
+                            contentItem: Text {
+                                text: qsTr("I understand that the selected disk (%1) will be modified and erased.")
+                                    .arg(diskValue || qsTr("target disk"))
+                                font.pixelSize: 14
+                                font.bold: true
                                 color: textColor
-                                verticalAlignment: Text.AlignVCenter
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-
-                            Text {
-                                text: "\u{1F680}"
-                                font.pixelSize: 20
-                                anchors.verticalCenter: parent.verticalCenter
+                                wrapMode: Text.WordWrap
+                                leftPadding: confirmCheckBox.indicator.width + confirmCheckBox.spacing
+                                width: parent.width
                             }
                         }
-
-                        onClicked: root.installClicked()
                     }
                 }
 
