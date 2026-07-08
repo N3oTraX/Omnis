@@ -165,12 +165,18 @@ def find_config_file(explicit_path: Path | None = None) -> Path:
             f"Create one with: cp omnis.yaml.example omnis.yaml"
         )
 
-    # Search locations
+    # Search locations: CWD, /etc, puis la config embarquée avec le paquet
+    # (install Nix/AppImage: <prefix>/share/omnis/config ; dépôt: <repo>/config),
+    # résolue en remontant depuis ce module.
     candidates = [
         Path("omnis.yaml"),
         Path("config/examples/glfos.yaml"),
         Path("/etc/omnis/omnis.yaml"),
     ]
+    here = Path(__file__).resolve()
+    for base in list(here.parents)[:6]:
+        candidates.append(base / "share" / "omnis" / "config" / "examples" / "glfos.yaml")
+        candidates.append(base / "config" / "examples" / "glfos.yaml")
 
     for candidate in candidates:
         if candidate.exists():
