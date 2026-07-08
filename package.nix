@@ -10,6 +10,11 @@
   cryptsetup,
   util-linux,
   pciutils,
+  makeFontsConf,
+  poppins,
+  roboto-mono,
+  noto-fonts,
+  noto-fonts-monochrome-emoji,
 }:
 
 let
@@ -25,6 +30,20 @@ let
     util-linux
     pciutils
   ];
+
+  # Fonts bundled so the UI renders identically off-host (AppImage): the theme
+  # fonts (Poppins, Roboto Mono), Noto Sans for non-Latin locales, and the
+  # monochrome emoji font that draws the requirement/section pictograms (color
+  # emoji would clash with the flat UI). A self-contained fontconfig file is
+  # pointed to by FONTCONFIG_FILE so font matching works without host /etc/fonts.
+  fontsConf = makeFontsConf {
+    fontDirectories = [
+      poppins
+      roboto-mono
+      noto-fonts
+      noto-fonts-monochrome-emoji
+    ];
+  };
 in
 
 # Omnis - modular GLF-OS installer (PySide6/QML). Packaged as a Qt-wrapped
@@ -59,6 +78,7 @@ python3Packages.buildPythonApplication {
   makeWrapperArgs = [
     "--prefix QML2_IMPORT_PATH : ${qt6.qtdeclarative}/lib/qt-6/qml"
     "--prefix PATH : ${lib.makeBinPath runtimeTools}"
+    "--set-default FONTCONFIG_FILE ${fontsConf}"
   ];
 
   dependencies = with python3Packages; [
