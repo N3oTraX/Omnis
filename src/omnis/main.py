@@ -390,6 +390,12 @@ def main() -> int:
     """
     args = parse_args()
 
+    # Qt Quick software backend by default: a portable AppImage cannot rely on a
+    # working GL/EGL stack on arbitrary hosts (QRhiGles2 fails, "EGL not
+    # available", window never renders) and the installer needs no GPU
+    # acceleration. Set before any Qt object is created; override still honored.
+    os.environ.setdefault("QT_QUICK_BACKEND", "software")
+
     # Configure logging
     logging.basicConfig(
         level=logging.DEBUG if args.debug else logging.INFO,
