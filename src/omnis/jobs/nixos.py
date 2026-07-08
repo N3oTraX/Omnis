@@ -863,6 +863,12 @@ class NixosJob(BaseJob):
         Streame pour faire avancer la barre pendant le build (voir
         :meth:`_run_install_streamed`).
         """
+        # Real progress driver: pre-build the system closure so the bar advances
+        # as each derivation is fetched from the cache / built. Best-effort — the
+        # nixos-install below reuses the (now cached) closure, so a prebuild
+        # failure never breaks the install; the bar just stays coarse.
+        self._prebuild_system(target_root, dry_run, context, tmpdir)
+
         flake_ref = f"{target_root}/etc/nixos#{self._flake_attr()}"
         cmd = [
             "nixos-install",
@@ -878,7 +884,67 @@ class NixosJob(BaseJob):
             "--root",
             target_root,
         ]
-        return self._run_install_streamed(cmd, "Running nixos-install", dry_run, context, tmpdir)
+        # The heavy build already happened in the prebuild step, so nixos-install
+        # runs fast from cache; drive the final stretch of the bar.
+        return self._run_install_streamed(
+            cmd,
+            "Running nixos-install",
+            dry_run,
+            context,
+            tmpdir,
+            pct_start=92,
+            pct_end=100,
+        )
+
+    def _prebuild_system(
+        self,
+        target_root: str,
+        dry_run: bool,
+        context: JobContext | None = None,
+        tmpdir: str | None = None,
+    ) -> None:
+        """Best-effort ``nix build`` of the system toplevel to drive real progress.
+
+        Unlike the ``nixos-install`` wrapper, ``nix build`` emits the
+        internal-json activity stream, so the progress bar reflects each
+        derivation copied from the binary cache or built. Any failure here is
+        logged and swallowed: ``nixos-install`` re-evaluates the identical
+        (now-cached) closure immediately after, so this step is purely cosmetic.
+        """
+        if dry_run:
+            return
+        attr = self._flake_attr()
+        toplevel = (
+            f"{target_root}/etc/nixos#nixosConfigurations.{attr}.config.system.build.toplevel"
+        )
+        cmd = [
+            "nix",
+            "build",
+            "--no-link",
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "--option",
+            "sandbox",
+            "false",
+            "--option",
+            "build-users-group",
+            "",
+            toplevel,
+        ]
+        try:
+            result = self._run_install_streamed(
+                cmd,
+                "Building system closure",
+                dry_run,
+                context,
+                tmpdir,
+                pct_start=60,
+                pct_end=92,
+            )
+            if not result.success:
+                logger.warning("System prebuild failed (non-fatal); continuing to nixos-install")
+        except Exception as exc:  # pragma: no cover - defensive, never break install
+            logger.warning("System prebuild error (non-fatal): %s", exc)
 
     def _run_install_streamed(
         self,
@@ -887,8 +953,18 @@ class NixosJob(BaseJob):
         dry_run: bool,
         context: JobContext | None,
         tmpdir: str | None = None,
+        pct_start: int = 60,
+        pct_end: int = 98,
     ) -> JobResult:
-        """Lance nixos-install en streaming (internal-json) et pilote la barre 60..98 %."""
+        """Run a nix/nixos-install command, driving the progress bar from the
+        internal-json activity stream over the ``pct_start``..``pct_end`` range.
+
+        Progress comes from the ``@nix`` build/copyPaths events (see
+        :class:`_NixProgress`), which only ``nix build`` emits reliably — the
+        ``nixos-install`` wrapper prints its own human-readable output, so the
+        bulk of real progress is driven by the ``nix build`` prebuild step (see
+        :meth:`_prebuild_system`).
+        """
         if dry_run:
             logger.info("[DRY-RUN] %s: %s", description, " ".join(cmd))
             return JobResult.ok(f"[DRY-RUN] {description}")
@@ -914,14 +990,15 @@ class NixosJob(BaseJob):
             logger.error("Command not found: %s", cmd[0])
             return JobResult.fail(f"Required tool not found: {cmd[0]}", error_code=ERR_TOOL_NOT_FOUND)
 
+        span = max(0, pct_end - pct_start)
         progress = _NixProgress()
         assert proc.stdout is not None
         for raw in proc.stdout:
             line = raw.rstrip("\n")
             fraction = progress.feed(line)
             if fraction is not None and context is not None:
-                pct = 60 + round(38 * fraction)
-                context.report_progress(min(98, pct), progress.message())
+                pct = pct_start + round(span * fraction)
+                context.report_progress(min(pct_end, pct), progress.message())
             elif not line.startswith("@nix "):
                 logger.debug("nixos-install: %s", line)
 

@@ -196,3 +196,34 @@ class TestUploadInstallLog:
         assert url == ""
         assert ok is False
         assert "Log upload failed" in error_message
+
+
+class TestInstallationSummary:
+    """installationSummary exposes distribution, target and duration."""
+
+    def test_summary_has_expected_keys(self, bridge: EngineBridge) -> None:
+        summary = bridge.installationSummary
+        for key in ("distribution", "targetDisk", "installationTime", "distroName"):
+            assert key in summary
+
+    def test_distribution_includes_distro_name(self, bridge: EngineBridge) -> None:
+        name = bridge._engine.get_branding().name
+        assert name in bridge.installationSummary["distribution"]
+
+    def test_target_disk_reflects_selection(self, bridge: EngineBridge) -> None:
+        bridge._selections["disk"] = "/dev/sdz"
+        assert "/dev/sdz" in bridge.installationSummary["targetDisk"]
+
+    def test_duration_empty_before_install(self, bridge: EngineBridge) -> None:
+        bridge._install_start_time = None
+        assert bridge._format_install_duration() == ""
+
+    def test_duration_formatted_after_install(self, bridge: EngineBridge) -> None:
+        bridge._install_start_time = 100.0
+        bridge._install_end_time = 100.0 + 372  # 6m 12s
+        assert bridge._format_install_duration() == "6m 12s"
+
+    def test_duration_seconds_only(self, bridge: EngineBridge) -> None:
+        bridge._install_start_time = 10.0
+        bridge._install_end_time = 55.0
+        assert bridge._format_install_duration() == "45s"

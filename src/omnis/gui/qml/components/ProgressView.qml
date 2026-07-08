@@ -330,106 +330,125 @@ Item {
                         NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
                     }
 
-                    Column {
-                        id: logColumn
-                        anchors.fill: parent
-                        anchors.margins: 24
-                        spacing: 16
+                        // ColumnLayout (et non Column) : le Column précédent
+                        // était `anchors.fill: parent` avec une hauteur de
+                        // ScrollView FIXE (380). Le total header+spacing+380
+                        // ne correspondait pas exactement à la hauteur
+                        // disponible (héritée de Layout.preferredHeight de la
+                        // carte), laissant une marge basse incohérente avec
+                        // la marge haute — la bordure arrondie du bas de la
+                        // carte se retrouvait masquée par le rectangle sombre
+                        // du journal. Avec ColumnLayout + Layout.fillHeight
+                        // sur le ScrollView, celui-ci occupe exactement
+                        // l'espace restant après le header, garantissant une
+                        // marge bas identique à la marge haut (24px) quelle
+                        // que soit la hauteur réelle du header.
+                        ColumnLayout {
+                            id: logColumn
+                            anchors.fill: parent
+                            anchors.margins: 24
+                            spacing: 16
 
-                        // Header
-                        Row {
-                            width: parent.width
-                            spacing: 12
+                            // Header
+                            Row {
+                                Layout.fillWidth: true
+                                spacing: 12
 
-                            Text {
-                                text: "\u{1F4DD}"  // Memo
-                                font.pixelSize: 24
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-
-                            Text {
-                                text: qsTr("Installation Log")
-                                font.pixelSize: 20
-                                font.bold: true
-                                color: textColor
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-
-                            Item { Layout.fillWidth: true }
-
-                            Button {
-                                text: showLog ? "▲" : "▼"
-                                width: 32
-                                height: 32
-                                anchors.verticalCenter: parent.verticalCenter
-
-                                background: Rectangle {
-                                    radius: 8
-                                    color: parent.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
-                                    border.color: textMutedColor
-                                    border.width: 1
+                                Text {
+                                    text: "\u{1F4DD}"  // Memo
+                                    font.pixelSize: 24
+                                    anchors.verticalCenter: parent.verticalCenter
                                 }
 
-                                contentItem: Text {
-                                    text: parent.text
-                                    font.pixelSize: 16
+                                Text {
+                                    text: qsTr("Installation Log")
+                                    font.pixelSize: 20
+                                    font.bold: true
                                     color: textColor
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
+                                    anchors.verticalCenter: parent.verticalCenter
                                 }
 
-                                onClicked: showLog = !showLog
+                                Item { Layout.fillWidth: true }
+
+                                Button {
+                                    text: showLog ? "▲" : "▼"
+                                    width: 32
+                                    height: 32
+                                    anchors.verticalCenter: parent.verticalCenter
+
+                                    background: Rectangle {
+                                        radius: 8
+                                        color: parent.pressed ? Qt.darker(backgroundColor, 1.2) : backgroundColor
+                                        border.color: textMutedColor
+                                        border.width: 1
+                                    }
+
+                                    contentItem: Text {
+                                        text: parent.text
+                                        font.pixelSize: 16
+                                        color: textColor
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+
+                                    onClicked: showLog = !showLog
+                                }
                             }
-                        }
 
-                        // Log content
-                        ScrollView {
-                            id: logScroll
-                            width: parent.width
-                            height: 380
-                            clip: true
-                            visible: showLog
+                            // Log content — occupe tout l'espace restant sous le
+                            // header (Layout.fillHeight) au lieu d'une hauteur
+                            // fixe : garantit une marge basse strictement égale à
+                            // la marge haute (anchors.margins: 24 sur logColumn),
+                            // donc la bordure arrondie basse de la carte reste
+                            // toujours visible quelle que soit la hauteur réelle
+                            // du header.
+                            ScrollView {
+                                id: logScroll
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                visible: showLog
 
-                            // Défilement vertical seul : la TextArea est bornée
-                            // en largeur (availableWidth) pour que wrapMode enroule
-                            // le texte au lieu de déborder horizontalement — cause
-                            // de l'illisibilité et du "scroll cassé".
-                            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-                            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                                // Défilement vertical seul : la TextArea est bornée
+                                // en largeur (availableWidth) pour que wrapMode enroule
+                                // le texte au lieu de déborder horizontalement — cause
+                                // de l'illisibilité et du "scroll cassé".
+                                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                                ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
-                            opacity: showLog ? 1 : 0
-                            Behavior on opacity {
-                                NumberAnimation { duration: 200 }
-                            }
-
-                            TextArea {
-                                id: logTextArea
-                                width: logScroll.availableWidth
-                                readOnly: true
-                                selectByMouse: true
-                                wrapMode: TextArea.Wrap
-                                font.family: "monospace"
-                                font.pixelSize: 12
-                                color: textColor
-                                // Source unique du journal live : property throttlée
-                                // (~5x/s) exposée par le moteur, contenant les ~300
-                                // dernières lignes. L'ancien signal per-ligne
-                                // logMessageAppended n'est plus émis (il saturait le
-                                // thread GUI sur les flux >10k lignes).
-                                text: engine.logTail
-
-                                background: Rectangle {
-                                    color: backgroundColor
-                                    radius: 8
+                                opacity: showLog ? 1 : 0
+                                Behavior on opacity {
+                                    NumberAnimation { duration: 200 }
                                 }
 
-                                // Auto-suivi systématique du bas : le tail affiche
-                                // toujours les dernières lignes du journal, donc on
-                                // se replace en bas à chaque mise à jour, sans
-                                // condition (pas de pin-to-bottom conditionnel).
-                                onTextChanged: cursorPosition = length
+                                TextArea {
+                                    id: logTextArea
+                                    width: logScroll.availableWidth
+                                    readOnly: true
+                                    selectByMouse: true
+                                    wrapMode: TextArea.Wrap
+                                    font.family: "monospace"
+                                    font.pixelSize: 12
+                                    color: textColor
+                                    // Source unique du journal live : property throttlée
+                                    // (~5x/s) exposée par le moteur, contenant les ~300
+                                    // dernières lignes. L'ancien signal per-ligne
+                                    // logMessageAppended n'est plus émis (il saturait le
+                                    // thread GUI sur les flux >10k lignes).
+                                    text: engine.logTail
+
+                                    background: Rectangle {
+                                        color: backgroundColor
+                                        radius: 8
+                                    }
+
+                                    // Auto-suivi systématique du bas : le tail affiche
+                                    // toujours les dernières lignes du journal, donc on
+                                    // se replace en bas à chaque mise à jour, sans
+                                    // condition (pas de pin-to-bottom conditionnel).
+                                    onTextChanged: cursorPosition = length
+                                }
                             }
-                        }
                     }
                 }
                 }

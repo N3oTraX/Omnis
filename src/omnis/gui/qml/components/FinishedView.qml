@@ -301,7 +301,7 @@ Item {
                                 }
 
                                 Text {
-                                    text: installationSummary.distroName || "Linux"
+                                    text: installationSummary.distribution || installationSummary.distroName || "GLF OS"
                                     font.pixelSize: 14
                                     font.bold: true
                                     color: textColor
@@ -675,8 +675,14 @@ Item {
                                 spacing: 8
 
                                 Text {
+                                    // Glyphe monochrome (dingbat, pas un emoji
+                                    // couleur) : sans `color:` explicite il
+                                    // hérite du noir par défaut de Text et
+                                    // devient invisible sur fond sombre. Rouge
+                                    // sémantique "éteindre".
                                     text: "\u{23FB}"  // Power symbol
                                     font.pixelSize: 20
+                                    color: errorColor
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
 
@@ -721,8 +727,15 @@ Item {
                                 spacing: 8
 
                                 Text {
-                                    text: "\u{1F5D7}"  // Desktop computer
-                                    font.pixelSize: 20
+                                    // L'ancien glyphe (U+1F5D7) n'est pas un
+                                    // caractère Unicode assigné : il s'affichait
+                                    // comme un glyphe manquant tout noir. Flèche
+                                    // simple, colorée (vert "continuer"), fiable
+                                    // même sans police d'emoji couleur.
+                                    text: "\u{2192}"  // Rightwards arrow
+                                    font.pixelSize: 22
+                                    font.bold: true
+                                    color: successColor
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
 

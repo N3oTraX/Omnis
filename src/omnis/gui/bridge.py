@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -676,6 +677,10 @@ class EngineBridge(QObject):
         # Thread management
         self._worker: InstallationWorker | None = None
         self._thread: QThread | None = None
+
+        # Installation timing (for the summary "duration" field).
+        self._install_start_time: float | None = None
+        self._install_end_time: float | None = None
 
         # Logs/diagnostics: in-process capture (jobs run in this same process).
         self._redactor = SecretRedactor()
@@ -1593,6 +1598,8 @@ class EngineBridge(QObject):
             return
 
         self.installationStarted.emit()
+        self._install_start_time = time.monotonic()
+        self._install_end_time = None
 
         # Create worker and thread
         self._thread = QThread(self)
@@ -1615,6 +1622,7 @@ class EngineBridge(QObject):
 
     def _on_installation_finished(self, success: bool) -> None:
         """Handle installation completion."""
+        self._install_end_time = time.monotonic()
         if self._debug:
             print(f"[Engine] Installation finished: {'success' if success else 'failed'}")
         self.installationFinished.emit(success)
@@ -2725,18 +2733,54 @@ class EngineBridge(QObject):
         """Get all selections for summary view."""
         return self._selections.copy()
 
-    @Property(object, notify=progressChanged)  # type: ignore[arg-type]
+    @Property("QVariantMap", notify=progressChanged)  # type: ignore[arg-type]
     def installationSummary(self) -> dict[str, Any]:
-        """Get installation summary for finished view."""
+        """Get installation summary for finished view.
+
+        Declared as ``QVariantMap`` (not ``object``): a ``Property(object)``
+        returning a plain dict marshals to QML as an opaque QVariant whose keys
+        can't be read via dot/bracket notation (they resolve to ``undefined``),
+        which is why the summary previously rendered only fallbacks. QVariantMap
+        exposes the dict to QML as an introspectable JS object.
+        """
         branding = self._engine.get_branding()
+        disk = str(self._selections.get("disk", "") or "")
+        de_label = self._environment_label(self._desktop_environments_model, "desktopEnvironment")
+        edition_label = self._environment_label(self._editions_model, "edition")
+        # "GLF OS (GNOME - Standard)" — distro name + chosen DE / flavor.
+        distribution = branding.name
+        if de_label or edition_label:
+            distribution = f"{branding.name} ({de_label} - {edition_label})"
+        size = self._get_disk_size(disk)
+        target = f"{disk} ({size})" if disk and size else disk
         return {
+            "distribution": distribution,
             "distroName": branding.name,
             "distroVersion": branding.version,
-            "targetDisk": self._selections.get("disk", ""),
-            "diskSize": self._get_disk_size(self._selections.get("disk", "")),
-            "installationTime": "N/A",  # Could track actual time
+            "targetDisk": target,
+            "diskSize": size,
+            "installationTime": self._format_install_duration(),
             "installedPackages": 0,  # Could track from packages job
         }
+
+    def _environment_label(self, model: list[dict[str, Any]], selection_key: str) -> str:
+        """Human-readable name for the selected DE / edition (falls back to id)."""
+        item_id = str(self._selections.get(selection_key, "") or "")
+        if not item_id:
+            return ""
+        for item in model:
+            if item.get("id") == item_id:
+                return str(item.get("name", item_id))
+        return item_id.capitalize()
+
+    def _format_install_duration(self) -> str:
+        """Format the elapsed installation time as ``Xm Ys`` (or ``Ys``)."""
+        if self._install_start_time is None:
+            return ""
+        end = self._install_end_time if self._install_end_time is not None else time.monotonic()
+        seconds = max(0, int(end - self._install_start_time))
+        minutes, secs = divmod(seconds, 60)
+        return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
 
     def _get_disk_size(self, disk_name: str) -> str:
         """Get disk size by name."""
