@@ -50,7 +50,7 @@ in
 # Python application so QML imports and Qt platform plugins resolve at runtime.
 python3Packages.buildPythonApplication {
   pname = "omnis-installer";
-  version = "0.5.2";
+  version = "0.5.3";
 
   src = ./.;
 
