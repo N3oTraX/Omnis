@@ -2,7 +2,7 @@
 
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -355,6 +355,36 @@ class TestSystemRequirementsChecker:
         assert "disk" in check_names
         assert "cpu_arch" in check_names
         assert "efi" in check_names
+
+    @patch("omnis.jobs.requirements.GPUDetector")
+    def test_gpu_incompatible_is_warn_by_default(self, mock_det: MagicMock) -> None:
+        """No compatible GPU is advisory (WARN) and does not block by default."""
+        mock_det.return_value.gpus = []
+        mock_det.return_value.check_compatibility.return_value = (
+            "fail",
+            "No compatible GPU detected",
+            [],
+        )
+        checker = SystemRequirementsChecker({"gpu": {"enabled": True}})
+        check = checker._check_gpu()
+
+        assert check.status == RequirementStatus.WARN
+        assert RequirementsResult(checks=[check]).can_continue is True
+
+    @patch("omnis.jobs.requirements.GPUDetector")
+    def test_gpu_incompatible_blocks_when_required(self, mock_det: MagicMock) -> None:
+        """With gpu.required=true, no compatible GPU is a blocking FAIL."""
+        mock_det.return_value.gpus = []
+        mock_det.return_value.check_compatibility.return_value = (
+            "fail",
+            "No compatible GPU detected",
+            [],
+        )
+        checker = SystemRequirementsChecker({"gpu": {"enabled": True, "required": True}})
+        check = checker._check_gpu()
+
+        assert check.status == RequirementStatus.FAIL
+        assert RequirementsResult(checks=[check]).can_continue is False
 
 
 # =============================================================================

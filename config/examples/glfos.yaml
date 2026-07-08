@@ -31,8 +31,8 @@ i18n:
 branding:
   # Identite
   name: "GLF OS"
-  version: "Omnislash"
-  edition: "25.04"
+  version: "Quasar Quake"
+  edition: "26.05"
   tagline: "Linux Gaming made easy!"
 
   # Couleurs officielles (source: gaminglinux.fr)
@@ -60,6 +60,14 @@ branding:
     icon: "logos/logo-256.png"
     bootloader: "boot/glf-bootloader.png"
     efi_icon: "boot/glf-efi.png"
+    # Users view icons (configurable via theme)
+    icon_user: "icons/users/user.svg"
+    icon_fullname: "icons/users/fullname.svg"
+    icon_hostname: "icons/users/hostname.svg"
+    icon_password: "icons/users/password.svg"
+    icon_settings: "icons/users/settings.svg"
+    icon_check: "icons/users/check.svg"
+    icon_cross: "icons/users/cross.svg"
 
   # Typographie
   fonts:
@@ -151,14 +159,31 @@ jobs:
           recommend_ssd: true
 
         # -----------------------------------------------------------------
-        # CPU Architecture Check
+        # CPU Check (Architecture + Cores)
         # -----------------------------------------------------------------
-        # Checks processor architecture (x86_64 required for modern Linux gaming).
-        # PASS: x86_64 | WARN: other (if not required) | FAIL: other (if required)
-        cpu_arch:
-          enabled: false  # Usually always x86_64, disabled by default
-          # Whether x86_64 is strictly required (FAIL if not met)
-          require_x86_64: true
+        # Combined CPU checks with two sub-sections:
+        # - cpu_arch: Processor architecture validation
+        # - cpu_cores: Core count validation
+        cpu:
+          # CPU Architecture sub-section
+          # Checks processor architecture (x86_64 required for modern Linux gaming).
+          # PASS: matches required | FAIL: does not match
+          cpu_arch:
+            enabled: true   # Enable architecture check
+            # Required architecture (default: x86_64)
+            required: "x86_64"
+
+          # CPU Cores sub-section
+          # Checks processor core count for performance requirements.
+          # PASS: >= warn_cores | WARN: >= min_cores | FAIL: < min_cores
+          cpu_cores:
+            enabled: true   # Enable core count check
+            # Minimum cores (FAIL if below)
+            min_cores: 4
+            # Warning threshold (WARN if between min and this value)
+            warn_cores: 8
+            # Recommended cores (displayed to user)
+            recommended_cores: 8
 
         # -----------------------------------------------------------------
         # Boot Mode Check (EFI/UEFI)
@@ -186,7 +211,7 @@ jobs:
         # Checks for active internet connection (for package updates).
         # PASS: Connected | WARN: Not connected (if recommended) | FAIL: Not connected (if required)
         internet:
-          enabled: false  # Disabled by default
+          enabled: true  # Enabled for GLF OS (NixOS requires network)
           # Whether internet is strictly required (FAIL if no connection)
           required: false
           # Whether to show warning if not connected
@@ -231,16 +256,22 @@ jobs:
           # Whether dedicated GPU is required (WARN if only iGPU)
           require_dedicated: false
 
+          # Whether a compatible GPU is MANDATORY to install.
+          # Default false: no/unknown GPU is advisory (WARN) so GPU-less and
+          # virtual machines can install. Set true to hard-block on bare metal.
+          required: false
+
           # Minimum GPU model overrides by vendor
           # Empty string = no minimum requirement for that vendor
           # See docs/gpu-compatibility.md for model reference
           overrides:
             # NVIDIA: GeForce GTX 1650+ (Turing architecture)
             nvidia: "GTX 1650"
-            # AMD: No minimum (empty = any AMD GPU)
-            amd: ""
-            # Intel: No minimum (empty = any Intel GPU)
-            intel: ""
+            # AMD: Radeon RX 560+ (Polaris architecture)
+            amd: "RX 560"
+            # Intel: Xe Graphics or Arc (different product lines)
+            # Note: Intel check accepts Xe, Arc, or newer integrated graphics
+            intel: "Xe"
 
   # Selection de la langue et region
   - name: locale
@@ -248,6 +279,21 @@ jobs:
       default_language: "fr_FR"
       default_timezone: "Europe/Paris"
       show_keyboard_preview: true
+      # Auto-detection configuration
+      auto_detection:
+        enabled: true
+        methods:
+          geoip:
+            enabled: true
+            timeout: 2.0
+          cmdline:
+            enabled: true
+          efi:
+            enabled: true
+        # prefer_local: le choix GRUB de l'ISO (kbd.layout/kbd.locale) prime sur
+        # le GeoIP reseau pour la langue et le clavier.
+        override_mode: "prefer_local"  # "auto", "prefer_geoip", "prefer_local"
+        confidence_threshold: 0.8
 
   # Partitionnement
   - name: partition
@@ -258,62 +304,59 @@ jobs:
       efi_partition_size_mb: 512
       swap_strategy: auto
 
-  # Selection de la saveur (DE/Edition)
-  - name: packages
-    config:
-      # Saveurs disponibles pour GLF OS
-      flavors:
-        - id: gnome
-          name: "GLF OS GNOME"
-          description: "Edition GNOME - Interface moderne et epuree"
-          icon: "flavors/gnome.png"
-          default: true
-        - id: kde
-          name: "GLF OS KDE"
-          description: "Edition KDE Plasma - Personnalisation maximale"
-          icon: "flavors/kde.png"
-        - id: minimal
-          name: "GLF OS Minimal"
-          description: "Base minimale sans environnement de bureau"
-          icon: "flavors/minimal.png"
-      # Groupes de paquets optionnels
-      optional_groups:
-        - id: gaming
-          name: "Gaming"
-          description: "Steam, Lutris, Wine, Proton-GE, MangoHud"
-          default: true
-        - id: streaming
-          name: "Streaming"
-          description: "OBS Studio, plugins streaming"
-        - id: emulation
-          name: "Emulation"
-          description: "RetroArch, Dolphin, PCSX2, RPCS3"
-
   # Installation du systeme (NixOS)
-  - name: install
+  #
+  # Le job `nixos` REMPLACE l'ancien couple `install` (rsync generique) +
+  # `bootloader` (arch-chroot bootctl), inadaptes a NixOS : sur NixOS le
+  # bootloader est declare dans la configuration Nix et pose par nixos-install.
+  # Ce job, calque sur le module Calamares GLF, genere configuration.nix +
+  # hardware-configuration.nix, copie le flake GLF, injecte les devices LUKS
+  # et lance `nixos-install --flake <cible>/etc/nixos#GLF-OS`.
+  #
+  # Prerequis : le job `partition` a partitionne ET monte la cible sur
+  # `target_root`. Les fichiers install.py / bootloader.py restent presents
+  # dans le code mais ne sont plus invoques pour GLF OS.
+  - name: nixos
     config:
-      source: "/iso/nixos"
-      method: nixos-install
-      preserve_permissions: true
-
-  # Configuration utilisateur
-  - name: users
-    config:
-      require_root_password: false
-      default_shell: "/bin/bash"
-      default_groups:
-        - wheel
-        - video
-        - audio
-        - storage
-        - input  # Pour les manettes gaming
-
-  # Bootloader
-  - name: bootloader
-    config:
-      type: systemd-boot
-      install_path: auto
-      enable_os_prober: false  # NixOS gere son propre boot
+      # Repertoire source du flake GLF present sur l'ISO (flake.nix,
+      # flake.lock, customConfig).
+      flake_source: "/iso/nixos"
+      # Attribut nixosConfigurations a installer.
+      flake_attr: "GLF-OS"
+      # Catalogue DE/edition consomme par l'ecran de selection
+      # (bridge _load_environment_data). id = glf.environment.type / .edition.
+      desktop_environments:
+        - id: gnome
+          name: "GNOME"
+          description: "Interface moderne et epuree, orientee productivite. Choix populaire de la communaute GLF-OS."
+          icon: "environments/gnome.png"
+          default: true
+        - id: plasma
+          name: "KDE Plasma"
+          description: "Environnement personnalisable, moderne et riche en fonctionnalites."
+          icon: "environments/plasma.png"
+      editions:
+        - id: standard
+          name: "Standard"
+          description: "Une suite logicielle complete, particulierement adaptee pour le Gaming."
+          icon: "editions/standard.png"
+          default: true
+        - id: mini
+          name: "Mini"
+          description: "Une suite logicielle minimale, a completer selon vos souhaits."
+          icon: "editions/mini.png"
+        - id: streamers
+          name: "Streamers"
+          description: "Pense pour les PC dedies au streaming, capturez leger !"
+          icon: "editions/streamers.png"
+        - id: studio
+          name: "Studio"
+          description: "Complete la suite standard avec des outils de creation artistique (DaVinci Resolve, OBS, Blender, Kdenlive, GIMP, Audacity)."
+          icon: "editions/studio.png"
+        - id: studio-pro
+          name: "Studio | DaVinci Resolve Pro"
+          description: "L'edition Studio avec la version Pro de DaVinci Resolve (DaVinci Resolve Studio)."
+          icon: "editions/studio-pro.png"
 
   # Finalization
   - name: finished

@@ -100,14 +100,17 @@ class EngineProcess:
             logger.warning("Engine already started")
             return
 
-        # Build command
-        python_exe = sys.executable
-        omnis_module = "omnis.main"
+        # Build command. Prefer the installed ``omnis`` entrypoint over a bare
+        # ``python -m omnis.main`` invocation: privilege-escalation tools such
+        # as pkexec sanitise the environment (dropping PYTHONPATH), and packaged
+        # builds (e.g. Nix) expose the ``omnis`` module only through a wrapper.
+        # Re-executing that wrapper keeps the module importable for the engine;
+        # ``python -m omnis.main`` would otherwise fail with ModuleNotFoundError.
+        omnis_bin = shutil.which("omnis")
+        base_cmd = [omnis_bin] if omnis_bin else [sys.executable, "-m", "omnis.main"]
 
         cmd_args = [
-            python_exe,
-            "-m",
-            omnis_module,
+            *base_cmd,
             "--engine",
             "--config",
             str(self.config_path),

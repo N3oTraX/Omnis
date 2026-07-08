@@ -1,13 +1,24 @@
 # Omnis Installer
 
+[![CI](https://github.com/N3oTraX/Omnis/actions/workflows/ci.yml/badge.svg)](https://github.com/N3oTraX/Omnis/actions/workflows/ci.yml)
+[![Release AppImage](https://github.com/N3oTraX/Omnis/actions/workflows/release.yml/badge.svg)](https://github.com/N3oTraX/Omnis/actions/workflows/release.yml)
+[![Release](https://img.shields.io/github/v/release/N3oTraX/Omnis?sort=semver)](https://github.com/N3oTraX/Omnis/releases)
+[![Downloads](https://img.shields.io/github/downloads/N3oTraX/Omnis/total.svg)](https://github.com/N3oTraX/Omnis/releases)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![Qt6](https://img.shields.io/badge/Qt-6-41CD52.svg)](https://www.qt.io/)
+
 **Installeur Linux universel, modulaire et moderne** - Alternative à Calamares.
 
 | Métrique | Valeur |
 |----------|--------|
-| Version | `0.3.0` (WelcomeJob) |
+| Version | `0.5.0` |
 | Python | `>=3.11` |
 | GUI | PySide6 (Qt6) + QML |
-| IPC | Unix Socket + JSON |
+| Livrable | AppImage standalone (Nix bundle, CI sur tag) |
+| Tests | 801 tests unitaires |
+| i18n | 37 locales supportées |
 | Licence | GPL-3.0-or-later |
 
 ---
@@ -122,7 +133,7 @@ cd Omnis
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-# Lancer les tests (122 tests)
+# Lancer les tests (801 tests)
 pytest
 
 # Démarrer l'installeur GLF OS (mode développement)
@@ -134,6 +145,23 @@ Output attendu :
 Using config: config/examples/glfos.yaml
 Theme base: /path/to/Omnis/config/themes/glfos
 ```
+
+---
+
+## Livrable standalone (AppImage)
+
+Omnis se distribue aussi en **exécutable unique** (AppImage), généré par la CI sur chaque tag `v*` et reproductible (Nix bundle épinglé au tag). L'UI et le partitionnement sont portables ; l'installation réelle de GLF-OS reste liée à l'environnement live NixOS (`nixos-install`).
+
+```bash
+# Construire l'AppImage localement (nécessite Nix)
+nix bundle .#omnis                      # -> ./omnis (AppImage unique)
+
+# Ou récupérer la dernière release publiée
+# https://github.com/N3oTraX/Omnis/releases
+./omnis-<version>-x86_64.AppImage
+```
+
+Étude complète : [`docs/etude-packaging-standalone.md`](docs/etude-packaging-standalone.md).
 
 ---
 
@@ -219,7 +247,7 @@ python -c "from omnis.core.engine import Engine; print('OK')"
 ### Commandes Développement
 
 ```bash
-# Lancer tous les tests (122 tests)
+# Lancer tous les tests (801 tests)
 pytest -v
 
 # Tests IPC uniquement
@@ -310,9 +338,69 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 
 ## État du Projet
 
-### v0.3.0 - WelcomeJob (Actuel)
+### v0.5.0 - Install NixOS, éditeur de partition, packaging (validation E2E en cours)
 
-**Welcome Screen (Écran d'accueil complet)**
+- [x] Job d'installation NixOS complet : `configuration.nix`, `nixos-generate-config`, `nixos-install`, LUKS chiffré/non-chiffré, GPU multi-vendor, systemd-boot
+- [x] Éditeur de partition manuel type GParted (create/delete/format/resize/flags, Apply live, table GPT auto)
+- [x] Barre de progression réelle pendant `nixos-install` (parse nix internal-json)
+- [x] Copie NetworkManager (wifi + filaire), i18n auto (boot GRUB + GeoIP, override manuel), durcissement permissions nix
+- [x] Livrable **AppImage standalone** + CI de release (Nix bundle)
+- [ ] Validation installation de bout en bout (ISO GLF-OS)
+
+### v0.4.2 - Stabilisation ✅
+
+- [x] Polish UI et animations
+- [ ] Tests d'intégration end-to-end
+- [ ] Documentation utilisateur
+
+### v0.4.1 - i18n & Locale Detection ✅
+
+Internationalisation complète :
+
+- [x] Détection automatique locale avec cascade fallback (système → DE → défaut)
+- [x] Live language switching dans l'UI (changement sans redémarrage)
+- [x] 37 locales supportées (fr, de, es, it, pt, ru, zh, ja, ko, ar, etc.)
+- [x] Scripts de gestion traductions (`fix_translation_encoding.py`, `compile_translations.sh`)
+- [x] Documentation i18n complète (`docs/translations.md`)
+
+Network & Connectivity :
+
+- [x] NetworkHelper : Vérification connectivité internet
+- [x] Détection environnement desktop (KDE, GNOME, etc.)
+- [x] Support proxy système
+
+Améliorations UI :
+
+- [x] Keyboard variants auto-update lors de la sélection locale
+- [x] Fix layout LocaleView et boutons dupliqués
+- [x] GPU check amélioré dans requirements
+
+### v0.4.0 - Jobs de Base + Phase 1 UI ✅
+
+Jobs d'installation :
+
+- [x] LocaleJob : Configuration langue, timezone, clavier
+- [x] UsersJob : Création utilisateur, mot de passe, options admin
+- [x] PartitionJob : Partitionnement automatique avec sécurité critique
+- [x] PackagesJob : Installation packages (pacman/apt)
+- [x] InstallJob : Copie système vers cible
+- [x] BootloaderJob : Installation GRUB/systemd-boot
+- [x] FinishedJob : Résumé et nettoyage
+
+Interface utilisateur (Phase 1) :
+
+- [x] LocaleView : Sélection locale/timezone/keymap
+- [x] UsersView : Formulaire utilisateur complet
+- [x] PartitionView : Sélection disque et mode
+- [x] SummaryView : Récapitulatif avant installation
+- [x] ProgressView : Barre de progression jobs
+- [x] FinishedView : Écran de fin (reboot/shutdown)
+- [x] Navigation wizard multi-étapes
+
+### v0.3.0 - WelcomeJob ✅
+
+Welcome Screen (Écran d'accueil complet) :
+
 - [x] Requirements panel avec checks système configurables
 - [x] Checks disponibles : RAM, Disk, CPU, EFI, Secure Boot, Internet, Power, GPU
 - [x] GPU : Détection dGPU/iGPU, noms courts marketing, tri par type
@@ -324,7 +412,8 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 
 ### v0.2.0 - IPC ✅
 
-**IPC (Inter-Process Communication)**
+IPC (Inter-Process Communication) :
+
 - [x] Protocole JSON avec framing length-prefix (4 bytes big-endian)
 - [x] Transport Unix Socket sécurisé (permissions 0600/0700)
 - [x] Server multi-client avec threads
@@ -333,34 +422,32 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 - [x] Validation de sécurité (whitelist, path traversal, injection)
 - [x] Dispatcher avec handlers enregistrables
 
-**Launcher (Séparation UI/Engine)**
+Launcher (Séparation UI/Engine) :
+
 - [x] EngineProcess avec élévation de privilèges (pkexec/sudo)
 - [x] Mode `--no-fork` pour développement
 - [x] Mode `--engine` pour serveur IPC isolé
 - [x] Handlers pour toutes les commandes (PING, GET_STATUS, GET_BRANDING, etc.)
 
-**Tests**
-- [x] 122 tests unitaires (pytest)
-- [x] Tests IPC complets (protocol, transport, security, server, client)
-- [x] Tests d'intégration (multi-clients, events, reconnection)
-- [x] Tests launcher (dispatcher, handlers)
-
 ### v0.1.0 - Squelette ✅
 
-**Core**
+Core :
+
 - [x] Structure projet complète
 - [x] Configuration pyproject.toml avec dépendances
 - [x] Modèles Pydantic pour validation YAML
 - [x] Interface Engine avec chargement config
 - [x] Classe abstraite BaseJob
 
-**GUI**
+GUI :
+
 - [x] Interface QML avec branding dynamique
 - [x] Bridge Python ↔ QML (BrandingProxy, EngineBridge)
 - [x] Résolution des assets en URLs `file://`
 - [x] Fallback UI si assets manquants
 
-**Thèmes**
+Thèmes :
+
 - [x] Système de thèmes modulaire
 - [x] Thème GLF OS complet (10 logos, 5 wallpapers, 2 boot assets)
 - [x] Documentation theming complète
@@ -371,22 +458,43 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 |---------|----------|--------|
 | v0.1.0 | Squelette + Thèmes | ✅ Terminé |
 | v0.2.0 | IPC UI/Engine | ✅ Terminé |
-| v0.3.0 | WelcomeJob + Requirements | ✅ Actuel |
-| v0.4.0 | Jobs de base (Locale, Users, Partition) | 🔲 À faire |
-| v0.5.0 | UI Wizard complet | 🔲 À faire |
-| v1.0.0 | Release stable | 🔲 À faire |
+| v0.3.0 | WelcomeJob + Requirements | ✅ Terminé |
+| v0.4.0 | Jobs de base + Phase 1 UI | ✅ Terminé |
+| v0.4.1 | i18n + Locale Detection | ✅ Terminé |
+| v0.4.2 | UsersView Integration | 🔄 En cours |
+| v0.4.3 | PartitionView Polish | 🔲 À faire |
+| v0.4.4 | SummaryView Polish | 🔲 À faire |
+| v0.4.5 | ProgressView Polish | 🔲 À faire |
+| v0.4.6 | FinishedView Polish | 🔲 À faire |
+| v0.5.0 | E2E Integration Tests | 🔲 À faire |
+| v0.6.0 | IPC Production Ready | 🔲 À faire |
+| v0.7.0 | UI Complete Validation | 🔲 Milestone |
+| v0.8.0 | GLFOS Module Integration | 🔲 À faire |
+| v0.9.0 | Production Hardening | 🔲 À faire |
+| v1.0.0 | First Stable Release | 🔲 Release |
+
+Roadmap détaillé : [`docs/roadmap.md`](docs/roadmap.md)
 
 ---
 
 ## Contribuer
 
-1. Fork le projet
-2. Créer une branche (`git checkout -b feature/ma-feature`)
-3. Commit (`git commit -m 'Add: ma feature'`)
-4. Push (`git push origin feature/ma-feature`)
-5. Ouvrir une Pull Request
+Le projet suit un **flux GitOps** classique à deux branches longues :
 
-**Standards** : Code typé, testé, conforme à ruff.
+- **`develop`** : branche d'intégration — tout le développement s'y fait (features, fixes).
+- **`main`** : branche stable — reçoit `develop` par Pull Request ; les releases y sont taguées (`v*`).
+
+```
+feature/*  ──PR──►  develop  ──PR──►  main  ──tag vX.Y.Z──►  CI release (AppImage + changelog)
+```
+
+1. Partir de `develop` (`git switch develop`)
+2. Créer une branche `feature/ma-feature` (ou committer sur `develop`)
+3. Commits **Conventional Commits** (`feat:`, `fix:`, `docs:`…) — ils alimentent le changelog auto
+4. Ouvrir une **PR vers `develop`**
+5. Une PR **`develop` → `main`** puis un **tag `vX.Y.Z`** déclenchent la publication de la release
+
+**Standards** : code typé (mypy strict), testé (pytest), conforme à ruff, commentaires minimaux.
 
 ---
 

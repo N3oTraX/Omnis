@@ -1,6 +1,7 @@
 """Unit tests for Omnis Engine."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -80,3 +81,261 @@ jobs: []
         assert branding.name == "Custom OS"
         assert branding.version == "1.0.0"
         assert branding.colors.primary == "#FF0000"
+
+
+class TestThemeOverlay:
+    """Tests for the <theme_dir>/theme.yaml overlay onto inline branding."""
+
+    @staticmethod
+    def _write_theme(tmp_path: Path, theme_yaml: str) -> None:
+        theme_dir = tmp_path / "themes" / "glfos"
+        theme_dir.mkdir(parents=True)
+        (theme_dir / "theme.yaml").write_text(theme_yaml)
+
+    def test_theme_colors_override_inline_branding(self, tmp_path: Path) -> None:
+        self._write_theme(
+            tmp_path,
+            """
+colors:
+  primary: "#222222"
+  secondary: "#333333"
+""",
+        )
+        config_file = tmp_path / "omnis.yaml"
+        config_file.write_text("""
+version: "1.0"
+theme: "themes/glfos"
+branding:
+  name: "Inline OS"
+  colors:
+    primary: "#111111"
+    text: "#ABCDEF"
+jobs: []
+""")
+        branding = Engine.from_config_file(config_file).get_branding()
+        assert branding.colors.primary == "#222222"  # theme wins
+        assert branding.colors.secondary == "#333333"  # theme provides
+        assert branding.colors.text == "#ABCDEF"  # inline kept (theme silent)
+        assert branding.name == "Inline OS"  # no theme metadata
+
+    def test_theme_metadata_maps_to_identity(self, tmp_path: Path) -> None:
+        self._write_theme(
+            tmp_path,
+            """
+metadata:
+  name: "Theme OS"
+  version: "2025.1"
+  codename: "Omnislash"
+colors:
+  primary: "#222222"
+""",
+        )
+        config_file = tmp_path / "omnis.yaml"
+        config_file.write_text("""
+version: "1.0"
+theme: "themes/glfos"
+branding:
+  name: "Inline OS"
+jobs: []
+""")
+        branding = Engine.from_config_file(config_file).get_branding()
+        assert branding.name == "Theme OS"
+        assert branding.version == "2025.1"
+        assert branding.edition == "Omnislash"
+
+    def test_theme_extra_color_keys_are_ignored(self, tmp_path: Path) -> None:
+        self._write_theme(
+            tmp_path,
+            """
+colors:
+  primary: "#222222"
+  success: "#010203"
+""",
+        )
+        config_file = tmp_path / "omnis.yaml"
+        config_file.write_text("""
+version: "1.0"
+theme: "themes/glfos"
+branding:
+  name: "Inline OS"
+jobs: []
+""")
+        # Must not raise despite `success` not being a BrandingColors field.
+        branding = Engine.from_config_file(config_file).get_branding()
+        assert branding.colors.primary == "#222222"
+
+    def test_missing_theme_yaml_uses_inline_branding(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "omnis.yaml"
+        config_file.write_text("""
+version: "1.0"
+theme: "themes/absent"
+branding:
+  name: "Inline OS"
+  colors:
+    primary: "#111111"
+jobs: []
+""")
+        branding = Engine.from_config_file(config_file).get_branding()
+        assert branding.colors.primary == "#111111"
+        assert branding.name == "Inline OS"
+
+    def test_status_colors_from_theme(self, tmp_path: Path) -> None:
+        # success/warning/error + background_light/text_on_primary must now be
+        # first-class branding colors, sourced from theme.yaml.
+        self._write_theme(
+            tmp_path,
+            """
+colors:
+  success: "#010203"
+  warning: "#040506"
+  error: "#070809"
+  background_light: "#0A0B0C"
+  text_on_primary: "#0D0E0F"
+""",
+        )
+        config_file = tmp_path / "omnis.yaml"
+        config_file.write_text("""
+version: "1.0"
+theme: "themes/glfos"
+branding:
+  name: "Inline OS"
+jobs: []
+""")
+        colors = Engine.from_config_file(config_file).get_branding().colors
+        assert colors.success == "#010203"
+        assert colors.warning == "#040506"
+        assert colors.error == "#070809"
+        assert colors.background_light == "#0A0B0C"
+        assert colors.text_on_primary == "#0D0E0F"
+
+
+class TestLayoutPropagation:
+    """A job's computed layout is forwarded into the shared selections."""
+
+    def test_partition_layout_reaches_later_jobs(self, tmp_path: Path) -> None:
+        from omnis.jobs.base import BaseJob, JobContext, JobResult
+
+        class _PartJob(BaseJob):
+            name = "part"
+            description = "part"
+
+            def run(self, _context: JobContext) -> JobResult:
+                return JobResult.ok(
+                    "ok", data={"layout": {"root": "/dev/sda2", "efi": "/dev/sda1"}}
+                )
+
+            def estimate_duration(self) -> int:
+                return 1
+
+        seen: dict[str, str] = {}
+
+        class _NixJob(BaseJob):
+            name = "nix"
+            description = "nix"
+
+            def run(self, context: JobContext) -> JobResult:
+                seen["root"] = str(context.selections.get("root_partition", ""))
+                seen["efi"] = str(context.selections.get("efi_partition", ""))
+                return JobResult.ok("ok")
+
+            def estimate_duration(self) -> int:
+                return 1
+
+        config_file = tmp_path / "c.yaml"
+        config_file.write_text('version: "1.0"\nbranding:\n  name: "T"\njobs: []\n')
+        engine = Engine.from_config_file(config_file)
+        engine.jobs = [_PartJob(), _NixJob()]
+
+        assert engine.run_all() is True
+        assert seen == {"root": "/dev/sda2", "efi": "/dev/sda1"}
+
+
+class TestOnErrorCallback:
+    """Regression tests for the P0 fix: on_error must fire for every failure mode.
+
+    Before the fix, ``_run_single_job`` only invoked ``on_error`` when
+    ``job.validate()`` failed or when ``job.run()`` raised an exception. A job
+    that *returned* ``JobResult.fail(...)`` from ``run()`` (the normal,
+    non-exceptional failure path) never triggered ``on_error``, so the GUI
+    surfaced a generic "unknown error" instead of the job's real message.
+    """
+
+    @staticmethod
+    def _make_engine(tmp_path: Path, job: Any) -> Engine:
+        from omnis.jobs.base import BaseJob
+
+        assert isinstance(job, BaseJob)
+        config_file = tmp_path / "c.yaml"
+        config_file.write_text('version: "1.0"\nbranding:\n  name: "T"\njobs: []\n')
+        engine = Engine.from_config_file(config_file)
+        engine.jobs = [job]
+        return engine
+
+    def test_returned_failure_triggers_on_error(self, tmp_path: Path) -> None:
+        """A job that returns JobResult.fail(...) must call on_error with its message."""
+        from omnis.jobs.base import BaseJob, JobContext, JobResult
+
+        class _FailingJob(BaseJob):
+            name = "failing_job"
+            description = "fails via return value"
+
+            def run(self, _context: JobContext) -> JobResult:
+                return JobResult.fail("boom")
+
+            def estimate_duration(self) -> int:
+                return 1
+
+        engine = self._make_engine(tmp_path, _FailingJob())
+
+        errors: list[tuple[str, str]] = []
+        engine.on_error = lambda name, message: errors.append((name, message))
+
+        assert engine.run_all() is False
+        assert errors == [("failing_job", "boom")]
+        assert engine.state.last_error == "boom"
+
+    def test_exception_still_triggers_on_error(self, tmp_path: Path) -> None:
+        """Non-regression: a job that raises must still call on_error (pre-existing path)."""
+        from omnis.jobs.base import BaseJob, JobContext, JobResult
+
+        class _RaisingJob(BaseJob):
+            name = "raising_job"
+            description = "raises an exception"
+
+            def run(self, _context: JobContext) -> JobResult:
+                raise RuntimeError("kaboom")
+
+            def estimate_duration(self) -> int:
+                return 1
+
+        engine = self._make_engine(tmp_path, _RaisingJob())
+
+        errors: list[tuple[str, str]] = []
+        engine.on_error = lambda name, message: errors.append((name, message))
+
+        assert engine.run_all() is False
+        assert errors == [("raising_job", "kaboom")]
+        assert engine.state.last_error == "kaboom"
+
+    def test_successful_job_does_not_trigger_on_error(self, tmp_path: Path) -> None:
+        """A successful job must never call on_error."""
+        from omnis.jobs.base import BaseJob, JobContext, JobResult
+
+        class _OkJob(BaseJob):
+            name = "ok_job"
+            description = "succeeds"
+
+            def run(self, _context: JobContext) -> JobResult:
+                return JobResult.ok("all good")
+
+            def estimate_duration(self) -> int:
+                return 1
+
+        engine = self._make_engine(tmp_path, _OkJob())
+
+        errors: list[tuple[str, str]] = []
+        engine.on_error = lambda name, message: errors.append((name, message))
+
+        assert engine.run_all() is True
+        assert errors == []
+        assert engine.state.last_error is None

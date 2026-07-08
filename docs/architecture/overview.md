@@ -61,6 +61,12 @@ class BaseJob(ABC):
     @abstractmethod
     def estimate_time(self) -> int:
         """Estimation en secondes pour l'UI."""
+
+    def validate(self, context: JobContext) -> JobResult:
+        """Validation avant exécution (optionnel)."""
+
+    def cleanup(self, context: JobContext) -> None:
+        """Nettoyage après exécution (optionnel)."""
 ```
 
 ### Cycle de Vie
@@ -73,15 +79,18 @@ class BaseJob(ABC):
 
 ### Jobs Standards
 
-| Job | Rôle |
-|-----|------|
-| `welcome` | Écran d'accueil, vérifications pré-installation |
-| `locale` | Sélection langue, timezone, clavier |
-| `partition` | Partitionnement disque (manuel/auto) |
-| `install` | Copie des fichiers système |
-| `bootloader` | Installation GRUB/systemd-boot |
-| `users` | Création utilisateurs |
-| `finished` | Résumé, redémarrage |
+| Job | Rôle | Status |
+|-----|------|--------|
+| `welcome` | Écran d'accueil, vérifications pré-installation | ✅ Implémenté |
+| `requirements` | Checks système (RAM, Disk, CPU, EFI, Internet, GPU) | ✅ Implémenté |
+| `locale` | Sélection langue, timezone, clavier + détection auto | ✅ Implémenté |
+| `partition` | Partitionnement disque avec sécurité critique | ✅ Implémenté |
+| `users` | Création utilisateurs, hostname, mot de passe | ✅ Implémenté |
+| `packages` | Installation packages (pacman/apt support) | ✅ Implémenté |
+| `gpu` | Détection GPU (dGPU/iGPU), drivers recommandés | ✅ Implémenté |
+| `install` | Copie des fichiers système | ✅ Implémenté |
+| `bootloader` | Installation GRUB/systemd-boot | ✅ Implémenté |
+| `finished` | Résumé, nettoyage, reboot/shutdown | ✅ Implémenté |
 
 ---
 
@@ -228,8 +237,33 @@ jobs:
 
 ---
 
-## Prochaines Étapes
+## État d'Avancement (v0.4.2)
 
-- [ ] Implémentation socket IPC
-- [ ] Jobs de base fonctionnels
-- [ ] Tests d'intégration UI/Engine
+### Complété ✅
+
+- [x] Socket IPC complet (protocol, transport, security, server, client)
+- [x] Tous les jobs de base implémentés (10 jobs)
+- [x] Tests unitaires complets (599 tests)
+- [x] Système i18n avec 37 locales
+- [x] Détection automatique de la locale
+- [x] Live language switching
+- [x] Phase 1 UI (tous les composants QML intégrés)
+- [x] Network helper avec checks connectivité
+
+### En Cours 🔄 (v0.4.2 - UsersView Integration)
+
+- [ ] Tests unitaires validation UsersView
+- [ ] Icons utilisateur (config/themes/glfos/icons/users/)
+- [ ] Integration complète Engine ↔ UsersView
+- [ ] Tests E2E UsersView ↔ UsersJob
+
+### Planifié 📋
+
+- [ ] v0.4.3: PartitionView Polish
+- [ ] v0.4.4: SummaryView Polish
+- [ ] v0.4.5: ProgressView Polish
+- [ ] v0.4.6: FinishedView Polish
+- [ ] v0.7.0: UI Complete Validation
+- [ ] v1.0.0: GLFOS Installation Ready
+
+Roadmap complet : [`docs/roadmap.md`](roadmap.md)

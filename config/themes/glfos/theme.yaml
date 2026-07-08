@@ -7,10 +7,10 @@
 
 metadata:
   name: "GLF OS"
-  codename: "Omnislash"
-  version: "2025.1"
+  codename: "Quasar Quake"
+  version: "26.05"
   author: "Gaming Linux FR"
-  website: "https://www.gaminglinux.fr/glf-os/"
+  website: "https://glfos.org"
   license: "MIT"
 
 # -----------------------------------------------------------------------------
