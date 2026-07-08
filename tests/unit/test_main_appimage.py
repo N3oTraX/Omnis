@@ -32,7 +32,7 @@ def test_appimage_forces_no_fork(monkeypatch, tmp_path):
     cfg = tmp_path / "glfos.yaml"
     cfg.write_text("branding: {}\n")
     monkeypatch.setenv("APPIMAGE", "/tmp/omnis.AppImage")
-    monkeypatch.setattr(main, "find_config_file", lambda explicit: cfg)
+    monkeypatch.setattr(main, "find_config_file", lambda *_a: cfg)
     monkeypatch.setattr(main.sys, "argv", ["omnis"])
 
     captured: dict = {}
@@ -47,7 +47,7 @@ def test_no_appimage_keeps_fork(monkeypatch, tmp_path):
     cfg.write_text("branding: {}\n")
     monkeypatch.delenv("APPIMAGE", raising=False)
     monkeypatch.delenv("APPDIR", raising=False)
-    monkeypatch.setattr(main, "find_config_file", lambda explicit: cfg)
+    monkeypatch.setattr(main, "find_config_file", lambda *_a: cfg)
     monkeypatch.setattr(main.sys, "argv", ["omnis"])
 
     captured: dict = {}
