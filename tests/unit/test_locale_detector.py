@@ -285,8 +285,7 @@ class TestCmdlineDetection:
         """GLF ISO GRUB params: kbd.locale + kbd.layout drive the selection;
         kbd.keymap (a console keymap like de-latin1) must be ignored."""
         cmdline = (
-            "BOOT_IMAGE=/boot/vmlinuz "
-            "kbd.layout=de kbd.keymap=de-latin1 kbd.locale=de_DE.UTF-8"
+            "BOOT_IMAGE=/boot/vmlinuz kbd.layout=de kbd.keymap=de-latin1 kbd.locale=de_DE.UTF-8"
         )
 
         with (

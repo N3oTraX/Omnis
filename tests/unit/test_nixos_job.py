@@ -357,9 +357,7 @@ class TestHashPasswordTool:
         job = NixosJob()
         with (
             patch.object(job, "_detect_state_version", return_value="25.11"),
-            patch.object(
-                job, "_hash_password", side_effect=RuntimeError("no tool")
-            ),
+            patch.object(job, "_hash_password", side_effect=RuntimeError("no tool")),
             patch("omnis.jobs.nixos.subprocess.run") as mock_run,
         ):
             result = job.run(_context(dry_run=True, password="userpw"))

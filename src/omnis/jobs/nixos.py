@@ -401,9 +401,7 @@ class NixosJob(BaseJob):
             groups = " ".join(f'"{g}"' for g in DEFAULT_USER_GROUPS)
             # Inject ``hashedPassword`` inside the user block only when a hash
             # was computed for the user account (i.e. a password was provided).
-            hashed = (
-                CFG_USER_HASHED_PASSWORD.format(hash=hashes.user) if hashes.user else ""
-            )
+            hashed = CFG_USER_HASHED_PASSWORD.format(hash=hashes.user) if hashes.user else ""
             cfg += CFG_USERS.format(
                 username=username,
                 fullname=fullname,
@@ -497,9 +495,7 @@ class NixosJob(BaseJob):
             candidates.append(["openssl", "passwd", "-6", "-stdin"])
 
         if not candidates:
-            raise RuntimeError(
-                "No password hashing tool found (need 'mkpasswd' or 'openssl')"
-            )
+            raise RuntimeError("No password hashing tool found (need 'mkpasswd' or 'openssl')")
 
         last_error = ""
         for cmd in candidates:
@@ -988,7 +984,9 @@ class NixosJob(BaseJob):
             )
         except FileNotFoundError:
             logger.error("Command not found: %s", cmd[0])
-            return JobResult.fail(f"Required tool not found: {cmd[0]}", error_code=ERR_TOOL_NOT_FOUND)
+            return JobResult.fail(
+                f"Required tool not found: {cmd[0]}", error_code=ERR_TOOL_NOT_FOUND
+            )
 
         span = max(0, pct_end - pct_start)
         progress = _NixProgress()
@@ -1005,7 +1003,9 @@ class NixosJob(BaseJob):
         code = proc.wait()
         if code != 0:
             logger.error("FAILED: %s (exit %s)", description, code)
-            return JobResult.fail(f"{description} failed (exit code {code})", error_code=ERR_INSTALL)
+            return JobResult.fail(
+                f"{description} failed (exit code {code})", error_code=ERR_INSTALL
+            )
         logger.info("OK: %s", description)
         return JobResult.ok(description)
 

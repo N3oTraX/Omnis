@@ -12,31 +12,75 @@ CFG_NVIDIA = """  glf.nvidia_config = {{
 """
 
 AMD_LEGACY_RADEON_HINTS = (
-    "hd 2", "hd 3", "hd 4", "hd 5", "hd 6",
-    "rv6", "rv7", "rs6", "rs7", "rs8", "rs9",
-    "r600", "r700", "r800", "r900",
-    "tera-scale", "terascale",
+    "hd 2",
+    "hd 3",
+    "hd 4",
+    "hd 5",
+    "hd 6",
+    "rv6",
+    "rv7",
+    "rs6",
+    "rs7",
+    "rs8",
+    "rs9",
+    "r600",
+    "r700",
+    "r800",
+    "r900",
+    "tera-scale",
+    "terascale",
 )
 AMD_DISCRETE_HINTS = ("rx ", "radeon pro", "instinct", "firepro")
 AMD_IGPU_HINTS = (
     "radeon graphics",
-    "vega 3", "vega 6", "vega 7", "vega 8", "vega 11",
-    "rembrandt", "phoenix", "raphael", "barcelo",
-    "cezanne", "renoir", "lucienne", "picasso",
+    "vega 3",
+    "vega 6",
+    "vega 7",
+    "vega 8",
+    "vega 11",
+    "rembrandt",
+    "phoenix",
+    "raphael",
+    "barcelo",
+    "cezanne",
+    "renoir",
+    "lucienne",
+    "picasso",
     "raven ridge",
 )
 INTEL_I915_DISCRETE_HINTS = (
     "dg2",
-    "a380", "a580", "a750", "a770",
-    "a310", "a350m", "a370m", "a550m", "a570m", "a730m", "a770m",
+    "a380",
+    "a580",
+    "a750",
+    "a770",
+    "a310",
+    "a350m",
+    "a370m",
+    "a550m",
+    "a570m",
+    "a730m",
+    "a770m",
 )
 INTEL_XE_DISCRETE_HINTS = ("battlemage", "bmg", "b580", "b770")
 INTEL_XE_INTEGRATED_HINTS = (
-    "lunar lake", "lnl",
-    "panther lake", "ptl",
-    "arrow lake", "arl",
+    "lunar lake",
+    "lnl",
+    "panther lake",
+    "ptl",
+    "arrow lake",
+    "arl",
 )
-VIRTUAL_GPU_HINTS = ("qxl", "virtio", "vmware", "vmwgfx", "cirrus", "bochs", "innotek", "virtualbox")
+VIRTUAL_GPU_HINTS = (
+    "qxl",
+    "virtio",
+    "vmware",
+    "vmwgfx",
+    "cirrus",
+    "bochs",
+    "innotek",
+    "virtualbox",
+)
 
 _VGA_KEYWORDS = (" VGA compatible controller: ", " 3D controller: ")
 

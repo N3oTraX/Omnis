@@ -211,9 +211,7 @@ def _build_partition(child: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _compute_segments(
-    disk_sectors: int, partitions: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
+def _compute_segments(disk_sectors: int, partitions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Interleave partitions and free-space regions across the whole disk.
 

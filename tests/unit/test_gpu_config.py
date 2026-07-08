@@ -8,10 +8,7 @@ from __future__ import annotations
 
 from omnis.jobs import gpu_config
 
-NVIDIA = (
-    "01:00.0 VGA compatible controller: NVIDIA Corporation "
-    "GA104 [GeForce RTX 3070] (rev a1)"
-)
+NVIDIA = "01:00.0 VGA compatible controller: NVIDIA Corporation GA104 [GeForce RTX 3070] (rev a1)"
 NVIDIA_MOBILE = (
     "01:00.0 VGA compatible controller: NVIDIA Corporation "
     "GA106M [GeForce RTX 3060 Mobile / Max-Q] (rev a1)"
@@ -21,8 +18,7 @@ INTEL_IGPU = (
     "AlderLake-P GT2 [Iris Xe Graphics] (rev 0c)"
 )
 INTEL_LUNARLAKE = (
-    "00:02.0 VGA compatible controller: Intel Corporation "
-    "Lunar Lake [Arc Graphics 140V] (rev 04)"
+    "00:02.0 VGA compatible controller: Intel Corporation Lunar Lake [Arc Graphics 140V] (rev 04)"
 )
 AMD_RX = (
     "03:00.0 VGA compatible controller: Advanced Micro Devices, Inc. "

@@ -274,9 +274,7 @@ class TestApplyPartitionOperations:
         assert results and results[0][0] is False
         assert bridge.partitionApplying is False
 
-    def test_apply_finished_success_clears_queue_and_rescans(
-        self, bridge: EngineBridge
-    ) -> None:
+    def test_apply_finished_success_clears_queue_and_rescans(self, bridge: EngineBridge) -> None:
         bridge.addPartitionOperation(_create_free_op())
         assert len(bridge.pendingOperations) == 1
 
@@ -299,9 +297,7 @@ class TestApplyPartitionOperations:
         mock_scan.assert_not_called()
         assert bridge.partitionApplying is False
 
-    def test_apply_finished_success_refreshes_editor_geometry(
-        self, bridge: EngineBridge
-    ) -> None:
+    def test_apply_finished_success_refreshes_editor_geometry(self, bridge: EngineBridge) -> None:
         # Regression: after a successful apply the partition editor
         # (simulatedSegments) must reflect the newly written layout, not the
         # pre-apply geometry (which only "Available Disks" used to refresh).

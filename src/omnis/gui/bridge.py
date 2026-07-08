@@ -2598,9 +2598,7 @@ class EngineBridge(QObject):
         self._desktop_environments_model = self._build_environment_items(
             environment_config.get("desktop_environments", [])
         )
-        self._editions_model = self._build_environment_items(
-            environment_config.get("editions", [])
-        )
+        self._editions_model = self._build_environment_items(environment_config.get("editions", []))
 
         # Apply config-declared defaults so the summary/first render match the
         # highlighted card even before any user interaction.

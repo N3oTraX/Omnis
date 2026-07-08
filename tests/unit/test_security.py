@@ -228,9 +228,9 @@ class TestCodeSecurity:
                 # Filter test files and obvious non-credentials (template markers).
                 real_matches = [m for m in matches if not placeholder_re.search(m)]
                 if "test" not in str(py_file).lower():
-                    assert (
-                        not real_matches
-                    ), f"Potential hardcoded credential in {py_file}: {real_matches}"
+                    assert not real_matches, (
+                        f"Potential hardcoded credential in {py_file}: {real_matches}"
+                    )
 
 
 @pytest.mark.skipif(not HAS_OMNIS, reason="omnis package not available")

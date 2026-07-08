@@ -205,7 +205,7 @@ class TranslatorProxy(QObject):
         return False
 
     @Slot(str, str, result=str)
-    def tr(self, key: str, section: str = "common") -> str:
+    def tr(self, key: str, section: str = "common") -> str:  # type: ignore[override]
         """
         Get translated string from Python translator.
 
