@@ -118,6 +118,9 @@ class BrandingConfig(BaseModel):
     strings: BrandingStrings = Field(default_factory=BrandingStrings)
     fonts: BrandingFonts = Field(default_factory=BrandingFonts)
     links: BrandingLinks = Field(default_factory=BrandingLinks)
+    # Category -> theme-relative SVG path for requirement icons, set from
+    # theme.yaml; falls back to the icons/requirements/cat-<name>.svg convention.
+    requirement_icons: dict[str, str] = Field(default_factory=dict)
 
 
 class JobDefinition(BaseModel):
@@ -259,7 +262,7 @@ class Engine:
             raw_config["branding"] = branding
 
         # Sub-sections whose keys map 1:1 onto the branding sub-models.
-        for section in ("colors", "fonts", "strings"):
+        for section in ("colors", "fonts", "strings", "requirement_icons"):
             values = theme.get(section)
             if isinstance(values, dict):
                 target = branding.get(section)

@@ -123,6 +123,26 @@ boot:
   efi_icon: "boot/glf-efi.png"
 
 # -----------------------------------------------------------------------------
+# Icônes de catégorie des prérequis (SVG, chemins relatifs au thème)
+# -----------------------------------------------------------------------------
+# Icône colorée affichée à gauche de chaque prérequis (CPU, RAM, GPU...).
+# Clé = nom de la catégorie (cpu_cores, cpu_arch, ram, disk, gpu, internet,
+# efi, secure_boot, power, battery). Si une catégorie n'est pas listée ici,
+# repli sur la convention icons/requirements/cat-<catégorie>.svg, puis sur un
+# emoji. Pour personnaliser : pointer vers n'importe quel .svg du thème.
+requirement_icons:
+  cpu_cores: "icons/requirements/cat-cpu_cores.svg"
+  cpu_arch: "icons/requirements/cat-cpu_arch.svg"
+  ram: "icons/requirements/cat-ram.svg"
+  disk: "icons/requirements/cat-disk.svg"
+  gpu: "icons/requirements/cat-gpu.svg"
+  internet: "icons/requirements/cat-internet.svg"
+  efi: "icons/requirements/cat-efi.svg"
+  secure_boot: "icons/requirements/cat-secure_boot.svg"
+  power: "icons/requirements/cat-power.svg"
+  battery: "icons/requirements/cat-battery.svg"
+
+# -----------------------------------------------------------------------------
 # Chaînes de l'installeur
 # -----------------------------------------------------------------------------
 # Textes de marque affichés dans l'UI. L'i18n (config/i18n/*.conf) a la priorité

@@ -427,6 +427,13 @@ class BrandingProxy(QObject):
     def themeIconUrl(self, relative_path: str) -> str:
         return self._resolve_asset(relative_path)
 
+    @Slot(str, result=str)
+    def requirementIconUrl(self, name: str) -> str:
+        if not name:
+            return ""
+        rel = self._branding.requirement_icons.get(name) or f"icons/requirements/cat-{name}.svg"
+        return self._resolve_asset(rel)
+
     @Property(str, notify=brandingChanged)
     def welcomeTitle(self) -> str:
         """Welcome screen title with i18n interpolation."""
