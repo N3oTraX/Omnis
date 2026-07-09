@@ -424,7 +424,7 @@ class BrandingProxy(QObject):
         return self._branding.fonts.monospace
 
     @Slot(str, result=str)
-    def iconUrl(self, relative_path: str) -> str:
+    def themeIconUrl(self, relative_path: str) -> str:
         return self._resolve_asset(relative_path)
 
     @Property(str, notify=brandingChanged)

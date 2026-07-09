@@ -86,7 +86,7 @@ Rectangle {
     // Colored category icon (status-independent) resolved from the theme,
     // e.g. icons/requirements/cat-gpu.svg. Empty when absent -> emoji fallback.
     readonly property string categoryIconUrl:
-        name ? branding.iconUrl("icons/requirements/cat-" + name + ".svg") : ""
+        name ? branding.themeIconUrl("icons/requirements/cat-" + name + ".svg") : ""
 
     // Check if we have a valid icon URL
     readonly property bool hasIconUrl: currentIconUrl !== ""
