@@ -79,6 +79,10 @@ python3Packages.buildPythonApplication {
     "--prefix QML2_IMPORT_PATH : ${qt6.qtdeclarative}/lib/qt-6/qml"
     "--prefix PATH : ${lib.makeBinPath runtimeTools}"
     "--set-default FONTCONFIG_FILE ${fontsConf}"
+    # qsvg imageformats plugin: PySide6's QImageReader ships no SVG support, so
+    # QML Image { source: "*.svg" } fails with "unsupported format" until the
+    # bundled qtsvg plugin is on the plugin path (theme icons are SVG).
+    "--prefix QT_PLUGIN_PATH : ${qt6.qtsvg}/lib/qt-6/plugins"
   ];
 
   dependencies = with python3Packages; [
