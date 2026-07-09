@@ -83,6 +83,11 @@ Rectangle {
         }
     }
 
+    // Colored category icon (status-independent) resolved from the theme,
+    // e.g. icons/requirements/cat-gpu.svg. Empty when absent -> emoji fallback.
+    readonly property string categoryIconUrl:
+        name ? branding.iconUrl("icons/requirements/cat-" + name + ".svg") : ""
+
     // Check if we have a valid icon URL
     readonly property bool hasIconUrl: currentIconUrl !== ""
 
@@ -109,23 +114,24 @@ Rectangle {
             width: 32
             height: 32
 
-            // Theme SVG icon (if available)
+            // Colored category SVG, else status SVG, else emoji fallback
             Image {
                 id: themeIcon
                 anchors.fill: parent
-                source: root.hasIconUrl ? root.currentIconUrl : ""
+                source: root.categoryIconUrl !== "" ? root.categoryIconUrl
+                        : (root.hasIconUrl ? root.currentIconUrl : "")
                 fillMode: Image.PreserveAspectFit
-                visible: root.hasIconUrl && themeIcon.status === Image.Ready
+                visible: themeIcon.status === Image.Ready
                 sourceSize.width: 32
                 sourceSize.height: 32
             }
 
-            // Fallback emoji icon
+            // Fallback emoji icon (when no SVG resolves)
             Text {
                 anchors.centerIn: parent
                 text: root.requirementIcon
                 font.pixelSize: 20
-                visible: !root.hasIconUrl || themeIcon.status !== Image.Ready
+                visible: themeIcon.status !== Image.Ready
             }
         }
 
