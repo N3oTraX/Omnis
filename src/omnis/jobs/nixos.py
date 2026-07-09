@@ -859,11 +859,15 @@ class NixosJob(BaseJob):
         Streame pour faire avancer la barre pendant le build (voir
         :meth:`_run_install_streamed`).
         """
-        # Real progress driver: pre-build the system closure so the bar advances
-        # as each derivation is fetched from the cache / built. Best-effort — the
-        # nixos-install below reuses the (now cached) closure, so a prebuild
-        # failure never breaks the install; the bar just stays coarse.
+        # Progress is split across the two phases that actually take time, each
+        # driven by ``nix``'s internal-json activity stream (best-effort, so a
+        # failure here never breaks the install — nixos-install still runs):
+        #   1) build/fetch the closure into the LIVE store           (60 → 70 %)
+        #   2) copy the closure onto the TARGET disk (the slow part) (70 → 96 %)
+        # nixos-install then finds everything already present and only registers
+        # the profile + bootloader + activation                     (96 → 100 %)
         self._prebuild_system(target_root, dry_run, context, tmpdir)
+        self._copy_system_to_target(target_root, dry_run, context, tmpdir)
 
         flake_ref = f"{target_root}/etc/nixos#{self._flake_attr()}"
         cmd = [
@@ -880,17 +884,64 @@ class NixosJob(BaseJob):
             "--root",
             target_root,
         ]
-        # The heavy build already happened in the prebuild step, so nixos-install
-        # runs fast from cache; drive the final stretch of the bar.
         return self._run_install_streamed(
             cmd,
             "Running nixos-install",
             dry_run,
             context,
             tmpdir,
-            pct_start=92,
+            pct_start=96,
             pct_end=100,
         )
+
+    def _copy_system_to_target(
+        self,
+        target_root: str,
+        dry_run: bool,
+        context: JobContext | None = None,
+        tmpdir: str | None = None,
+    ) -> None:
+        """Best-effort ``nix copy`` of the system closure onto the target disk.
+
+        This is the phase that actually takes minutes (copying the whole system
+        closure to ``/mnt/target``), and — unlike the ``nixos-install`` wrapper —
+        ``nix copy`` emits the internal-json ``@nix`` activity stream, so the
+        progress bar advances smoothly as each path is copied. nixos-install then
+        finds the paths already present in the target store and skips its own
+        copy. Failures are swallowed: nixos-install still performs the copy.
+        """
+        if dry_run:
+            return
+        attr = self._flake_attr()
+        toplevel = (
+            f"{target_root}/etc/nixos#nixosConfigurations.{attr}.config.system.build.toplevel"
+        )
+        cmd = [
+            "nix",
+            "copy",
+            "--no-check-sigs",
+            "--log-format",
+            "internal-json",
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "--to",
+            target_root,
+            toplevel,
+        ]
+        try:
+            result = self._run_install_streamed(
+                cmd,
+                "Copying system to target disk",
+                dry_run,
+                context,
+                tmpdir,
+                pct_start=70,
+                pct_end=96,
+            )
+            if not result.success:
+                logger.warning("Target copy failed (non-fatal); nixos-install will copy instead")
+        except Exception as exc:  # pragma: no cover - defensive, never break install
+            logger.warning("Target copy error (non-fatal): %s", exc)
 
     def _prebuild_system(
         self,
@@ -942,7 +993,7 @@ class NixosJob(BaseJob):
                 context,
                 tmpdir,
                 pct_start=60,
-                pct_end=92,
+                pct_end=70,
             )
             if not result.success:
                 logger.warning("System prebuild failed (non-fatal); continuing to nixos-install")

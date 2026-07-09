@@ -746,6 +746,31 @@ class TestHardenTarget:
         assert "--log-format" in prebuild
         assert "internal-json" in prebuild
 
+    def test_copies_closure_to_target_with_progress(self) -> None:
+        """The closure is copied to the target via `nix copy --to <target>` with
+        internal-json so the bar advances smoothly during the slow disk copy."""
+        job = NixosJob()
+        calls: list[list[str]] = []
+
+        def fake_popen(cmd: list[str], **_kwargs: Any) -> MagicMock:
+            calls.append(cmd)
+            proc = MagicMock()
+            proc.stdout = iter([])
+            proc.wait.return_value = 0
+            return proc
+
+        with patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen):
+            job._nixos_install("/mnt/target", dry_run=False, tmpdir="/secure/tmp")
+
+        copy = next(cmd for cmd in calls if cmd[:2] == ["nix", "copy"])
+        assert "--to" in copy
+        assert "/mnt/target" in copy
+        assert "internal-json" in copy
+        # The copy runs BEFORE nixos-install (so the target store is pre-populated).
+        copy_idx = next(i for i, cmd in enumerate(calls) if cmd[:2] == ["nix", "copy"])
+        install_idx = next(i for i, cmd in enumerate(calls) if cmd[0] == "nixos-install")
+        assert copy_idx < install_idx
+
 
 class TestNetworkConfigCopy:
     """Carry over the live NetworkManager connections (Wi-Fi + wired)."""
