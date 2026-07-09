@@ -145,6 +145,35 @@ class TestValidateMethod:
         assert result.error_code == 11
         assert "Invalid username" in result.message
 
+    def test_validate_reserved_username_nobody(self) -> None:
+        """validate should reject the reserved 'nobody' username (nixos-install
+        assertion: exactly one of isSystemUser/isNormalUser)."""
+        job = UsersJob()
+        context = JobContext(selections={"username": "nobody", "password": "secret123"})
+
+        result = job.validate(context)
+
+        assert result.success is False
+        assert result.error_code == 14
+        assert "reserved" in result.message.lower()
+
+    def test_validate_reserved_username_root(self) -> None:
+        """validate should reject the reserved 'root' username."""
+        job = UsersJob()
+        context = JobContext(selections={"username": "root", "password": "secret123"})
+
+        result = job.validate(context)
+
+        assert result.success is False
+        assert result.error_code == 14
+
+    def test_validate_non_reserved_username_ok(self) -> None:
+        """A normal username passes (control for the reserved-name check)."""
+        job = UsersJob()
+        context = JobContext(selections={"username": "gamer", "password": "secret123"})
+
+        assert job.validate(context).success is True
+
     def test_validate_missing_password(self) -> None:
         """validate should fail if password is missing."""
         job = UsersJob()

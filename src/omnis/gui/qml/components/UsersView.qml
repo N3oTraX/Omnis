@@ -53,7 +53,17 @@ Item {
     // Validation states
     // Aligné sur UsersJob.USERNAME_PATTERN côté Python : un underscore est
     // autorisé en première position (^[a-z_][a-z0-9_-]*$).
-    readonly property bool usernameValid: usernameField.text.length > 0 && /^[a-z_][a-z0-9_-]*$/.test(usernameField.text)
+    // Noms réservés par le système (alignés sur UsersJob.RESERVED_USERNAMES) :
+    // les réutiliser (surtout « nobody ») fait échouer nixos-install.
+    readonly property var reservedUsernames: [
+        "root", "nobody", "nixos", "daemon", "bin", "sys", "messagebus", "sshd",
+        "nscd", "polkituser", "rtkit", "avahi", "systemd-network", "systemd-resolve",
+        "systemd-timesync", "systemd-coredump", "nm-openvpn", "dbus"
+    ]
+    readonly property bool usernameReserved: reservedUsernames.indexOf(usernameField.text) !== -1
+    readonly property bool usernameValid: usernameField.text.length > 0
+        && /^[a-z_][a-z0-9_-]*$/.test(usernameField.text)
+        && !usernameReserved
     readonly property bool hostnameValid: hostnameField.text.length > 0 && /^[a-z][a-z0-9-]*$/.test(hostnameField.text)
 
     // Password criteria (NIST SP 800-63B inspired)
@@ -300,7 +310,9 @@ Item {
 
                             Text {
                                 width: parent.width
-                                text: usernameField.text.length > 0 && !usernameValid ?
+                                text: usernameField.text.length > 0 && usernameReserved ?
+                                      qsTr("This username is reserved by the system — please choose another") :
+                                      usernameField.text.length > 0 && !usernameValid ?
                                       qsTr("Username must start with a letter and contain only lowercase letters, numbers, hyphens, or underscores") :
                                       qsTr("This will be your login name")
                                 font.pixelSize: 11

@@ -917,6 +917,13 @@ class NixosJob(BaseJob):
             "nix",
             "build",
             "--no-link",
+            # ``log-format`` is a CLI-only option — it is NOT honoured via
+            # NIX_CONFIG/nix.conf. Passing it here is what makes ``nix build``
+            # emit the ``@nix`` internal-json activity stream that _NixProgress
+            # parses to advance the bar. Without it, no @nix lines are produced
+            # and the bar stays frozen.
+            "--log-format",
+            "internal-json",
             "--extra-experimental-features",
             "nix-command flakes",
             "--option",
@@ -965,9 +972,12 @@ class NixosJob(BaseJob):
             logger.info("[DRY-RUN] %s: %s", description, " ".join(cmd))
             return JobResult.ok(f"[DRY-RUN] {description}")
 
+        # NOTE: internal-json progress is enabled via the ``--log-format
+        # internal-json`` CLI flag on the ``nix build`` prebuild (see
+        # _prebuild_system) — NOT via NIX_CONFIG, which does not honour
+        # ``log-format``. The nixos-install wrapper doesn't accept the flag, so
+        # its call simply won't stream @nix events (the prebuild already did).
         env = dict(os.environ)
-        extra = "log-format = internal-json"
-        env["NIX_CONFIG"] = f"{env['NIX_CONFIG']}\n{extra}" if env.get("NIX_CONFIG") else extra
         if tmpdir:
             env["TMPDIR"] = tmpdir
 

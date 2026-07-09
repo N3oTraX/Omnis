@@ -724,12 +724,12 @@ class TestHardenTarget:
         assert all(c.args[1:] == (0, 0) for c in cho.call_args_list)  # root:root
         assert chm.called
 
-    def test_tmpdir_and_json_reach_the_install_env(self) -> None:
+    def test_prebuild_uses_cli_internal_json_and_tmpdir(self) -> None:
         job = NixosJob()
-        captured: dict[str, Any] = {}
+        calls: list[tuple[list[str], dict[str, Any]]] = []
 
-        def fake_popen(_cmd: list[str], **kwargs: Any) -> MagicMock:
-            captured["env"] = kwargs.get("env", {})
+        def fake_popen(cmd: list[str], **kwargs: Any) -> MagicMock:
+            calls.append((cmd, kwargs.get("env", {})))
             proc = MagicMock()
             proc.stdout = iter([])
             proc.wait.return_value = 0
@@ -738,8 +738,13 @@ class TestHardenTarget:
         with patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen):
             result = job._nixos_install("/mnt/target", dry_run=False, tmpdir="/secure/tmp")
         assert result.success is True
-        assert captured["env"].get("TMPDIR") == "/secure/tmp"
-        assert "internal-json" in captured["env"].get("NIX_CONFIG", "")
+        # TMPDIR reaches every install command's environment.
+        assert all(env.get("TMPDIR") == "/secure/tmp" for _cmd, env in calls)
+        # Progress is driven by the prebuild `nix build` with the CLI
+        # ``--log-format internal-json`` flag (NIX_CONFIG does NOT honour it).
+        prebuild = next(cmd for cmd, _env in calls if cmd[:2] == ["nix", "build"])
+        assert "--log-format" in prebuild
+        assert "internal-json" in prebuild
 
 
 class TestNetworkConfigCopy:
