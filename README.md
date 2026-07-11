@@ -13,11 +13,11 @@
 
 | Métrique | Valeur |
 |----------|--------|
-| Version | `0.5.1` |
+| Version | `0.6.0` |
 | Python | `>=3.11` |
 | GUI | PySide6 (Qt6) + QML |
 | Livrable | AppImage standalone (Nix bundle, CI sur tag) |
-| Tests | 801 tests unitaires |
+| Tests | 939 tests unitaires |
 | i18n | 37 locales supportées |
 | Licence | GPL-3.0-or-later |
 
@@ -133,7 +133,7 @@ cd Omnis
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-# Lancer les tests (801 tests)
+# Lancer les tests (939 tests)
 pytest
 
 # Démarrer l'installeur GLF OS (mode développement)
@@ -247,7 +247,7 @@ python -c "from omnis.core.engine import Engine; print('OK')"
 ### Commandes Développement
 
 ```bash
-# Lancer tous les tests (801 tests)
+# Lancer tous les tests (939 tests)
 pytest -v
 
 # Tests IPC uniquement
@@ -338,19 +338,30 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 
 ## État du Projet
 
+### v0.6.0 - Installation GLF OS de bout en bout + barre granulaire ✅
+
+Première installation GLF OS complète qui aboutit, avec progression honnête et session live réactive :
+
+- [x] Installation NixOS de bout en bout menée à terme via `nixos-install --flake` (abandon de l'offload `nix build`, qui déclenchait une assertion interne de libnixstore avec nix 2.34.7)
+- [x] Barre de progression **granulaire** : le dénominateur exact provient des totaux annoncés par `nixos-install` (dérivations à construire + chemins à récupérer), le compteur suit builds et substitutions, et l'affichage bascule dynamiquement d'indéterminé (pulse) à déterminé dès que le total est connu
+- [x] Montage root/EFI avec type de système de fichiers explicite (`-t <fs>`) au lieu de l'auto-détection blkid périmée (qui tentait FAT sur de l'ext4 → « superbloc erroné ») ; démontage récursif de `/mnt/target` avant partitionnement (retry sûr)
+- [x] Changement de **langue** appliqué dynamiquement à toutes les vues et à la config d'installation ; changement de **clavier** appliqué en live à la session utilisateur (via `runuser`, car Omnis tourne en root) et écrit dans la config d'installation ; 36 fichiers de traduction régénérés (fr_FR / en_US complètes)
+- [x] Bureau live réactif pendant l'install : throttle CPU/IO (`nice`/`ionice`, `--cores`/`--max-jobs` à ~80 % des cœurs, `--option max-substitution-jobs`) et pile nix illimitée (évite un `SIGSEGV` au prébuild)
+- [x] Chemin de log corrigé (`/var/log/omnis-install.log`) — l'anomalie « Failed to save logs: /tmp/omnis.log » est résolue
+
 ### v0.5.1 - AppImage lançable ✅
 
 - [x] Correction de la résolution de configuration hors du répertoire courant : lancé depuis n'importe quel dossier (AppImage, install Nix), Omnis localise la config embarquée (`share/omnis/config`) au lieu de quitter sur `No configuration file found`
 - [x] Premier AppImage réellement lançable en dehors de l'arbre source (thème + i18n + QML résolus depuis le bundle)
 
-### v0.5.0 - Install NixOS, éditeur de partition, packaging (validation E2E en cours)
+### v0.5.0 - Install NixOS, éditeur de partition, packaging ✅
 
 - [x] Job d'installation NixOS complet : `configuration.nix`, `nixos-generate-config`, `nixos-install`, LUKS chiffré/non-chiffré, GPU multi-vendor, systemd-boot
 - [x] Éditeur de partition manuel type GParted (create/delete/format/resize/flags, Apply live, table GPT auto)
 - [x] Barre de progression réelle pendant `nixos-install` (parse nix internal-json)
 - [x] Copie NetworkManager (wifi + filaire), i18n auto (boot GRUB + GeoIP, override manuel), durcissement permissions nix
 - [x] Livrable **AppImage standalone** + CI de release (Nix bundle)
-- [ ] Validation installation de bout en bout (ISO GLF-OS)
+- [x] Validation installation de bout en bout (ISO GLF-OS) — livrée en v0.6.0
 
 ### v0.4.2 - Stabilisation ✅
 
@@ -468,8 +479,8 @@ Thèmes :
 | v0.4.1 | i18n + Locale Detection | ✅ Terminé |
 | v0.4.2 | Stabilisation UI | ✅ Terminé |
 | v0.5.0 | Install NixOS + éditeur partition + packaging AppImage | ✅ Terminé |
-| v0.5.1 | AppImage lançable (fix résolution config) | ✅ Actuel |
-| v0.6.0 | Validation installation E2E (ISO GLF-OS) | 🔲 À faire |
+| v0.5.1 | AppImage lançable (fix résolution config) | ✅ Terminé |
+| v0.6.0 | Installation GLF OS E2E + barre granulaire + langue/clavier live | ✅ Actuel |
 | v0.7.0 | Slimming AppImage + intégration module GLF-OS | 🔲 À faire |
 | v0.8.0 | Durcissement production (Polkit, IPC) | 🔲 À faire |
 | v1.0.0 | Première release stable | 🔲 Release |
