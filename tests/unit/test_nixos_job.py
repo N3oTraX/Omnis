@@ -744,6 +744,61 @@ class TestNixProgress:
         assert secret not in p.current_package()
 
 
+class TestNixProgressPlain:
+    """Plain-text ``nixos-install`` output (the wrapper ignores ``--log-format``)."""
+
+    _COPY = "copying path '/nix/store/jlyahda14aya375lv7k9fsin2zk90nxz-glib-2.88.1' to 'local'..."
+    _BUILD = "building '/nix/store/6a3k2hzqpr1czvxlgmy53xaannmnpd3i-copy-extra-files.drv'..."
+
+    def test_plain_lines_advance_counters_and_package(self) -> None:
+        p = _NixProgress()
+        assert p.feed(self._COPY) is None  # not an @nix line
+        f1 = p.feed_plain(self._COPY)
+        assert f1 is not None and f1 > 0.0
+        assert "1 copiés" in p.message()
+        assert "glib-2.88.1" in p.message()
+        p.feed_plain(self._BUILD)
+        assert "1 construits" in p.message()
+        assert "copy-extra-files" in p.message()
+
+    def test_plain_fraction_is_monotonic_and_never_frozen(self) -> None:
+        p = _NixProgress()
+        seen = [p.feed_plain(self._COPY) for _ in range(5)]
+        assert all(v is not None for v in seen)
+        floats = [v for v in seen if v is not None]
+        assert floats == sorted(floats)
+        assert floats[-1] > floats[0]
+
+    def test_plain_denominator_yields_real_ratio(self) -> None:
+        p = _NixProgress(plain_total=453)
+        for _ in range(10):
+            p.feed_plain(self._COPY)
+        assert "10/453 copiés" in p.message()
+        frac = p.feed_plain(self._COPY)
+        assert frac == pytest.approx(11 / 453)
+
+    def test_plain_ignores_unrelated_lines(self) -> None:
+        p = _NixProgress()
+        assert p.feed_plain("installing bootloader") is None
+        assert p.feed_plain("setting up /etc...") is None
+        assert p.message() == "Installing NixOS..."
+
+    def test_at_nix_parsing_still_works_alongside_plain(self) -> None:
+        p = _NixProgress()
+        p.feed('@nix {"action":"start","id":1,"type":104}')
+        assert p.feed('@nix {"action":"result","fields":[3,10,0,0],"id":1,"type":105}') == 0.3
+        assert "3/10 built" in p.message()
+
+    def test_plain_copy_destination_never_reaches_message(self) -> None:
+        p = _NixProgress()
+        secret = "hunter2-SECRET-passphrase"
+        p.feed_plain(f"copying path '/nix/store/aaaa-thing' to 'ssh://{secret}'...")
+        # Only the source store path is parsed; the destination URI is dropped.
+        assert secret not in p.message()
+        assert "ssh://" not in p.message()
+        assert "thing" in p.message()
+
+
 class TestHardenTarget:
     """Securing the Nix build-dir hierarchy before nixos-install."""
 
@@ -788,7 +843,13 @@ class TestHardenTarget:
             proc.wait.return_value = 0
             return proc
 
-        with patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen):
+        with (
+            patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
+            patch(
+                "omnis.jobs.nixos.subprocess.run",
+                return_value=MagicMock(returncode=0, stdout="/nix/store/abc-glf-system\n"),
+            ),
+        ):
             result = job._nixos_install("/mnt/target", dry_run=False, tmpdir="/secure/tmp")
         assert result.success is True
         # TMPDIR reaches every install command's environment.
@@ -823,7 +884,13 @@ class TestHardenTarget:
             proc.wait.return_value = 0
             return proc
 
-        with patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen):
+        with (
+            patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
+            patch(
+                "omnis.jobs.nixos.subprocess.run",
+                return_value=MagicMock(returncode=0, stdout="/nix/store/abc-glf-system\n"),
+            ),
+        ):
             job._nixos_install("/mnt/target", dry_run=False, tmpdir="/secure/tmp")
 
         copy = next(cmd for cmd in calls if cmd[:2] == ["nix", "copy"])
@@ -841,6 +908,32 @@ class TestHardenTarget:
         assert "--system" in install
         assert "/nix/store/abc-glf-system" in install
         assert "--flake" not in install
+
+
+class TestClosurePathCount:
+    """`nix path-info -r` feeds the ``Y/total copiés`` denominator (best effort)."""
+
+    def test_counts_non_empty_lines(self) -> None:
+        job = NixosJob()
+        stdout = "/nix/store/a-x\n/nix/store/b-y\n\n/nix/store/c-z\n"
+        with patch(
+            "omnis.jobs.nixos.subprocess.run",
+            return_value=MagicMock(returncode=0, stdout=stdout),
+        ):
+            assert job._closure_path_count("/nix/store/abc-glf-system") == 3
+
+    def test_returns_none_on_failure(self) -> None:
+        job = NixosJob()
+        with patch(
+            "omnis.jobs.nixos.subprocess.run",
+            return_value=MagicMock(returncode=1, stdout=""),
+        ):
+            assert job._closure_path_count("/nix/store/abc-glf-system") is None
+
+    def test_returns_none_when_tool_missing(self) -> None:
+        job = NixosJob()
+        with patch("omnis.jobs.nixos.subprocess.run", side_effect=OSError("no nix")):
+            assert job._closure_path_count("/nix/store/abc-glf-system") is None
 
 
 class TestNetworkConfigCopy:

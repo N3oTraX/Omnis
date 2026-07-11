@@ -203,13 +203,18 @@ class _NixProgress:
     _RES_PROGRESS = 105
 
     _STORE_PATH_RE = re.compile(r"/nix/store/[a-z0-9]+-(.+?)(?:\.drv|'|$)")
+    _BUILDING_RE = re.compile(r"building '([^']+\.drv)'")
+    _COPYING_RE = re.compile(r"copying path '([^']+)' to ")
 
-    def __init__(self) -> None:
+    def __init__(self, plain_total: int = 0) -> None:
         self._kind: dict[int, str] = {}
         self._done: dict[int, int] = {}
         self._expected: dict[int, int] = {}
         self._fraction = 0.0
         self._current_pkg = ""
+        self._plain_total = plain_total
+        self._plain_built = 0
+        self._plain_copied = 0
 
     def feed(self, line: str) -> float | None:
         if not line.startswith("@nix "):
@@ -242,6 +247,43 @@ class _NixProgress:
         if expected > 0:
             ratio = min(1.0, sum(self._done.values()) / expected)
             self._fraction = max(self._fraction, ratio)
+        return self._fraction
+
+    def feed_plain(self, line: str) -> float | None:
+        """Reconnaît les lignes TEXTE de ``nixos-install`` (hors flux ``@nix``).
+
+        Le wrapper ``nixos-install`` n'accepte pas ``--log-format`` : il imprime
+        en clair ``building '/nix/store/…drv'…`` et ``copying path
+        '/nix/store/…' to …``. On les compte pour faire avancer la barre et
+        exposer le paquet courant pendant cette phase (sinon la barre gèle).
+
+        SÉCURITÉ : seuls des chemins ``/nix/store/…`` sont extraits, jamais une
+        sélection utilisateur ni un secret.
+        """
+        building = self._BUILDING_RE.search(line)
+        if building:
+            self._plain_built += 1
+            self._set_plain_package(building.group(1))
+            return self._plain_fraction()
+        copying = self._COPYING_RE.search(line)
+        if copying:
+            self._plain_copied += 1
+            self._set_plain_package(copying.group(1))
+            return self._plain_fraction()
+        return None
+
+    def _set_plain_package(self, store_path: str) -> None:
+        match = self._STORE_PATH_RE.search(store_path)
+        if match:
+            self._current_pkg = match.group(1)
+
+    def _plain_fraction(self) -> float:
+        if self._plain_total > 0:
+            ratio = min(1.0, self._plain_copied / self._plain_total)
+        else:
+            moved = self._plain_built + self._plain_copied
+            ratio = 1.0 - 1.0 / (1.0 + moved / 40.0)
+        self._fraction = max(self._fraction, ratio)
         return self._fraction
 
     def _capture_package(self, event: dict[str, Any]) -> None:
@@ -284,7 +326,20 @@ class _NixProgress:
         c_done, c_exp = self._totals("copy")
         if c_exp:
             parts.append(f"{c_done}/{c_exp} copied")
+        if self._plain_built or self._plain_copied:
+            parts.append(self._plain_message())
         return "Installing NixOS: " + ", ".join(parts) if parts else "Installing NixOS..."
+
+    def _plain_message(self) -> str:
+        copied = (
+            f"{self._plain_copied}/{self._plain_total} copiés"
+            if self._plain_total
+            else f"{self._plain_copied} copiés"
+        )
+        seg = f"{self._plain_built} construits, {copied}"
+        if self._current_pkg:
+            seg += f" ({self._current_pkg})"
+        return seg
 
 
 @dataclass(frozen=True)
@@ -920,7 +975,13 @@ class NixosJob(BaseJob):
         store_path = self._prebuild_system(target_root, dry_run, context, tmpdir)
         self._copy_system_to_target(target_root, dry_run, context, tmpdir, store_path)
 
+        closure_total: int | None = None
         if store_path:
+            logger.info(
+                "Offload active: nixos-install registers prebuilt system %s (no rebuild)",
+                store_path,
+            )
+            closure_total = self._closure_path_count(store_path)
             cmd = [
                 "nixos-install",
                 "--root",
@@ -937,6 +998,9 @@ class NixosJob(BaseJob):
                 "",
             ]
         else:
+            logger.warning(
+                "Offload inactive: no prebuilt store path; nixos-install rebuilds via --flake"
+            )
             flake_ref = f"{target_root}/etc/nixos#{self._flake_attr()}"
             cmd = [
                 "nixos-install",
@@ -960,7 +1024,39 @@ class NixosJob(BaseJob):
             tmpdir,
             pct_start=96,
             pct_end=100,
+            closure_total=closure_total,
         )
+
+    def _closure_path_count(self, store_path: str) -> int | None:
+        """Nombre de chemins de la closure — dénominateur « Y/total copiés ».
+
+        ``nix path-info -r`` imprime un chemin par ligne pour toute la closure.
+        Best effort : toute erreur retourne ``None`` (barre vivante sans total).
+        """
+        try:
+            result = subprocess.run(
+                [
+                    "nix",
+                    "path-info",
+                    "-r",
+                    "--extra-experimental-features",
+                    "nix-command flakes",
+                    store_path,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.warning("Could not size closure %s: %s", store_path, exc)
+            return None
+        if result.returncode != 0:
+            logger.warning("nix path-info failed (exit %s) for %s", result.returncode, store_path)
+            return None
+        count = sum(1 for ln in result.stdout.splitlines() if ln.strip())
+        if count:
+            logger.info("Install closure: %d store paths", count)
+        return count or None
 
     def _copy_system_to_target(
         self,
@@ -1014,8 +1110,14 @@ class NixosJob(BaseJob):
                 pct_start=90,
                 pct_end=96,
             )
-            if not result.success:
-                logger.warning("Target copy failed (non-fatal); nixos-install will copy instead")
+            if result.success:
+                logger.info("System closure copied into target chroot store %s", target_root)
+            else:
+                logger.warning(
+                    "Target pre-copy FAILED (non-fatal): nixos-install will re-copy the "
+                    "whole closure into %s — offload ineffective",
+                    target_root,
+                )
         except Exception as exc:  # pragma: no cover - defensive, never break install
             logger.warning("Target copy error (non-fatal): %s", exc)
 
@@ -1154,15 +1256,19 @@ class NixosJob(BaseJob):
         tmpdir: str | None = None,
         pct_start: int = 60,
         pct_end: int = 98,
+        closure_total: int | None = None,
     ) -> JobResult:
-        """Run a nix/nixos-install command, driving the progress bar from the
-        internal-json activity stream over the ``pct_start``..``pct_end`` range.
+        """Run a nix/nixos-install command, driving the progress bar over the
+        ``pct_start``..``pct_end`` range from whichever output stream is present.
 
-        Progress comes from the ``@nix`` build/copyPaths events (see
-        :class:`_NixProgress`), which only ``nix build`` emits reliably — the
-        ``nixos-install`` wrapper prints its own human-readable output, so the
-        bulk of real progress is driven by the ``nix build`` prebuild step (see
-        :meth:`_prebuild_system`).
+        Two sources feed the bar (see :class:`_NixProgress`):
+
+        - ``@nix`` internal-json events, emitted by ``nix build``/``nix copy``.
+        - the plain-text ``building '…'`` / ``copying path '…' to …`` lines
+          printed by the ``nixos-install`` wrapper (which ignores
+          ``--log-format``). Without this second source the bar froze on the
+          last prebuild value while nixos-install worked on. ``closure_total``,
+          when known, turns the copy counter into a real ``Y/total`` ratio.
         """
         if dry_run:
             logger.info("[DRY-RUN] %s: %s", description, " ".join(cmd))
@@ -1195,15 +1301,17 @@ class NixosJob(BaseJob):
             )
 
         span = max(0, pct_end - pct_start)
-        progress = _NixProgress()
+        progress = _NixProgress(plain_total=closure_total or 0)
         assert proc.stdout is not None
         for raw in proc.stdout:
             line = raw.rstrip("\n")
             fraction = progress.feed(line)
+            if fraction is None:
+                fraction = progress.feed_plain(line)
             if fraction is not None and context is not None:
                 pct = pct_start + round(span * fraction)
                 context.report_progress(min(pct_end, pct), progress.message())
-            elif not line.startswith("@nix "):
+            elif fraction is None and not line.startswith("@nix "):
                 logger.debug("nixos-install: %s", line)
 
         code = proc.wait()
