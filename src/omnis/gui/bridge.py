@@ -27,6 +27,7 @@ from omnis.jobs.partition import (
 )
 from omnis.jobs.requirements import SystemRequirementsChecker
 from omnis.utils import disk_detector
+from omnis.utils.keyboard_layout import apply_keyboard_layout_live
 from omnis.utils.locale_detector import LocaleDetectionResult, LocaleDetector
 from omnis.utils.log_capture import BridgeLogHandler, SecretRedactor, resolve_log_path, upload_log
 from omnis.utils.network_helper import NetworkHelper
@@ -2010,6 +2011,22 @@ class EngineBridge(QObject):
             self._selections["keyboardVariant"] = self._keyboard_variants_model[0]
 
         self.keyboardVariantsChanged.emit()
+
+    @Slot(str, str, result=bool)
+    def applyKeyboardLayout(self, layout: str, variant: str) -> bool:
+        """
+        Apply a keyboard layout to the live installer session (best-effort).
+
+        This only affects the running session (GNOME Wayland via gsettings,
+        X11 via setxkbmap fallback) so every input field in the installer
+        reflects the chosen layout immediately. It never touches the target
+        install config, which stays driven by setSelectedKeymap /
+        setSelectedKeyboardVariant.
+        """
+        applied = apply_keyboard_layout_live(layout, variant)
+        if self._debug:
+            print(f"[Engine] Live keyboard apply ({layout}+{variant}): {applied}")
+        return applied
 
     @Property(str, notify=selectionsChanged)
     def username(self) -> str:

@@ -289,15 +289,18 @@ ApplicationWindow {
                         var normalizedLocale = locale.split(".")[0]
                         translator.setLocale(normalizedLocale)
                     }
+                    engine.applyKeyboardLayout(engine.selectedKeymap, engine.selectedKeyboardVariant)
                 }
                 onTimezoneSelected: function(timezone) {
                     engine.setSelectedTimezone(timezone)
                 }
                 onKeymapSelected: function(keymap) {
                     engine.setSelectedKeymap(keymap)
+                    engine.applyKeyboardLayout(engine.selectedKeymap, engine.selectedKeyboardVariant)
                 }
                 onKeyboardVariantSelected: function(variant) {
                     engine.setSelectedKeyboardVariant(variant)
+                    engine.applyKeyboardLayout(engine.selectedKeymap, engine.selectedKeyboardVariant)
                 }
 
                 Behavior on opacity {
