@@ -830,14 +830,19 @@ class TestMountPartitions:
         mock_run_cmd.return_value = JobResult.ok()
 
         context = JobContext(target_root="/mnt")
-        result = job._mount_partitions(context, dry_run=True)
+        result = job._mount_partitions(context, "ext4", dry_run=True)
 
         assert result.success is True
 
-        # Verify mount commands were called
-        calls = mock_run_cmd.call_args_list
-        mount_calls = [c for c in calls if "mount" in str(c)]
+        # Verify mount commands were called with an explicit filesystem type
+        # (``mount -t`` avoids stale-blkid auto-detection failures).
+        calls = [c.args[0] for c in mock_run_cmd.call_args_list if c.args]
+        mount_calls = [cmd for cmd in calls if cmd and cmd[0] == "mount"]
         assert len(mount_calls) >= 2  # root + EFI
+        root_mount = next(c for c in mount_calls if c[-1] == "/mnt")
+        assert root_mount[:3] == ["mount", "-t", "ext4"]
+        efi_mount = next(c for c in mount_calls if str(c[-1]).endswith("boot"))
+        assert efi_mount[:3] == ["mount", "-t", "vfat"]
 
     @patch("omnis.jobs.partition.Path")
     @patch("omnis.jobs.partition.PartitionJob._run_partitioning_command")
@@ -858,7 +863,7 @@ class TestMountPartitions:
         mock_path.return_value.__truediv__.return_value = mock_efi_mount
 
         context = JobContext(target_root="/mnt")
-        result = job._mount_partitions(context, dry_run=False)
+        result = job._mount_partitions(context, "ext4", dry_run=False)
 
         assert result.success is True
         mock_efi_mount.mkdir.assert_called_once_with(parents=True, exist_ok=True)
@@ -876,7 +881,7 @@ class TestMountPartitions:
         mock_run_cmd.return_value = JobResult.ok()
 
         context = JobContext(target_root="/mnt")
-        result = job._mount_partitions(context, dry_run=True)
+        result = job._mount_partitions(context, "ext4", dry_run=True)
 
         assert result.success is True
 
@@ -906,7 +911,7 @@ class TestMountPartitions:
         mock_run_cmd.side_effect = run_cmd_side_effect
 
         context = JobContext(target_root="/mnt")
-        result = job._mount_partitions(context, dry_run=True)
+        result = job._mount_partitions(context, "ext4", dry_run=True)
 
         # Should still succeed
         assert result.success is True
@@ -1139,7 +1144,7 @@ class TestPartitionAutoSequence:
         )
         mock_run_cmd.return_value = JobResult.ok()
 
-        result = job._mount_partitions(JobContext(target_root="/mnt"), dry_run=True)
+        result = job._mount_partitions(JobContext(target_root="/mnt"), "ext4", dry_run=True)
         assert result.success is True
 
         # Find the mount command that targets the EFI partition.

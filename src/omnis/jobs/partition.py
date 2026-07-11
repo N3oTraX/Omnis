@@ -1110,7 +1110,7 @@ class PartitionJob(BaseJob):
         context.report_progress(80, "Mounting filesystems...")
 
         # Step 8: Mount partitions
-        result = self._mount_partitions(context, dry_run)
+        result = self._mount_partitions(context, filesystem, dry_run)
         if not result.success:
             return result
 
@@ -1824,7 +1824,7 @@ class PartitionJob(BaseJob):
 
         return JobResult.ok("Partitions formatted successfully")
 
-    def _mount_partitions(self, context: JobContext, dry_run: bool) -> JobResult:
+    def _mount_partitions(self, context: JobContext, filesystem: str, dry_run: bool) -> JobResult:
         """
         Mount partitions to target root.
 
@@ -1844,9 +1844,10 @@ class PartitionJob(BaseJob):
 
         target_root = context.target_root
 
-        # Mount root target (LUKS mapper when encrypted)
+        # Type explicite : sans ``-t``, mount peut auto-détecter un type périmé
+        # (cache blkid non rafraîchi après mkfs) et échouer « superbloc erroné ».
         result = self._run_partitioning_command(
-            ["mount", self._layout.root_target, target_root],
+            ["mount", "-t", filesystem, self._layout.root_target, target_root],
             description=f"Mounting root partition to {target_root}",
             dry_run=dry_run,
         )
@@ -1867,7 +1868,7 @@ class PartitionJob(BaseJob):
 
         # Mount EFI partition
         result = self._run_partitioning_command(
-            ["mount", self._layout.efi_partition, str(efi_mount)],
+            ["mount", "-t", "vfat", self._layout.efi_partition, str(efi_mount)],
             description=f"Mounting EFI partition to {efi_mount}",
             dry_run=dry_run,
         )
