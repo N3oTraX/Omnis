@@ -34,6 +34,9 @@ Item {
     property bool showLog: true
     property string installationStatus: "idle"  // idle, running, success, failed
     property string errorMessage: ""
+    property bool isStalled: false
+    property bool indeterminate: false
+    readonly property bool pulsing: root.isStalled || root.indeterminate
 
     // Distro info
     property string distroName: ""
@@ -149,12 +152,16 @@ Item {
 
                         // Overall progress bar
                         Rectangle {
+                            id: overallTrack
                             width: parent.width
                             height: 16
                             radius: 8
                             color: backgroundColor
+                            clip: true
 
                             Rectangle {
+                                id: overallFill
+                                visible: !root.pulsing
                                 width: parent.width * (overallProgress / 100)
                                 height: parent.height
                                 radius: parent.radius
@@ -188,15 +195,41 @@ Item {
                                     }
 
                                     SequentialAnimation on x {
-                                        running: overallProgress < 100
+                                        running: overallProgress < 100 && !root.pulsing
                                         loops: Animation.Infinite
                                         NumberAnimation {
                                             from: -shimmer.width
-                                            to: parent.width
+                                            to: overallFill.width
                                             duration: 2000
                                             easing.type: Easing.InOutQuad
                                         }
                                         PauseAnimation { duration: 500 }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                id: indeterminateBar
+                                visible: root.pulsing
+                                width: overallTrack.width * 0.35
+                                height: parent.height
+                                radius: parent.radius
+                                x: -width
+                                gradient: Gradient {
+                                    orientation: Gradient.Horizontal
+                                    GradientStop { position: 0.0; color: "transparent" }
+                                    GradientStop { position: 0.5; color: primaryColor }
+                                    GradientStop { position: 1.0; color: "transparent" }
+                                }
+
+                                SequentialAnimation on x {
+                                    running: root.pulsing
+                                    loops: Animation.Infinite
+                                    NumberAnimation {
+                                        from: -indeterminateBar.width
+                                        to: overallTrack.width
+                                        duration: 1400
+                                        easing.type: Easing.InOutQuad
                                     }
                                 }
                             }
@@ -274,6 +307,16 @@ Item {
                                     text: currentJobMessage || qsTr("Working...")
                                     font.pixelSize: 14
                                     color: textMutedColor
+                                    wrapMode: Text.WordWrap
+                                    width: parent.width
+                                }
+
+                                Text {
+                                    visible: root.pulsing
+                                    text: qsTr("Construction du système en cours… cela peut prendre plusieurs minutes ; l'interface peut sembler ralentie.")
+                                    font.pixelSize: 13
+                                    font.italic: true
+                                    color: warningColor
                                     wrapMode: Text.WordWrap
                                     width: parent.width
                                 }
@@ -427,7 +470,7 @@ Item {
                                     readOnly: true
                                     selectByMouse: true
                                     wrapMode: TextArea.Wrap
-                                    font.family: "monospace"
+                                    font.family: branding.fontMonospace
                                     font.pixelSize: 12
                                     color: textColor
                                     // Source unique du journal live : property throttlée

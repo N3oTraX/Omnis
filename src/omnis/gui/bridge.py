@@ -27,6 +27,7 @@ from omnis.jobs.partition import (
 )
 from omnis.jobs.requirements import SystemRequirementsChecker
 from omnis.utils import disk_detector
+from omnis.utils.keyboard_layout import apply_keyboard_layout_live
 from omnis.utils.locale_detector import LocaleDetectionResult, LocaleDetector
 from omnis.utils.log_capture import BridgeLogHandler, SecretRedactor, resolve_log_path, upload_log
 from omnis.utils.network_helper import NetworkHelper
@@ -411,6 +412,29 @@ class BrandingProxy(QObject):
         """Error / failure status color."""
         return self._branding.colors.error
 
+    @Property(str, constant=True)
+    def fontPrimary(self) -> str:
+        return self._branding.fonts.primary
+
+    @Property(str, constant=True)
+    def fontDisplay(self) -> str:
+        return self._branding.fonts.display
+
+    @Property(str, constant=True)
+    def fontMonospace(self) -> str:
+        return self._branding.fonts.monospace
+
+    @Slot(str, result=str)
+    def themeIconUrl(self, relative_path: str) -> str:
+        return self._resolve_asset(relative_path)
+
+    @Slot(str, result=str)
+    def requirementIconUrl(self, name: str) -> str:
+        if not name:
+            return ""
+        rel = self._branding.requirement_icons.get(name) or f"icons/requirements/cat-{name}.svg"
+        return self._resolve_asset(rel)
+
     @Property(str, notify=brandingChanged)
     def welcomeTitle(self) -> str:
         """Welcome screen title with i18n interpolation."""
@@ -566,6 +590,8 @@ class EngineBridge(QObject):
     - Job navigation
     - Branding configuration
     """
+
+    _STALL_THRESHOLD_S: float = 6.0
 
     # Signals for QML
     installationStarted = Signal()
@@ -1302,11 +1328,20 @@ class EngineBridge(QObject):
         self._installation_status: str = "idle"  # idle, running, success, failed
         self._error_message: str = ""
 
+        self._is_stalled: bool = False
+        self._indeterminate: bool = False
+        self._last_progress_ts: float | None = None
+        self._stall_timer = QTimer(self)
+        self._stall_timer.setInterval(1000)
+        self._stall_timer.timeout.connect(self._check_stall)
+        self._stall_timer.start()
+
         # Connect engine callbacks
         self._engine.on_job_start = self._on_job_start
         self._engine.on_job_progress = self._on_job_progress
         self._engine.on_job_complete = self._on_job_complete
         self._engine.on_error = self._on_error
+        self._engine.on_job_indeterminate = self._on_job_indeterminate
 
         # Initialize requirements checker with config
         self._init_requirements_checker()
@@ -1338,6 +1373,7 @@ class EngineBridge(QObject):
         self._current_job_name = job_name
         self._current_job_progress = 0
         self._current_job_message = f"Starting {job_name}..."
+        self._mark_progress_alive()
         self._update_jobs_list()
         self.progressChanged.emit()
         self.jobStarted.emit(job_name)
@@ -1356,8 +1392,37 @@ class EngineBridge(QObject):
             job_contribution = percent // total_jobs
             self._overall_progress = base_progress + job_contribution
 
+        self._mark_progress_alive()
         self.progressChanged.emit()
         self.jobProgress.emit(job_name, percent, message)
+
+    def _mark_progress_alive(self) -> None:
+        """Enregistre un « battement » de progression (peut venir du thread worker).
+
+        N'écrit qu'un timestamp (thread-safe : écriture atomique d'un float) et
+        sort d'un éventuel état figé. Le passage EN état figé est décidé par
+        ``_check_stall`` côté GUI — jamais ici — pour ne pas piloter le QTimer
+        depuis le thread worker.
+        """
+        self._last_progress_ts = time.monotonic()
+        if self._is_stalled:
+            self._is_stalled = False
+            self.progressChanged.emit()
+
+    def _check_stall(self) -> None:
+        """Sonde GUI (1 Hz) : bascule ``isStalled`` après un silence prolongé.
+
+        Aucun progress reçu depuis ``_STALL_THRESHOLD_S`` secondes alors qu'une
+        installation est en cours ⇒ la barre passe en mode « indéterminé »
+        (build local silencieux). Le prochain progress ré-arme via
+        :meth:`_mark_progress_alive`.
+        """
+        if self._last_progress_ts is None:
+            return
+        stalled = (time.monotonic() - self._last_progress_ts) >= self._STALL_THRESHOLD_S
+        if stalled != self._is_stalled:
+            self._is_stalled = stalled
+            self.progressChanged.emit()
 
     def _on_job_complete(self, job_name: str, result: Any) -> None:
         """Handle job completion event."""
@@ -1365,12 +1430,28 @@ class EngineBridge(QObject):
         self.progressChanged.emit()
         self.jobCompleted.emit(job_name, result.success)
 
+    def _on_job_indeterminate(self, _job_name: str, active: bool) -> None:
+        """Reflète le mode indéterminé demandé par le job (barre en pulse)."""
+        if self._indeterminate != active:
+            self._indeterminate = active
+            self.progressChanged.emit()
+
     def _on_error(self, job_name: str, error: str) -> None:
         """Handle error event."""
         self._error_message = error
         self._installation_status = "failed"
+        self._reset_stall_state()
+        if self._indeterminate:
+            self._indeterminate = False
         self.progressChanged.emit()
         self.errorOccurred.emit(job_name, error)
+
+    def _reset_stall_state(self) -> None:
+        """Stoppe la détection de silence et sort de l'état figé (thread-safe)."""
+        self._last_progress_ts = None
+        if self._is_stalled:
+            self._is_stalled = False
+            self.progressChanged.emit()
 
     def _mark_log_dirty(self, _line: str) -> None:
         """Flag that new log line(s) arrived (called from the worker thread).
@@ -1623,6 +1704,7 @@ class EngineBridge(QObject):
     def _on_installation_finished(self, success: bool) -> None:
         """Handle installation completion."""
         self._install_end_time = time.monotonic()
+        self._reset_stall_state()
         if self._debug:
             print(f"[Engine] Installation finished: {'success' if success else 'failed'}")
         self.installationFinished.emit(success)
@@ -1651,6 +1733,7 @@ class EngineBridge(QObject):
 
         self._installation_status = "idle"
         self._error_message = ""
+        self._reset_stall_state()
         self._engine.state.last_error = None
         self._engine.state.is_running = False
         self._engine.state.is_finished = False
@@ -1928,6 +2011,22 @@ class EngineBridge(QObject):
             self._selections["keyboardVariant"] = self._keyboard_variants_model[0]
 
         self.keyboardVariantsChanged.emit()
+
+    @Slot(str, str, result=bool)
+    def applyKeyboardLayout(self, layout: str, variant: str) -> bool:
+        """
+        Apply a keyboard layout to the live installer session (best-effort).
+
+        This only affects the running session (GNOME Wayland via gsettings,
+        X11 via setxkbmap fallback) so every input field in the installer
+        reflects the chosen layout immediately. It never touches the target
+        install config, which stays driven by setSelectedKeymap /
+        setSelectedKeyboardVariant.
+        """
+        applied = apply_keyboard_layout_live(layout, variant)
+        if self._debug:
+            print(f"[Engine] Live keyboard apply ({layout}+{variant}): {applied}")
+        return applied
 
     @Property(str, notify=selectionsChanged)
     def username(self) -> str:
@@ -2695,6 +2794,25 @@ class EngineBridge(QObject):
     def jobsList(self) -> list[dict[str, Any]]:
         """Get jobs list with status for progress view."""
         return self._jobs_list
+
+    @Property(bool, notify=progressChanged)
+    def isStalled(self) -> bool:
+        """True quand aucun progress n'est arrivé depuis ``_STALL_THRESHOLD_S`` s.
+
+        L'UI bascule alors la barre en animation « indéterminée » : le système
+        construit localement un paquet (silencieux), l'interface n'est pas figée.
+        """
+        return self._is_stalled
+
+    @Property(bool, notify=progressChanged)
+    def indeterminate(self) -> bool:
+        """True quand le job progresse réellement mais sans total fiable.
+
+        Piloté explicitement par le job (``report_indeterminate``), et non par
+        le timer de silence. L'UI pulse la barre et affiche les compteurs texte
+        (« X construits, Y copiés ») au lieu d'un pourcentage inventé.
+        """
+        return self._indeterminate
 
     @Property(str, notify=progressChanged)
     def installationStatus(self) -> str:

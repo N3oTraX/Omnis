@@ -394,7 +394,7 @@ Item {
 
                         Rectangle {
                             width: parent.width
-                            height: errorText.height + 32
+                            height: errorText.implicitHeight + 32
                             radius: 8
                             color: Qt.rgba(errorColor.r, errorColor.g, errorColor.b, 0.15)
                             border.color: errorColor
@@ -406,7 +406,7 @@ Item {
                                 anchors.margins: 16
                                 text: errorMessage || qsTr("An unknown error occurred during installation")
                                 font.pixelSize: 14
-                                font.family: "monospace"
+                                font.family: branding.fontMonospace
                                 color: textColor
                                 wrapMode: Text.Wrap
                             }

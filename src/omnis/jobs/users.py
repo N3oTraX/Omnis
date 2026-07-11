@@ -44,6 +44,35 @@ class UsersJob(BaseJob):
     # Valid username pattern (lowercase letters, digits, underscore, hyphen)
     USERNAME_PATTERN = re.compile(r"^[a-z_][a-z0-9_-]*$")
 
+    # Usernames already claimed by system accounts NixOS defines by default.
+    # Reusing one (most notably ``nobody``) makes the installer emit
+    # ``users.users.<name>.isNormalUser = true`` on top of the built-in system
+    # account, which NixOS rejects at nixos-install time with the fatal
+    # assertion: "Exactly one of users.users.<name>.isSystemUser and
+    # users.users.<name>.isNormalUser must be set."
+    RESERVED_USERNAMES = frozenset(
+        {
+            "root",
+            "nobody",
+            "nixos",
+            "daemon",
+            "bin",
+            "sys",
+            "messagebus",
+            "sshd",
+            "nscd",
+            "polkituser",
+            "rtkit",
+            "avahi",
+            "systemd-network",
+            "systemd-resolve",
+            "systemd-timesync",
+            "systemd-coredump",
+            "nm-openvpn",
+            "dbus",
+        }
+    )
+
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         """Initialize the users job."""
         super().__init__(config)
@@ -71,6 +100,12 @@ class UsersJob(BaseJob):
                 f"Invalid username '{username}'. Must start with lowercase letter or underscore, "
                 "and contain only lowercase letters, digits, underscores, or hyphens.",
                 error_code=11,
+            )
+
+        if username in self.RESERVED_USERNAMES:
+            return JobResult.fail(
+                f"Username '{username}' is reserved by the system. Please choose another name.",
+                error_code=14,
             )
 
         # Validate password (must not be empty, but we don't log it)

@@ -118,6 +118,9 @@ class BrandingConfig(BaseModel):
     strings: BrandingStrings = Field(default_factory=BrandingStrings)
     fonts: BrandingFonts = Field(default_factory=BrandingFonts)
     links: BrandingLinks = Field(default_factory=BrandingLinks)
+    # Category -> theme-relative SVG path for requirement icons, set from
+    # theme.yaml; falls back to the icons/requirements/cat-<name>.svg convention.
+    requirement_icons: dict[str, str] = Field(default_factory=dict)
 
 
 class JobDefinition(BaseModel):
@@ -209,6 +212,7 @@ class Engine:
     on_job_progress: Any | None = None  # (job_name: str, percent: int, msg: str) -> None
     on_job_complete: Any | None = None  # (job_name: str, result: JobResult) -> None
     on_error: Any | None = None  # (job_name: str, error: str) -> None
+    on_job_indeterminate: Any | None = None  # (job_name: str, active: bool) -> None
 
     def set_selections(self, selections: dict[str, Any]) -> None:
         """
@@ -259,7 +263,7 @@ class Engine:
             raw_config["branding"] = branding
 
         # Sub-sections whose keys map 1:1 onto the branding sub-models.
-        for section in ("colors", "fonts", "strings"):
+        for section in ("colors", "fonts", "strings", "requirement_icons"):
             values = theme.get(section)
             if isinstance(values, dict):
                 target = branding.get(section)
@@ -469,7 +473,12 @@ class Engine:
             if self.on_job_progress:
                 self.on_job_progress(job.name, percent, message)
 
+        def indeterminate_callback(active: bool) -> None:
+            if self.on_job_indeterminate:
+                self.on_job_indeterminate(job.name, active)
+
         context.on_progress = progress_callback
+        context.on_indeterminate = indeterminate_callback
         context.config = job._config
 
         # Validate

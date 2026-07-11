@@ -1,10 +1,22 @@
 # =============================================================================
 # GLF OS Theme - Omnislash Edition
 # =============================================================================
-# Official branding assets for GLF OS installer
+# Fichier de branding d'un thème Omnis. Il est fusionné par-dessus le bloc
+# `branding:` de la config d'installation (ex. config/examples/glfos.yaml) au
+# chargement : les sections `metadata`, `colors`, `fonts` et `strings` du thème
+# ONT LA PRIORITÉ sur le branding inline (le branding sert de valeurs par défaut).
+# Les chemins d'assets (logos/wallpapers/boot/icons) sont relatifs à CE dossier
+# de thème.
+#
+# Pour créer un thème : copier ce dossier, remplacer les assets, ajuster les
+# valeurs ci-dessous, puis pointer la config d'installation dessus
+# (`branding.theme: "../themes/<mon-theme>"`).
+# -----------------------------------------------------------------------------
 # Source: https://github.com/Gaming-Linux-FR/GLF-OS
 # License: MIT
 
+# Identité du thème. `name`/`codename`/`version` alimentent le titre de la
+# fenêtre, l'écran d'accueil et l'écran final (ex. "Bienvenue sur GLF OS 26.05").
 metadata:
   name: "GLF OS"
   codename: "Quasar Quake"
@@ -14,105 +26,144 @@ metadata:
   license: "MIT"
 
 # -----------------------------------------------------------------------------
-# Color Palette
+# Palette de couleurs
 # -----------------------------------------------------------------------------
+# Toutes en hex "#RRGGBB". Chaque clé a un rôle précis dans l'UI ; les 11 sont
+# exposées au QML via le BrandingProxy (primaryColor, backgroundColor, ...).
 colors:
-  # Primary colors (from gaminglinux.fr)
+  # Couleur de marque : boutons d'action, accents, indicateur d'étape actif.
   primary: "#5597e6"
+  # Variante de la primaire (survols, dégradés).
   secondary: "#4a8bd4"
+  # Accent secondaire (mise en évidence, focus).
   accent: "#5597e6"
 
-  # Background colors
+  # Fond principal de la fenêtre.
   background: "#1a1a1a"
+  # Fond légèrement plus clair (zones surélevées).
   background_light: "#2d2d2d"
+  # Surface des cartes/panneaux posés sur le fond.
   surface: "#32373c"
 
-  # Text colors
+  # Texte courant sur fond sombre.
   text: "#fffded"
+  # Texte secondaire / libellés atténués.
   text_muted: "#9CA3AF"
+  # Texte posé sur une surface de couleur primaire (ex. libellé de bouton).
   text_on_primary: "#ffffff"
 
-  # Status colors
+  # Statuts (validation des prérequis, messages) : ok / avertissement / erreur.
   success: "#10B981"
   warning: "#F59E0B"
   error: "#EF4444"
 
 # -----------------------------------------------------------------------------
-# Typography
+# Typographie
 # -----------------------------------------------------------------------------
+# Chaque nom est une famille de police. `primary` est appliquée globalement à
+# l'UI (repli Noto Sans pour les scripts non-latins), `monospace` aux zones de
+# code/journaux, `display` aux gros titres.
+# Pour EMBARQUER une police absente de l'hôte (rendu identique en AppImage),
+# déposer le fichier .ttf/.otf dans le dossier "fonts/" de ce thème : il est
+# chargé au démarrage (QFontDatabase) et sélectionnable ici par son nom de
+# famille. Ex : fonts/LEMONMILK-Regular.otf  ->  display: "Lemon Milk".
 fonts:
   primary: "Poppins"
   display: "Lemon Milk"
   monospace: "Roboto Mono"
+  # Graisses indicatives (pour les thèmes qui les exploitent).
   weights:
     regular: 400
     medium: 600
     bold: 700
 
 # -----------------------------------------------------------------------------
-# Logo Assets
+# Logos (chemins relatifs au dossier du thème)
 # -----------------------------------------------------------------------------
+# `main*` = variantes sur fond sombre (déclinées par taille), `light*` = sur
+# fond clair. Les tailles permettent au QML de choisir l'asset adapté.
 logos:
-  # Main logo (dark background)
+  # Logo principal (fond sombre)
   main: "logos/logo.png"
   main_256: "logos/logo-256.png"
   main_128: "logos/logo-128.png"
   main_64: "logos/logo-64.png"
   main_32: "logos/logo-32.png"
 
-  # Light variant (light background)
+  # Variante fond clair
   light: "logos/logo_light.png"
   light_256: "logos/logo_light-256.png"
   light_128: "logos/logo_light-128.png"
 
-  # Special logos
+  # Logos spéciaux (SVG)
   mango: "logos/mango.svg"
   selector: "logos/selector.svg"
 
 # -----------------------------------------------------------------------------
-# Wallpapers
+# Fonds d'écran (chemins relatifs au dossier du thème)
 # -----------------------------------------------------------------------------
+# `default` = fond de l'assistant ; `welcome_*` = fond de l'écran d'accueil
+# (variantes sombre/clair) ; les autres sont des alternatives sélectionnables.
 wallpapers:
-  # Installer default
   default: "wallpapers/dark.jpg"
 
-  # Welcome screen wallpapers (dark/light themes)
   welcome_dark: "wallpapers/welcome-dark.jpg"
   welcome_light: "wallpapers/welcome-light.jpg"
 
-  # Alternatives
   frost_dark: "wallpapers/frost-2-dark.png"
   frost_light: "wallpapers/frost-2.png"
   dalle_dark: "wallpapers/dalle-dark-glf.png"
   dalle_light: "wallpapers/dalle-glf.png"
 
 # -----------------------------------------------------------------------------
-# Boot Assets
+# Assets de démarrage (bootloader / EFI)
 # -----------------------------------------------------------------------------
 boot:
   bootloader: "boot/glf-bootloader.png"
   efi_icon: "boot/glf-efi.png"
 
 # -----------------------------------------------------------------------------
-# Installer Strings (French)
+# Icônes de catégorie des prérequis (SVG, chemins relatifs au thème)
 # -----------------------------------------------------------------------------
+# Icône colorée affichée à gauche de chaque prérequis (CPU, RAM, GPU...).
+# Clé = nom de la catégorie (cpu_cores, cpu_arch, ram, disk, gpu, internet,
+# efi, secure_boot, power, battery). Si une catégorie n'est pas listée ici,
+# repli sur la convention icons/requirements/cat-<catégorie>.svg, puis sur un
+# emoji. Pour personnaliser : pointer vers n'importe quel .svg du thème.
+requirement_icons:
+  cpu_cores: "icons/requirements/cat-cpu_cores.svg"
+  cpu_arch: "icons/requirements/cat-cpu_arch.svg"
+  ram: "icons/requirements/cat-ram.svg"
+  disk: "icons/requirements/cat-disk.svg"
+  gpu: "icons/requirements/cat-gpu.svg"
+  internet: "icons/requirements/cat-internet.svg"
+  efi: "icons/requirements/cat-efi.svg"
+  secure_boot: "icons/requirements/cat-secure_boot.svg"
+  power: "icons/requirements/cat-power.svg"
+  battery: "icons/requirements/cat-battery.svg"
+
+# -----------------------------------------------------------------------------
+# Chaînes de l'installeur
+# -----------------------------------------------------------------------------
+# Textes de marque affichés dans l'UI. L'i18n (config/i18n/*.conf) a la priorité
+# quand une traduction existe ; ces valeurs servent de repli.
 strings:
   welcome_title: "Bienvenue sur GLF OS"
   welcome_subtitle: "Linux Gaming made easy!"
   install_button: "Installer GLF OS"
 
-  # Progress messages
+  # Messages de progression
   progress_partitioning: "Partitionnement du disque..."
   progress_installing: "Installation du système..."
   progress_configuring: "Configuration..."
   progress_bootloader: "Installation du bootloader..."
 
-  # Finish screen
+  # Écran final
   finished_title: "Installation terminée !"
   finished_message: "GLF OS est prêt. Redémarrez pour découvrir le gaming sur Linux."
   reboot_button: "Redémarrer maintenant"
 
-  # Errors
+  # Erreurs
   error_generic: "Une erreur est survenue"
   error_disk_space: "Espace disque insuffisant"
   error_network: "Connexion réseau requise"

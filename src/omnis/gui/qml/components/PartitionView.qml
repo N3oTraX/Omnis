@@ -2282,7 +2282,7 @@ Item {
                                                 width: parent.width
                                                 text: modelData
                                                 font.pixelSize: 12
-                                                font.family: "monospace"
+                                                font.family: branding.fontMonospace
                                                 color: textMutedColor
                                                 wrapMode: Text.WrapAnywhere
                                             }

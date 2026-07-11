@@ -36,8 +36,9 @@ ApplicationWindow {
     readonly property string systemFontFamily: engine.systemFontFamily
     readonly property bool needsUnicodeFont: engine.needsUnicodeFont
 
-    // Apply font globally to the window (empty string = system default)
-    font.family: needsUnicodeFont && systemFontFamily ? systemFontFamily : ""
+    // Apply font globally: theme primary font for Latin, Noto Sans for non-Latin
+    // scripts. Empty string falls back to the Qt system default.
+    font.family: needsUnicodeFont && systemFontFamily ? systemFontFamily : (branding.fontPrimary || "")
 
     // Le style Fusion rend le texte des champs via palette.text (noir par
     // défaut) en ignorant la propriété color. On force un gris clair lisible
@@ -288,15 +289,18 @@ ApplicationWindow {
                         var normalizedLocale = locale.split(".")[0]
                         translator.setLocale(normalizedLocale)
                     }
+                    engine.applyKeyboardLayout(engine.selectedKeymap, engine.selectedKeyboardVariant)
                 }
                 onTimezoneSelected: function(timezone) {
                     engine.setSelectedTimezone(timezone)
                 }
                 onKeymapSelected: function(keymap) {
                     engine.setSelectedKeymap(keymap)
+                    engine.applyKeyboardLayout(engine.selectedKeymap, engine.selectedKeyboardVariant)
                 }
                 onKeyboardVariantSelected: function(variant) {
                     engine.setSelectedKeyboardVariant(variant)
+                    engine.applyKeyboardLayout(engine.selectedKeymap, engine.selectedKeyboardVariant)
                 }
 
                 Behavior on opacity {
@@ -477,6 +481,8 @@ ApplicationWindow {
                 jobsList: engine.jobsList
                 installationStatus: engine.installationStatus
                 errorMessage: engine.errorMessage
+                isStalled: engine.isStalled
+                indeterminate: engine.indeterminate
 
                 distroName: branding.name
                 distroLogo: branding.logoSmallUrl
@@ -835,7 +841,7 @@ ApplicationWindow {
                     readOnly: true
                     selectByMouse: true
                     wrapMode: TextArea.Wrap
-                    font.family: "monospace"
+                    font.family: branding.fontMonospace
                     font.pixelSize: 12
                     color: textColor
                     text: engine.installationLog
