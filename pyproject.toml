@@ -1,6 +1,6 @@
 [project]
 name = "omnis-installer"
-version = "0.5.5"
+version = "0.6.0"
 description = "Next-generation, modular, and universal Linux installer"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
