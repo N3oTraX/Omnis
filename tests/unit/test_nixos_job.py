@@ -723,7 +723,7 @@ class TestNixProgress:
         p = _NixProgress()
         p.feed(
             '@nix {"action":"start","id":1,"type":104,'
-            "\"text\":\"building '/nix/store/xxxx-mesa-24.0.drv'\"}"
+            '"text":"building \'/nix/store/xxxx-mesa-24.0.drv\'"}'
         )
         assert p.current_package() == "mesa-24.0"
         # Et le paquet apparaît dans le message une fois les compteurs connus.
@@ -738,13 +738,8 @@ class TestNixProgress:
         secret = "hunter2-SECRET-passphrase"
         # Secret glissé dans le texte d'un build start ET dans les fields d'un
         # result — aucun des deux ne doit fuiter.
-        p.feed(
-            '@nix {"action":"start","id":1,"type":104,'
-            f'"text":"building for user {secret}"}}'
-        )
-        p.feed(
-            f'@nix {{"action":"result","fields":[2,10,"{secret}"],"id":1,"type":105}}'
-        )
+        p.feed(f'@nix {{"action":"start","id":1,"type":104,"text":"building for user {secret}"}}')
+        p.feed(f'@nix {{"action":"result","fields":[2,10,"{secret}"],"id":1,"type":105}}')
         assert secret not in p.message()
         assert secret not in p.current_package()
 
