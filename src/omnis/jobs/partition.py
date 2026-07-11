@@ -813,6 +813,16 @@ class PartitionJob(BaseJob):
                 logger.warning(f"⚠️  Target disk: {disk}")
                 logger.warning("⚠️  All data will be PERMANENTLY LOST!")
 
+            # Une tentative précédente peut avoir laissé la cible montée : un
+            # montage résiduel empêche partprobe de relire la nouvelle table
+            # (nodes stale → « superbloc erroné » au mount). On démonte d'abord.
+            if not dry_run:
+                subprocess.run(
+                    ["umount", "-R", context.target_root],
+                    check=False,
+                    capture_output=True,
+                )
+
             context.report_progress(10, "Planning partition layout...")
 
             # Execute based on mode

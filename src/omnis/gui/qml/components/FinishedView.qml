@@ -394,7 +394,7 @@ Item {
 
                         Rectangle {
                             width: parent.width
-                            height: errorText.height + 32
+                            height: errorText.implicitHeight + 32
                             radius: 8
                             color: Qt.rgba(errorColor.r, errorColor.g, errorColor.b, 0.15)
                             border.color: errorColor

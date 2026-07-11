@@ -412,6 +412,48 @@ class TestSecurityGates:
             call_args = mock_partition.call_args
             assert call_args.kwargs["dry_run"] is True
 
+    def test_real_run_unmounts_target_before_partitioning(self) -> None:
+        """A leftover mount from a previous attempt is torn down before wiping."""
+        job = PartitionJob()
+
+        with (
+            patch.object(job, "validate") as mock_validate,
+            patch.object(job, "_partition_auto") as mock_partition,
+            patch("omnis.jobs.partition.subprocess.run") as mock_run,
+        ):
+            mock_validate.return_value = JobResult.ok()
+            mock_partition.return_value = JobResult.ok()
+
+            context = JobContext(
+                selections={"disk": "/dev/sda", "dry_run": False, "confirmed": True}
+            )
+            job.run(context)
+
+            umount_calls = [
+                c for c in mock_run.call_args_list if c.args and c.args[0][:2] == ["umount", "-R"]
+            ]
+            assert umount_calls, "expected a recursive umount before partitioning"
+            assert umount_calls[0].args[0][2] == context.target_root
+
+    def test_dry_run_does_not_unmount_target(self) -> None:
+        """Dry-run must not touch mounts."""
+        job = PartitionJob()
+
+        with (
+            patch.object(job, "validate") as mock_validate,
+            patch.object(job, "_partition_auto") as mock_partition,
+            patch("omnis.jobs.partition.subprocess.run") as mock_run,
+        ):
+            mock_validate.return_value = JobResult.ok()
+            mock_partition.return_value = JobResult.ok()
+
+            context = JobContext(selections={"disk": "/dev/sda", "dry_run": True})
+            job.run(context)
+
+            assert not [
+                c for c in mock_run.call_args_list if c.args and c.args[0][:2] == ["umount", "-R"]
+            ]
+
     def test_confirmed_default_false(self) -> None:
         """SECURITY: confirmed should default to False."""
         job = PartitionJob()
