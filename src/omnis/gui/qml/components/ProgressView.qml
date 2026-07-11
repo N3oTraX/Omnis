@@ -35,6 +35,8 @@ Item {
     property string installationStatus: "idle"  // idle, running, success, failed
     property string errorMessage: ""
     property bool isStalled: false
+    property bool indeterminate: false
+    readonly property bool pulsing: root.isStalled || root.indeterminate
 
     // Distro info
     property string distroName: ""
@@ -159,7 +161,7 @@ Item {
 
                             Rectangle {
                                 id: overallFill
-                                visible: !root.isStalled
+                                visible: !root.pulsing
                                 width: parent.width * (overallProgress / 100)
                                 height: parent.height
                                 radius: parent.radius
@@ -193,7 +195,7 @@ Item {
                                     }
 
                                     SequentialAnimation on x {
-                                        running: overallProgress < 100 && !root.isStalled
+                                        running: overallProgress < 100 && !root.pulsing
                                         loops: Animation.Infinite
                                         NumberAnimation {
                                             from: -shimmer.width
@@ -207,8 +209,8 @@ Item {
                             }
 
                             Rectangle {
-                                id: indeterminate
-                                visible: root.isStalled
+                                id: indeterminateBar
+                                visible: root.pulsing
                                 width: overallTrack.width * 0.35
                                 height: parent.height
                                 radius: parent.radius
@@ -221,10 +223,10 @@ Item {
                                 }
 
                                 SequentialAnimation on x {
-                                    running: root.isStalled
+                                    running: root.pulsing
                                     loops: Animation.Infinite
                                     NumberAnimation {
-                                        from: -indeterminate.width
+                                        from: -indeterminateBar.width
                                         to: overallTrack.width
                                         duration: 1400
                                         easing.type: Easing.InOutQuad
@@ -310,7 +312,7 @@ Item {
                                 }
 
                                 Text {
-                                    visible: root.isStalled
+                                    visible: root.pulsing
                                     text: qsTr("Construction du système en cours… cela peut prendre plusieurs minutes ; l'interface peut sembler ralentie.")
                                     font.pixelSize: 13
                                     font.italic: true

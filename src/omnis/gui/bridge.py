@@ -1328,6 +1328,7 @@ class EngineBridge(QObject):
         self._error_message: str = ""
 
         self._is_stalled: bool = False
+        self._indeterminate: bool = False
         self._last_progress_ts: float | None = None
         self._stall_timer = QTimer(self)
         self._stall_timer.setInterval(1000)
@@ -1339,6 +1340,7 @@ class EngineBridge(QObject):
         self._engine.on_job_progress = self._on_job_progress
         self._engine.on_job_complete = self._on_job_complete
         self._engine.on_error = self._on_error
+        self._engine.on_job_indeterminate = self._on_job_indeterminate
 
         # Initialize requirements checker with config
         self._init_requirements_checker()
@@ -1427,11 +1429,19 @@ class EngineBridge(QObject):
         self.progressChanged.emit()
         self.jobCompleted.emit(job_name, result.success)
 
+    def _on_job_indeterminate(self, _job_name: str, active: bool) -> None:
+        """Reflète le mode indéterminé demandé par le job (barre en pulse)."""
+        if self._indeterminate != active:
+            self._indeterminate = active
+            self.progressChanged.emit()
+
     def _on_error(self, job_name: str, error: str) -> None:
         """Handle error event."""
         self._error_message = error
         self._installation_status = "failed"
         self._reset_stall_state()
+        if self._indeterminate:
+            self._indeterminate = False
         self.progressChanged.emit()
         self.errorOccurred.emit(job_name, error)
 
@@ -2776,6 +2786,16 @@ class EngineBridge(QObject):
         construit localement un paquet (silencieux), l'interface n'est pas figée.
         """
         return self._is_stalled
+
+    @Property(bool, notify=progressChanged)
+    def indeterminate(self) -> bool:
+        """True quand le job progresse réellement mais sans total fiable.
+
+        Piloté explicitement par le job (``report_indeterminate``), et non par
+        le timer de silence. L'UI pulse la barre et affiche les compteurs texte
+        (« X construits, Y copiés ») au lieu d'un pourcentage inventé.
+        """
+        return self._indeterminate
 
     @Property(str, notify=progressChanged)
     def installationStatus(self) -> str:

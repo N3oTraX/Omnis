@@ -479,6 +479,7 @@ ApplicationWindow {
                 installationStatus: engine.installationStatus
                 errorMessage: engine.errorMessage
                 isStalled: engine.isStalled
+                indeterminate: engine.indeterminate
 
                 distroName: branding.name
                 distroLogo: branding.logoSmallUrl

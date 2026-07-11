@@ -24,6 +24,9 @@ try:
         ERR_NOT_CONFIRMED,
         NixosJob,
         _NixProgress,
+        _parallelism_flags,
+        _throttle_cores,
+        _throttled,
     )
 
     HAS_NIXOS_JOB = True
@@ -62,6 +65,20 @@ def _selections(**overrides: Any) -> dict[str, Any]:
 def _context(**overrides: Any) -> JobContext:
     """Build a JobContext with the given selections overrides."""
     return JobContext(target_root="/mnt/target", selections=_selections(**overrides))
+
+
+def _base_cmd(cmd: list[str]) -> list[str]:
+    """Strip the leading ``nice``/``ionice`` throttle prefix for assertions.
+
+    The throttle prefix is host-dependent (present only when the binaries
+    exist), so tests match on the *real* command regardless of throttling.
+    """
+    c = list(cmd)
+    if c[:1] == ["nice"]:
+        c = c[3:]  # nice -n 15
+    if c[:1] == ["ionice"]:
+        c = c[5:]  # ionice -c 2 -n 7
+    return c
 
 
 # =============================================================================
@@ -403,12 +420,15 @@ class TestInstallSequence:
             calls.append(cmd)
             proc = MagicMock()
             proc.stdout = iter([])
+            proc.stderr = iter([])  # prebuild streams @nix progress on STDERR
             proc.wait.return_value = 0
             return proc
 
         # Patch subprocess.run/Popen (command execution) and the config/flake
         # writing filesystem ops so nothing touches the real disk. The
         # stateVersion query is stubbed so ``calls`` is only the install sequence.
+        # fake_run returns empty stdout ⇒ store-path capture yields nothing ⇒
+        # the install falls back to the historical ``--flake`` flow.
         with (
             patch.object(job, "_detect_state_version", return_value="25.11"),
             patch.object(job, "_gpu_config", return_value=""),
@@ -441,8 +461,8 @@ class TestInstallSequence:
         # hardware-configuration.nix is NEVER copied over (it is preserved).
         assert "hardware-configuration.nix" not in copied
 
-        # Last command is nixos-install with the exact GLF flags.
-        install = calls[-1]
+        # Last command is nixos-install with the exact GLF flags (throttle stripped).
+        install = _base_cmd(calls[-1])
         assert install[0] == "nixos-install"
         assert "--no-root-passwd" in install
         assert install[install.index("--flake") + 1] == "/mnt/target/etc/nixos#GLF-OS"
@@ -832,12 +852,12 @@ class TestHardenTarget:
         def fake_popen(cmd: list[str], **kwargs: Any) -> MagicMock:
             calls.append((cmd, kwargs.get("env", {})))
             proc = MagicMock()
-            if cmd[:2] == ["nix", "build"]:
-                # Le prebuild sépare STDERR (progression @nix) de STDOUT
-                # (store-path imprimé par --print-out-paths).
+            if _base_cmd(cmd)[:2] == ["nix", "build"]:
+                # Le prebuild stream la progression @nix sur STDERR ; STDOUT est
+                # simplement drainé (le store-path n'y est PLUS imprimé).
                 proc.stderr = iter([])
                 proc.stdout = MagicMock()
-                proc.stdout.read.return_value = "/nix/store/abc-glf-system\n"
+                proc.stdout.read.return_value = ""
             else:
                 proc.stdout = iter([])
             proc.wait.return_value = 0
@@ -855,12 +875,18 @@ class TestHardenTarget:
         # TMPDIR reaches every install command's environment.
         assert all(env.get("TMPDIR") == "/secure/tmp" for _cmd, env in calls)
         # Progress is driven by the prebuild `nix build` with the CLI
-        # ``--log-format internal-json`` flag (NIX_CONFIG does NOT honour it),
-        # and the store-path is captured via ``--print-out-paths``.
-        prebuild = next(cmd for cmd, _env in calls if cmd[:2] == ["nix", "build"])
+        # ``--log-format internal-json`` flag (NIX_CONFIG does NOT honour it).
+        # The store-path is NO LONGER captured via ``--print-out-paths`` (dropped:
+        # it was fragile); a separate ``nix path-info`` call does it.
+        prebuild = _base_cmd(
+            next(cmd for cmd, _env in calls if _base_cmd(cmd)[:2] == ["nix", "build"])
+        )
         assert "--log-format" in prebuild
         assert "internal-json" in prebuild
-        assert "--print-out-paths" in prebuild
+        assert "--print-out-paths" not in prebuild
+        # Parallelism capped at ~80 % of the cores.
+        assert "--cores" in prebuild
+        assert "--max-jobs" in prebuild
 
     def test_copies_closure_to_target_with_progress(self) -> None:
         """The closure is copied to the target via `nix copy --to <target>` with
@@ -875,10 +901,10 @@ class TestHardenTarget:
         def fake_popen(cmd: list[str], **_kwargs: Any) -> MagicMock:
             calls.append(cmd)
             proc = MagicMock()
-            if cmd[:2] == ["nix", "build"]:
+            if _base_cmd(cmd)[:2] == ["nix", "build"]:
                 proc.stderr = iter([])
                 proc.stdout = MagicMock()
-                proc.stdout.read.return_value = "/nix/store/abc-glf-system\n"
+                proc.stdout.read.return_value = ""
             else:
                 proc.stdout = iter([])
             proc.wait.return_value = 0
@@ -893,18 +919,19 @@ class TestHardenTarget:
         ):
             job._nixos_install("/mnt/target", dry_run=False, tmpdir="/secure/tmp")
 
-        copy = next(cmd for cmd in calls if cmd[:2] == ["nix", "copy"])
+        copy = _base_cmd(next(cmd for cmd in calls if _base_cmd(cmd)[:2] == ["nix", "copy"]))
         assert "--to" in copy
         assert "/mnt/target" in copy
         assert "internal-json" in copy
+        assert "--cores" in copy
         # La copie se fait par store-path exact (flux --system, zéro rebuild).
         assert "/nix/store/abc-glf-system" in copy
         # The copy runs BEFORE nixos-install (so the target store is pre-populated).
-        copy_idx = next(i for i, cmd in enumerate(calls) if cmd[:2] == ["nix", "copy"])
-        install_idx = next(i for i, cmd in enumerate(calls) if cmd[0] == "nixos-install")
+        copy_idx = next(i for i, cmd in enumerate(calls) if _base_cmd(cmd)[:2] == ["nix", "copy"])
+        install_idx = next(i for i, cmd in enumerate(calls) if _base_cmd(cmd)[0] == "nixos-install")
         assert copy_idx < install_idx
         # nixos-install n'exécute AUCUN build : il installe le --system préconstruit.
-        install = next(cmd for cmd in calls if cmd[0] == "nixos-install")
+        install = _base_cmd(next(cmd for cmd in calls if _base_cmd(cmd)[0] == "nixos-install"))
         assert "--system" in install
         assert "/nix/store/abc-glf-system" in install
         assert "--flake" not in install
@@ -975,3 +1002,227 @@ class TestNetworkConfigCopy:
         # The copied secret is locked down (root:root, 0600).
         assert any(call.args[1] == 0o600 for call in chmod.call_args_list)
         assert chown.call_args_list and chown.call_args_list[-1].args[1:] == (0, 0)
+
+
+class TestThrottle:
+    """AXE 1 : les commandes lourdes sont préfixées nice+ionice (dégradation propre)."""
+
+    def test_prefixes_nice_and_ionice_when_available(self) -> None:
+        with patch("omnis.jobs.nixos.shutil.which", return_value="/usr/bin/x"):
+            out = _throttled(["nix", "build"])
+        assert out == ["nice", "-n", "15", "ionice", "-c", "2", "-n", "7", "nix", "build"]
+
+    def test_no_prefix_when_both_missing(self) -> None:
+        with patch("omnis.jobs.nixos.shutil.which", return_value=None):
+            assert _throttled(["nix", "copy"]) == ["nix", "copy"]
+
+    def test_partial_degradation_nice_only(self) -> None:
+        def which(name: str) -> str | None:
+            return "/usr/bin/nice" if name == "nice" else None
+
+        with patch("omnis.jobs.nixos.shutil.which", side_effect=which):
+            assert _throttled(["nix", "copy"]) == ["nice", "-n", "15", "nix", "copy"]
+
+    def test_partial_degradation_ionice_only(self) -> None:
+        def which(name: str) -> str | None:
+            return "/usr/bin/ionice" if name == "ionice" else None
+
+        with patch("omnis.jobs.nixos.shutil.which", side_effect=which):
+            assert _throttled(["nix", "copy"]) == ["ionice", "-c", "2", "-n", "7", "nix", "copy"]
+
+
+class TestThrottleCores:
+    """AXE 1 : le parallélisme suit ~80 % des cœurs de la machine."""
+
+    def test_cores_is_80_percent_of_cpu_count(self) -> None:
+        with patch("omnis.jobs.nixos.os.cpu_count", return_value=10):
+            assert _throttle_cores() == 8  # int(10 * 0.8)
+
+    def test_cores_never_below_one(self) -> None:
+        with patch("omnis.jobs.nixos.os.cpu_count", return_value=1):
+            assert _throttle_cores() == 1
+
+    def test_cores_defaults_to_one_when_cpu_count_unknown(self) -> None:
+        with patch("omnis.jobs.nixos.os.cpu_count", return_value=None):
+            assert _throttle_cores() == 1
+
+    def test_parallelism_flags_reflect_cores(self) -> None:
+        with patch("omnis.jobs.nixos.os.cpu_count", return_value=8):
+            flags = _parallelism_flags()
+        # int(8 * 0.8) == 6 cores, one derivation at a time (predictable 80 % cap).
+        assert flags == ["--cores", "6", "--max-jobs", "1"]
+
+
+class TestStorePathCapture:
+    """AXE 3 : capture déterministe du store-path via ``nix path-info``."""
+
+    def test_captures_last_store_path(self) -> None:
+        job = NixosJob()
+        with patch(
+            "omnis.jobs.nixos.subprocess.run",
+            return_value=MagicMock(returncode=0, stdout="/nix/store/xxx-glf-system\n"),
+        ) as run:
+            store_path = job._capture_store_path("attr#toplevel", tmpdir="/secure/tmp")
+        assert store_path == "/nix/store/xxx-glf-system"
+        cmd = run.call_args.args[0]
+        assert cmd[:2] == ["nix", "path-info"]
+        assert run.call_args.kwargs["env"].get("TMPDIR") == "/secure/tmp"
+
+    def test_returns_none_on_nonzero_exit(self) -> None:
+        job = NixosJob()
+        with patch(
+            "omnis.jobs.nixos.subprocess.run",
+            return_value=MagicMock(returncode=1, stdout=""),
+        ):
+            assert job._capture_store_path("attr", None) is None
+
+    def test_returns_none_without_store_path_line(self) -> None:
+        job = NixosJob()
+        with patch(
+            "omnis.jobs.nixos.subprocess.run",
+            return_value=MagicMock(returncode=0, stdout="warning: something\n"),
+        ):
+            assert job._capture_store_path("attr", None) is None
+
+    def test_returns_none_on_oserror(self) -> None:
+        job = NixosJob()
+        with patch("omnis.jobs.nixos.subprocess.run", side_effect=OSError("no nix")):
+            assert job._capture_store_path("attr", None) is None
+
+    def test_prebuild_falls_back_when_capture_fails(self) -> None:
+        """Build OK mais capture KO ⇒ store_path None (fallback ``--flake``)."""
+        job = NixosJob()
+
+        def fake_popen(_cmd: list[str], **_k: Any) -> MagicMock:
+            proc = MagicMock()
+            proc.stderr = iter([])
+            proc.stdout = MagicMock()
+            proc.stdout.read.return_value = ""
+            proc.wait.return_value = 0
+            return proc
+
+        with (
+            patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
+            patch(
+                "omnis.jobs.nixos.subprocess.run",
+                return_value=MagicMock(returncode=1, stdout=""),
+            ),
+        ):
+            store_path = job._prebuild_system("/mnt/target", dry_run=False, tmpdir="/secure/tmp")
+        assert store_path is None
+
+    def test_prebuild_returns_none_when_build_fails(self) -> None:
+        """Build KO ⇒ pas de capture, store_path None."""
+        job = NixosJob()
+
+        def fake_popen(_cmd: list[str], **_k: Any) -> MagicMock:
+            proc = MagicMock()
+            proc.stderr = iter([])
+            proc.stdout = MagicMock()
+            proc.stdout.read.return_value = ""
+            proc.wait.return_value = 1
+            return proc
+
+        with (
+            patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
+            patch("omnis.jobs.nixos.subprocess.run") as run,
+        ):
+            store_path = job._prebuild_system("/mnt/target", dry_run=False)
+        assert store_path is None
+        run.assert_not_called()  # capture never attempted on a failed build
+
+
+class TestIndeterminateInstall:
+    """AXE 2 : barre honnête — indéterminée sans total, déterminée avec total."""
+
+    @staticmethod
+    def _recorder() -> tuple[JobContext, list[tuple[str, Any]]]:
+        events: list[tuple[str, Any]] = []
+        ctx = JobContext(target_root="/mnt/target")
+        ctx.on_progress = lambda pct, _msg: events.append(("progress", pct))
+        ctx.on_indeterminate = lambda active: events.append(("indet", active))
+        return ctx, events
+
+    @staticmethod
+    def _popen_lines(lines: list[str], code: int = 0) -> Any:
+        def fake_popen(_cmd: list[str], **_k: Any) -> MagicMock:
+            proc = MagicMock()
+            proc.stdout = iter([ln + "\n" for ln in lines])
+            proc.wait.return_value = code
+            return proc
+
+        return fake_popen
+
+    def test_indeterminate_without_total_freezes_pct_until_exit(self) -> None:
+        job = NixosJob()
+        ctx, events = self._recorder()
+        lines = [
+            "building '/nix/store/aaa-foo.drv'...",
+            "copying path '/nix/store/bbb-bar' to '/mnt/target'...",
+            "copying path '/nix/store/ccc-baz' to '/mnt/target'...",
+        ]
+        with patch("omnis.jobs.nixos.subprocess.Popen", side_effect=self._popen_lines(lines)):
+            result = job._run_install_streamed(
+                ["nixos-install"],
+                "install",
+                dry_run=False,
+                context=ctx,
+                pct_start=96,
+                pct_end=100,
+                closure_total=None,
+                allow_indeterminate=True,
+            )
+        assert result.success is True
+        indet = [active for kind, active in events if kind == "indet"]
+        assert indet[0] is True
+        assert indet[-1] is False
+        prog = [pct for kind, pct in events if kind == "progress"]
+        # pct_end (100) is only reached AFTER a clean exit (last progress event).
+        assert prog[-1] == 100
+        # During streaming the pct stays frozen at pct_start (no invented ramp).
+        assert all(pct <= 96 for pct in prog[:-1])
+
+    def test_determinate_with_total_advances_without_indeterminate(self) -> None:
+        job = NixosJob()
+        ctx, events = self._recorder()
+        lines = [f"copying path '/nix/store/p{i}-x' to '/mnt/target'..." for i in range(4)]
+        with patch("omnis.jobs.nixos.subprocess.Popen", side_effect=self._popen_lines(lines)):
+            result = job._run_install_streamed(
+                ["nixos-install"],
+                "install",
+                dry_run=False,
+                context=ctx,
+                pct_start=96,
+                pct_end=100,
+                closure_total=4,
+                allow_indeterminate=True,
+            )
+        assert result.success is True
+        # A reliable total ⇒ never indeterminate; the bar advances deterministically.
+        assert not any(kind == "indet" for kind, _ in events)
+        prog = [pct for kind, pct in events if kind == "progress"]
+        assert prog and max(prog) <= 100
+
+    def test_indeterminate_reset_and_no_full_pct_on_failure(self) -> None:
+        job = NixosJob()
+        ctx, events = self._recorder()
+        lines = ["building '/nix/store/a-x.drv'..."]
+        with patch(
+            "omnis.jobs.nixos.subprocess.Popen", side_effect=self._popen_lines(lines, code=1)
+        ):
+            result = job._run_install_streamed(
+                ["nixos-install"],
+                "install",
+                dry_run=False,
+                context=ctx,
+                pct_start=96,
+                pct_end=100,
+                closure_total=None,
+                allow_indeterminate=True,
+            )
+        assert result.success is False
+        indet = [active for kind, active in events if kind == "indet"]
+        assert indet[0] is True
+        assert indet[-1] is False
+        prog = [pct for kind, pct in events if kind == "progress"]
+        assert 100 not in prog  # never claims completion on a failed install
