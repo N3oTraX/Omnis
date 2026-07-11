@@ -52,6 +52,34 @@ class TestApplyViaGsettings:
             "0",
         ]
 
+    def test_root_wraps_gsettings_in_user_session(self) -> None:
+        pw = MagicMock(pw_name="nixos")
+        with (
+            patch.dict(
+                "os.environ",
+                {"XDG_SESSION_TYPE": "wayland", "XDG_RUNTIME_DIR": "/run/user/1000"},
+                clear=True,
+            ),
+            patch("omnis.utils.keyboard_layout.os.geteuid", return_value=0),
+            patch("omnis.utils.keyboard_layout.pwd.getpwuid", return_value=pw),
+            patch("omnis.utils.keyboard_layout.shutil.which", return_value="/run/wrappers/bin/su"),
+            patch("omnis.utils.keyboard_layout.subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0)
+            result = apply_keyboard_layout_live("de", "")
+
+        assert result is True
+        sources_call = mock_run.call_args_list[0].args[0]
+        assert sources_call[:5] == ["runuser", "-u", "nixos", "--", "env"]
+        assert "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus" in sources_call
+        assert sources_call[-5:] == [
+            "gsettings",
+            "set",
+            "org.gnome.desktop.input-sources",
+            "sources",
+            "[('xkb', 'de')]",
+        ]
+
     def test_layout_without_variant_omits_plus(self) -> None:
         with (
             patch.dict("os.environ", {"XDG_SESSION_TYPE": "wayland"}, clear=True),
