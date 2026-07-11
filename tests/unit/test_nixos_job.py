@@ -1086,3 +1086,32 @@ class TestIndeterminateInstall:
         assert indet[-1] is False
         prog = [pct for kind, pct in events if kind == "progress"]
         assert 100 not in prog  # never claims completion on a failed install
+
+    def test_announced_total_switches_from_pulse_to_determinate(self) -> None:
+        job = NixosJob()
+        ctx, events = self._recorder()
+        lines = [
+            "these 2 derivations will be built:",
+            "these 4 paths will be fetched (1.0 MiB download):",
+            *[
+                f"copying path '/nix/store/p{i}-x' from 'https://cache.nixos.org'..."
+                for i in range(4)
+            ],
+        ]
+        with patch("omnis.jobs.nixos.subprocess.Popen", side_effect=self._popen_lines(lines)):
+            result = job._run_install_streamed(
+                ["nixos-install"],
+                "install",
+                dry_run=False,
+                context=ctx,
+                pct_start=60,
+                pct_end=100,
+                closure_total=None,
+                allow_indeterminate=True,
+            )
+        assert result.success is True
+        indet = [active for kind, active in events if kind == "indet"]
+        assert indet[0] is True and indet[-1] is False  # pulse, puis déterminé
+        prog = [pct for kind, pct in events if kind == "progress"]
+        # Total connu (2+4=6) ⇒ la barre dépasse pct_start au lieu de rester figée.
+        assert max(prog[:-1]) > 60

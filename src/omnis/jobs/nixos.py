@@ -347,6 +347,10 @@ class _NixProgress:
         self._fraction = max(self._fraction, ratio)
         return self._fraction
 
+    def has_total(self) -> bool:
+        """Un total fiable est-il connu (annonce nix parsée ou flux @nix) ?"""
+        return self._plain_total > 0 or sum(self._expected.values()) > 0
+
     def _capture_package(self, event: dict[str, Any]) -> None:
         """Mémorise le nom du paquet en cours de build depuis l'event type 104.
 
@@ -1091,8 +1095,6 @@ class NixosJob(BaseJob):
             logger.info("[DRY-RUN] %s: %s", description, " ".join(cmd))
             return JobResult.ok(f"[DRY-RUN] {description}")
 
-        indeterminate = allow_indeterminate and closure_total is None
-
         env = dict(os.environ)
         if tmpdir:
             env["TMPDIR"] = tmpdir
@@ -1117,7 +1119,8 @@ class NixosJob(BaseJob):
 
         span = max(0, pct_end - pct_start)
         progress = _NixProgress(plain_total=closure_total or 0)
-        if indeterminate and context is not None:
+        pulsing = allow_indeterminate and not progress.has_total()
+        if pulsing and context is not None:
             context.report_indeterminate(True)
             context.report_progress(pct_start, progress.message())
         assert proc.stdout is not None
@@ -1127,8 +1130,10 @@ class NixosJob(BaseJob):
             if fraction is None:
                 fraction = progress.feed_plain(line)
             if fraction is not None and context is not None:
-                if indeterminate:
-                    # Pct gelé : seuls les compteurs texte avancent (pulse côté UI).
+                if pulsing and progress.has_total():
+                    pulsing = False
+                    context.report_indeterminate(False)
+                if pulsing:
                     context.report_progress(pct_start, progress.message())
                 else:
                     pct = pct_start + round(span * fraction)
@@ -1137,14 +1142,14 @@ class NixosJob(BaseJob):
                 logger.debug("nixos-install: %s", line)
 
         code = proc.wait()
-        if indeterminate and context is not None:
+        if pulsing and context is not None:
             context.report_indeterminate(False)
         if code != 0:
             logger.error("FAILED: %s (exit %s)", description, code)
             return JobResult.fail(
                 f"{description} failed (exit code {code})", error_code=ERR_INSTALL
             )
-        if indeterminate and context is not None:
+        if context is not None:
             context.report_progress(pct_end, progress.message())
         logger.info("OK: %s", description)
         return JobResult.ok(description)
