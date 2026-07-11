@@ -478,6 +478,7 @@ ApplicationWindow {
                 jobsList: engine.jobsList
                 installationStatus: engine.installationStatus
                 errorMessage: engine.errorMessage
+                isStalled: engine.isStalled
 
                 distroName: branding.name
                 distroLogo: branding.logoSmallUrl

@@ -590,6 +590,8 @@ class EngineBridge(QObject):
     - Branding configuration
     """
 
+    _STALL_THRESHOLD_S: float = 6.0
+
     # Signals for QML
     installationStarted = Signal()
     installationFinished = Signal(bool)  # success: bool
@@ -1325,6 +1327,13 @@ class EngineBridge(QObject):
         self._installation_status: str = "idle"  # idle, running, success, failed
         self._error_message: str = ""
 
+        self._is_stalled: bool = False
+        self._last_progress_ts: float | None = None
+        self._stall_timer = QTimer(self)
+        self._stall_timer.setInterval(1000)
+        self._stall_timer.timeout.connect(self._check_stall)
+        self._stall_timer.start()
+
         # Connect engine callbacks
         self._engine.on_job_start = self._on_job_start
         self._engine.on_job_progress = self._on_job_progress
@@ -1361,6 +1370,7 @@ class EngineBridge(QObject):
         self._current_job_name = job_name
         self._current_job_progress = 0
         self._current_job_message = f"Starting {job_name}..."
+        self._mark_progress_alive()
         self._update_jobs_list()
         self.progressChanged.emit()
         self.jobStarted.emit(job_name)
@@ -1379,8 +1389,37 @@ class EngineBridge(QObject):
             job_contribution = percent // total_jobs
             self._overall_progress = base_progress + job_contribution
 
+        self._mark_progress_alive()
         self.progressChanged.emit()
         self.jobProgress.emit(job_name, percent, message)
+
+    def _mark_progress_alive(self) -> None:
+        """Enregistre un « battement » de progression (peut venir du thread worker).
+
+        N'écrit qu'un timestamp (thread-safe : écriture atomique d'un float) et
+        sort d'un éventuel état figé. Le passage EN état figé est décidé par
+        ``_check_stall`` côté GUI — jamais ici — pour ne pas piloter le QTimer
+        depuis le thread worker.
+        """
+        self._last_progress_ts = time.monotonic()
+        if self._is_stalled:
+            self._is_stalled = False
+            self.progressChanged.emit()
+
+    def _check_stall(self) -> None:
+        """Sonde GUI (1 Hz) : bascule ``isStalled`` après un silence prolongé.
+
+        Aucun progress reçu depuis ``_STALL_THRESHOLD_S`` secondes alors qu'une
+        installation est en cours ⇒ la barre passe en mode « indéterminé »
+        (build local silencieux). Le prochain progress ré-arme via
+        :meth:`_mark_progress_alive`.
+        """
+        if self._last_progress_ts is None:
+            return
+        stalled = (time.monotonic() - self._last_progress_ts) >= self._STALL_THRESHOLD_S
+        if stalled != self._is_stalled:
+            self._is_stalled = stalled
+            self.progressChanged.emit()
 
     def _on_job_complete(self, job_name: str, result: Any) -> None:
         """Handle job completion event."""
@@ -1392,8 +1431,16 @@ class EngineBridge(QObject):
         """Handle error event."""
         self._error_message = error
         self._installation_status = "failed"
+        self._reset_stall_state()
         self.progressChanged.emit()
         self.errorOccurred.emit(job_name, error)
+
+    def _reset_stall_state(self) -> None:
+        """Stoppe la détection de silence et sort de l'état figé (thread-safe)."""
+        self._last_progress_ts = None
+        if self._is_stalled:
+            self._is_stalled = False
+            self.progressChanged.emit()
 
     def _mark_log_dirty(self, _line: str) -> None:
         """Flag that new log line(s) arrived (called from the worker thread).
@@ -1646,6 +1693,7 @@ class EngineBridge(QObject):
     def _on_installation_finished(self, success: bool) -> None:
         """Handle installation completion."""
         self._install_end_time = time.monotonic()
+        self._reset_stall_state()
         if self._debug:
             print(f"[Engine] Installation finished: {'success' if success else 'failed'}")
         self.installationFinished.emit(success)
@@ -1674,6 +1722,7 @@ class EngineBridge(QObject):
 
         self._installation_status = "idle"
         self._error_message = ""
+        self._reset_stall_state()
         self._engine.state.last_error = None
         self._engine.state.is_running = False
         self._engine.state.is_finished = False
@@ -2718,6 +2767,15 @@ class EngineBridge(QObject):
     def jobsList(self) -> list[dict[str, Any]]:
         """Get jobs list with status for progress view."""
         return self._jobs_list
+
+    @Property(bool, notify=progressChanged)
+    def isStalled(self) -> bool:
+        """True quand aucun progress n'est arrivé depuis ``_STALL_THRESHOLD_S`` s.
+
+        L'UI bascule alors la barre en animation « indéterminée » : le système
+        construit localement un paquet (silencieux), l'interface n'est pas figée.
+        """
+        return self._is_stalled
 
     @Property(str, notify=progressChanged)
     def installationStatus(self) -> str:

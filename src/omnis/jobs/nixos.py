@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -178,17 +179,37 @@ ERR_HASH_FAILED = 70
 
 
 class _NixProgress:
-    """Fraction 0..1 depuis les events nix internal-json (builds type 104 + copyPaths 103)."""
+    """Progression 0..1 depuis les events nix internal-json (builds type 104 + copyPaths 103).
+
+    Deux notions distinctes :
+
+    - **Valeur affichée (monotone)** : ``self._fraction`` ne décroît JAMAIS
+      (``max`` à chaque calcul), pour que le pourcentage affiché ne régresse
+      pas quand nix découvre de nouvelles dérivations (``expected`` gonfle).
+    - **Vivacité** : :meth:`feed` retourne une valeur exploitable (la fraction
+      monotone) à CHAQUE event ``@nix`` pertinent (démarrage build/copy OU
+      résultat de progression 105 sur une activité suivie), même si le nombre
+      n'augmente pas — afin que l'appelant réémette un ``report_progress`` avec
+      un MESSAGE à jour (paquet courant, compteurs). Les lignes non-``@nix``,
+      le JSON malformé et les events non pertinents retournent ``None``.
+
+    SÉCURITÉ : cette classe ne lit que le flux ``@nix`` ; elle n'accède jamais
+    aux sélections utilisateur ni à un secret. Le nom de paquet exposé provient
+    exclusivement d'un chemin ``/nix/store/…`` du flux.
+    """
 
     _ACT_COPY_PATHS = 103
     _ACT_BUILDS = 104
     _RES_PROGRESS = 105
+
+    _STORE_PATH_RE = re.compile(r"/nix/store/[a-z0-9]+-(.+?)(?:\.drv|'|$)")
 
     def __init__(self) -> None:
         self._kind: dict[int, str] = {}
         self._done: dict[int, int] = {}
         self._expected: dict[int, int] = {}
         self._fraction = 0.0
+        self._current_pkg = ""
 
     def feed(self, line: str) -> float | None:
         if not line.startswith("@nix "):
@@ -198,26 +219,54 @@ class _NixProgress:
         except ValueError:
             return None
         action = event.get("action")
+        relevant = False
         if action == "start":
             act_type = event.get("type")
             if act_type == self._ACT_BUILDS:
                 self._kind[event.get("id")] = "build"
+                self._capture_package(event)
+                relevant = True
             elif act_type == self._ACT_COPY_PATHS:
                 self._kind[event.get("id")] = "copy"
+                relevant = True
         elif action == "result" and event.get("type") == self._RES_PROGRESS:
             rid = event.get("id")
             if rid in self._kind:
                 fields = event.get("fields") or []
                 self._done[rid] = int(fields[0]) if len(fields) > 0 else 0
                 self._expected[rid] = int(fields[1]) if len(fields) > 1 else 0
+                relevant = True
+        if not relevant:
+            return None
         expected = sum(self._expected.values())
-        if expected <= 0:
-            return None
-        fraction = min(1.0, sum(self._done.values()) / expected)
-        if fraction <= self._fraction:
-            return None
-        self._fraction = fraction
-        return fraction
+        if expected > 0:
+            ratio = min(1.0, sum(self._done.values()) / expected)
+            self._fraction = max(self._fraction, ratio)
+        return self._fraction
+
+    def _capture_package(self, event: dict[str, Any]) -> None:
+        """Mémorise le nom du paquet en cours de build depuis l'event type 104.
+
+        Le nom vient du champ ``text`` (souvent ``building '/nix/store/…drv'``)
+        ou, à défaut, d'un champ ``fields`` textuel. Absence ou format inattendu
+        sont ignorés proprement (l'ancien nom est conservé).
+        """
+        candidates: list[str] = []
+        text = event.get("text")
+        if isinstance(text, str):
+            candidates.append(text)
+        fields = event.get("fields")
+        if isinstance(fields, list):
+            candidates.extend(f for f in fields if isinstance(f, str))
+        for cand in candidates:
+            match = self._STORE_PATH_RE.search(cand)
+            if match:
+                self._current_pkg = match.group(1)
+                return
+
+    def current_package(self) -> str:
+        """Nom du dernier paquet en cours de build ("" si inconnu)."""
+        return self._current_pkg
 
     def _totals(self, kind: str) -> tuple[int, int]:
         done = sum(v for i, v in self._done.items() if self._kind.get(i) == kind)
@@ -228,7 +277,10 @@ class _NixProgress:
         parts = []
         b_done, b_exp = self._totals("build")
         if b_exp:
-            parts.append(f"{b_done}/{b_exp} built")
+            seg = f"{b_done}/{b_exp} built"
+            if self._current_pkg:
+                seg += f" ({self._current_pkg})"
+            parts.append(seg)
         c_done, c_exp = self._totals("copy")
         if c_exp:
             parts.append(f"{c_done}/{c_exp} copied")
@@ -846,44 +898,60 @@ class NixosJob(BaseJob):
         tmpdir: str | None = None,
     ) -> JobResult:
         """
-        Run ``nixos-install`` against the GLF flake attribute.
+        Install GLF OS onto the mounted target — sans AUCUN rebuild final.
 
-        Command (faithful to the Calamares nixos module)::
+        Orchestration « --system » (zéro build pendant l'install finale) :
 
-            nixos-install --no-root-passwd \
-                --option sandbox false \
-                --option build-users-group "" \
-                --flake <target>/etc/nixos#GLF-OS \
-                --root <target>
+        1. :meth:`_prebuild_system` construit le toplevel une seule fois et
+           imprime son store-path (``nix build --print-out-paths``). (60 → 90 %)
+        2. :meth:`_copy_system_to_target` copie CE chemin sur le disque cible
+           (``nix copy <store-path>``). (90 → 96 %)
+        3. ``nixos-install --root <target> --system <store-path>`` ne build ni
+           n'évalue rien (la closure est déjà présente) — il enregistre juste
+           le profil + le bootloader + l'activation. (96 → 100 %)
 
-        Streame pour faire avancer la barre pendant le build (voir
-        :meth:`_run_install_streamed`).
+        Le flake reste copié dans ``<target>/etc/nixos`` (fait en amont dans
+        :meth:`run`) pour les futurs ``nixos-rebuild`` / glf-update.
+
+        FALLBACK : si le prebuild n'a pas fourni de store-path (build échoué ou
+        sortie inattendue), on retombe sur l'ancien flux ``nixos-install
+        --flake …#GLF-OS`` qui reste correct (il re-construit alors la closure).
         """
-        # Progress is split across the two phases that actually take time, each
-        # driven by ``nix``'s internal-json activity stream (best-effort, so a
-        # failure here never breaks the install — nixos-install still runs):
-        #   1) build/fetch the closure into the LIVE store           (60 → 70 %)
-        #   2) copy the closure onto the TARGET disk (the slow part) (70 → 96 %)
-        # nixos-install then finds everything already present and only registers
-        # the profile + bootloader + activation                     (96 → 100 %)
-        self._prebuild_system(target_root, dry_run, context, tmpdir)
-        self._copy_system_to_target(target_root, dry_run, context, tmpdir)
+        store_path = self._prebuild_system(target_root, dry_run, context, tmpdir)
+        self._copy_system_to_target(target_root, dry_run, context, tmpdir, store_path)
 
-        flake_ref = f"{target_root}/etc/nixos#{self._flake_attr()}"
-        cmd = [
-            "nixos-install",
-            "--no-root-passwd",
-            "--option",
-            "sandbox",
-            "false",
-            "--option",
-            "build-users-group",
-            "",
-            "--flake",
-            flake_ref,
-            "--root",
-            target_root,
-        ]
+        if store_path:
+            cmd = [
+                "nixos-install",
+                "--root",
+                target_root,
+                "--system",
+                store_path,
+                "--no-channel-copy",
+                "--no-root-passwd",
+                "--option",
+                "sandbox",
+                "false",
+                "--option",
+                "build-users-group",
+                "",
+            ]
+        else:
+            flake_ref = f"{target_root}/etc/nixos#{self._flake_attr()}"
+            cmd = [
+                "nixos-install",
+                "--no-root-passwd",
+                "--option",
+                "sandbox",
+                "false",
+                "--option",
+                "build-users-group",
+                "",
+                "--flake",
+                flake_ref,
+                "--root",
+                target_root,
+            ]
         return self._run_install_streamed(
             cmd,
             "Running nixos-install",
@@ -900,22 +968,30 @@ class NixosJob(BaseJob):
         dry_run: bool,
         context: JobContext | None = None,
         tmpdir: str | None = None,
+        store_path: str | None = None,
     ) -> None:
         """Best-effort ``nix copy`` of the system closure onto the target disk.
 
         This is the phase that actually takes minutes (copying the whole system
         closure to ``/mnt/target``), and — unlike the ``nixos-install`` wrapper —
         ``nix copy`` emits the internal-json ``@nix`` activity stream, so the
-        progress bar advances smoothly as each path is copied. nixos-install then
-        finds the paths already present in the target store and skips its own
-        copy. Failures are swallowed: nixos-install still performs the copy.
+        progress bar advances smoothly as each path is copied.
+
+        Quand ``store_path`` est fourni (flux nominal ``--system``) la copie se
+        fait par STORE-PATH exact — aucune évaluation du flake, donc aucun
+        rebuild possible. À défaut (fallback), on copie l'attribut ``toplevel``
+        du flake comme historiquement. Les échecs sont avalés : ``nixos-install``
+        recopiera de toute façon.
         """
         if dry_run:
             return
-        attr = self._flake_attr()
-        toplevel = (
-            f"{target_root}/etc/nixos#nixosConfigurations.{attr}.config.system.build.toplevel"
-        )
+        if store_path:
+            source = store_path
+        else:
+            attr = self._flake_attr()
+            source = (
+                f"{target_root}/etc/nixos#nixosConfigurations.{attr}.config.system.build.toplevel"
+            )
         cmd = [
             "nix",
             "copy",
@@ -926,7 +1002,7 @@ class NixosJob(BaseJob):
             "nix-command flakes",
             "--to",
             target_root,
-            toplevel,
+            source,
         ]
         try:
             result = self._run_install_streamed(
@@ -935,7 +1011,7 @@ class NixosJob(BaseJob):
                 dry_run,
                 context,
                 tmpdir,
-                pct_start=70,
+                pct_start=90,
                 pct_end=96,
             )
             if not result.success:
@@ -949,17 +1025,22 @@ class NixosJob(BaseJob):
         dry_run: bool,
         context: JobContext | None = None,
         tmpdir: str | None = None,
-    ) -> None:
-        """Best-effort ``nix build`` of the system toplevel to drive real progress.
+    ) -> str | None:
+        """``nix build`` unique du toplevel — imprime et retourne son store-path.
 
-        Unlike the ``nixos-install`` wrapper, ``nix build`` emits the
-        internal-json activity stream, so the progress bar reflects each
-        derivation copied from the binary cache or built. Any failure here is
-        logged and swallowed: ``nixos-install`` re-evaluates the identical
-        (now-cached) closure immediately after, so this step is purely cosmetic.
+        ``nix build`` émet le flux internal-json ``@nix`` (progression réelle,
+        chaque dérivation construite/copiée) sur STDERR, et — grâce à
+        ``--print-out-paths`` — imprime le store-path résultant sur STDOUT. On
+        SÉPARE donc les deux flux : STDERR pilote la barre, STDOUT fournit le
+        chemin réutilisé par la copie puis ``nixos-install --system``.
+
+        Retourne le store-path (str) en cas de succès, ou ``None`` si le build
+        échoue / n'imprime aucun chemin — auquel cas l'appelant retombe sur le
+        flux ``--flake`` historique. Toute exception est loggée et convertie en
+        ``None`` : le prebuild ne doit jamais casser l'install.
         """
         if dry_run:
-            return
+            return None
         attr = self._flake_attr()
         toplevel = (
             f"{target_root}/etc/nixos#nixosConfigurations.{attr}.config.system.build.toplevel"
@@ -968,6 +1049,7 @@ class NixosJob(BaseJob):
             "nix",
             "build",
             "--no-link",
+            "--print-out-paths",
             # ``log-format`` is a CLI-only option — it is NOT honoured via
             # NIX_CONFIG/nix.conf. Passing it here is what makes ``nix build``
             # emit the ``@nix`` internal-json activity stream that _NixProgress
@@ -986,19 +1068,82 @@ class NixosJob(BaseJob):
             toplevel,
         ]
         try:
-            result = self._run_install_streamed(
+            return self._run_prebuild_streamed(
                 cmd,
                 "Building system closure",
-                dry_run,
                 context,
                 tmpdir,
                 pct_start=60,
-                pct_end=70,
+                pct_end=90,
             )
-            if not result.success:
-                logger.warning("System prebuild failed (non-fatal); continuing to nixos-install")
         except Exception as exc:  # pragma: no cover - defensive, never break install
             logger.warning("System prebuild error (non-fatal): %s", exc)
+            return None
+
+    def _run_prebuild_streamed(
+        self,
+        cmd: list[str],
+        description: str,
+        context: JobContext | None,
+        tmpdir: str | None,
+        pct_start: int,
+        pct_end: int,
+    ) -> str | None:
+        """Exécute ``nix build --print-out-paths`` en séparant STDERR / STDOUT.
+
+        STDERR : flux internal-json ``@nix`` → progression (``pct_start`` →
+        ``pct_end``). STDOUT : store-path(s) imprimé(s) à la fin.
+
+        Le STDOUT (quelques lignes, petit) n'est lu qu'après avoir drainé STDERR
+        puis attendu le process — pas de risque de blocage puisque nix n'imprime
+        les out-paths qu'une fois le build terminé. Retourne le dernier chemin
+        non vide, ou ``None`` (build échoué / aucune sortie).
+        """
+        env = dict(os.environ)
+        if tmpdir:
+            env["TMPDIR"] = tmpdir
+
+        logger.info("Executing: %s", description)
+        logger.debug("Command: %s", " ".join(cmd))
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                env=env,
+            )
+        except FileNotFoundError:
+            logger.error("Command not found: %s", cmd[0])
+            return None
+
+        span = max(0, pct_end - pct_start)
+        progress = _NixProgress()
+        if proc.stderr is not None:
+            for raw in proc.stderr:
+                line = raw.rstrip("\n")
+                fraction = progress.feed(line)
+                if fraction is not None and context is not None:
+                    pct = pct_start + round(span * fraction)
+                    context.report_progress(min(pct_end, pct), progress.message())
+                elif not line.startswith("@nix "):
+                    logger.debug("nix build: %s", line)
+
+        out = proc.stdout.read() if proc.stdout is not None else ""
+        code = proc.wait()
+        if code != 0:
+            logger.warning(
+                "System prebuild failed (exit %s); falling back to --flake install", code
+            )
+            return None
+        paths = [ln.strip() for ln in out.splitlines() if ln.strip()]
+        if not paths:
+            logger.warning("Prebuild produced no store path; falling back to --flake install")
+            return None
+        store_path = paths[-1]
+        logger.info("Prebuilt system toplevel: %s", store_path)
+        return store_path
 
     def _run_install_streamed(
         self,

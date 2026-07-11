@@ -687,15 +687,66 @@ class TestNixProgress:
         assert p.feed('@nix {"action":"result","fields":[84,84,0,0],"id":99,"type":105}') is None
         assert p._fraction == before
 
-    def test_fraction_is_monotonic(self) -> None:
+    def test_fraction_is_monotonic_but_stays_alive(self) -> None:
+        """Le pct affiché ne régresse jamais, MAIS feed() reste « vivant » :
+        un event pertinent retourne toujours une valeur non-None (message vivant)
+        même quand le nombre n'augmente pas."""
         p = _NixProgress()
         p.feed('@nix {"action":"start","id":1,"type":104}')
         assert p.feed(self._build(1, 8, 10)) == 0.8
-        # A newly discovered activity enlarges 'expected'; the fraction would dip
-        # but must not move backwards.
+        # A newly discovered activity enlarges 'expected'; the numeric fraction
+        # would dip to 8/20=0.4 but the DISPLAYED value must not move backwards…
         p.feed('@nix {"action":"start","id":2,"type":103}')
-        assert p.feed(self._build(2, 0, 10)) is None
+        result = p.feed(self._build(2, 0, 10))
+        # …and feed() still returns a usable (non-None) monotone value so the
+        # caller re-emits an up-to-date message.
+        assert result == 0.8
         assert p._fraction == 0.8
+
+    def test_expected_growth_yields_live_non_none_series(self) -> None:
+        """``expected`` croissant → série de retours non-None, fraction monotone."""
+        p = _NixProgress()
+        p.feed('@nix {"action":"start","id":1,"type":104}')
+        seen: list[float | None] = [
+            p.feed(self._build(1, 1, 5)),  # 0.2
+            p.feed(self._build(1, 2, 20)),  # 2/20=0.1 → clampé à 0.2 (monotone)
+            p.feed(self._build(1, 5, 20)),  # 0.25
+        ]
+        assert all(v is not None for v in seen)
+        # Chaque valeur est un float non décroissant.
+        floats = [v for v in seen if v is not None]
+        assert floats == sorted(floats)
+        assert p._fraction == 0.25
+
+    def test_extracts_current_package_from_build_start(self) -> None:
+        """Le nom du paquet en cours vient du champ ``text`` d'un event 104."""
+        p = _NixProgress()
+        p.feed(
+            '@nix {"action":"start","id":1,"type":104,'
+            "\"text\":\"building '/nix/store/xxxx-mesa-24.0.drv'\"}"
+        )
+        assert p.current_package() == "mesa-24.0"
+        # Et le paquet apparaît dans le message une fois les compteurs connus.
+        p.feed(self._build(1, 1, 4))
+        assert "mesa-24.0" in p.message()
+        assert "1/4 built" in p.message()
+
+    def test_secret_in_event_never_reaches_message(self) -> None:
+        """SÉCURITÉ : un faux secret injecté dans un champ d'event n'apparaît
+        jamais dans message() ni dans current_package()."""
+        p = _NixProgress()
+        secret = "hunter2-SECRET-passphrase"
+        # Secret glissé dans le texte d'un build start ET dans les fields d'un
+        # result — aucun des deux ne doit fuiter.
+        p.feed(
+            '@nix {"action":"start","id":1,"type":104,'
+            f'"text":"building for user {secret}"}}'
+        )
+        p.feed(
+            f'@nix {{"action":"result","fields":[2,10,"{secret}"],"id":1,"type":105}}'
+        )
+        assert secret not in p.message()
+        assert secret not in p.current_package()
 
 
 class TestHardenTarget:
@@ -731,7 +782,14 @@ class TestHardenTarget:
         def fake_popen(cmd: list[str], **kwargs: Any) -> MagicMock:
             calls.append((cmd, kwargs.get("env", {})))
             proc = MagicMock()
-            proc.stdout = iter([])
+            if cmd[:2] == ["nix", "build"]:
+                # Le prebuild sépare STDERR (progression @nix) de STDOUT
+                # (store-path imprimé par --print-out-paths).
+                proc.stderr = iter([])
+                proc.stdout = MagicMock()
+                proc.stdout.read.return_value = "/nix/store/abc-glf-system\n"
+            else:
+                proc.stdout = iter([])
             proc.wait.return_value = 0
             return proc
 
@@ -741,21 +799,32 @@ class TestHardenTarget:
         # TMPDIR reaches every install command's environment.
         assert all(env.get("TMPDIR") == "/secure/tmp" for _cmd, env in calls)
         # Progress is driven by the prebuild `nix build` with the CLI
-        # ``--log-format internal-json`` flag (NIX_CONFIG does NOT honour it).
+        # ``--log-format internal-json`` flag (NIX_CONFIG does NOT honour it),
+        # and the store-path is captured via ``--print-out-paths``.
         prebuild = next(cmd for cmd, _env in calls if cmd[:2] == ["nix", "build"])
         assert "--log-format" in prebuild
         assert "internal-json" in prebuild
+        assert "--print-out-paths" in prebuild
 
     def test_copies_closure_to_target_with_progress(self) -> None:
         """The closure is copied to the target via `nix copy --to <target>` with
-        internal-json so the bar advances smoothly during the slow disk copy."""
+        internal-json so the bar advances smoothly during the slow disk copy.
+
+        Le prebuild imprime un store-path, donc la copie ET nixos-install
+        s'appuient sur CE chemin (``--system``) — aucun rebuild final.
+        """
         job = NixosJob()
         calls: list[list[str]] = []
 
         def fake_popen(cmd: list[str], **_kwargs: Any) -> MagicMock:
             calls.append(cmd)
             proc = MagicMock()
-            proc.stdout = iter([])
+            if cmd[:2] == ["nix", "build"]:
+                proc.stderr = iter([])
+                proc.stdout = MagicMock()
+                proc.stdout.read.return_value = "/nix/store/abc-glf-system\n"
+            else:
+                proc.stdout = iter([])
             proc.wait.return_value = 0
             return proc
 
@@ -766,10 +835,17 @@ class TestHardenTarget:
         assert "--to" in copy
         assert "/mnt/target" in copy
         assert "internal-json" in copy
+        # La copie se fait par store-path exact (flux --system, zéro rebuild).
+        assert "/nix/store/abc-glf-system" in copy
         # The copy runs BEFORE nixos-install (so the target store is pre-populated).
         copy_idx = next(i for i, cmd in enumerate(calls) if cmd[:2] == ["nix", "copy"])
         install_idx = next(i for i, cmd in enumerate(calls) if cmd[0] == "nixos-install")
         assert copy_idx < install_idx
+        # nixos-install n'exécute AUCUN build : il installe le --system préconstruit.
+        install = next(cmd for cmd in calls if cmd[0] == "nixos-install")
+        assert "--system" in install
+        assert "/nix/store/abc-glf-system" in install
+        assert "--flake" not in install
 
 
 class TestNetworkConfigCopy:
