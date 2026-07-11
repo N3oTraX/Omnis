@@ -42,7 +42,6 @@ import re
 import resource
 import shutil
 import subprocess
-from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -201,17 +200,6 @@ def _throttled(cmd: list[str]) -> list[str]:
 def _throttle_cores() -> int:
     """Parallélisme cible ≈ 80 % des cœurs (réserve du CPU au bureau live)."""
     return max(1, int((os.cpu_count() or 1) * 0.8))
-
-
-def _parallelism_flags() -> list[str]:
-    """Flags nix ``--cores``/``--max-jobs`` plafonnant le CPU à ~80 % des cœurs.
-
-    ``--cores`` = 80 % des cœurs (threads par dérivation) et ``--max-jobs 1``
-    (une seule dérivation à la fois) : plafond CPU PRÉVISIBLE à ~80 %, sans
-    sur-souscription ``cores × jobs``. ``nice``/``ionice`` restent la garantie
-    de priorité basse.
-    """
-    return ["--cores", str(_throttle_cores()), "--max-jobs", "1"]
 
 
 def _raise_stack_limit() -> None:
@@ -1012,358 +1000,125 @@ class NixosJob(BaseJob):
         tmpdir: str | None = None,
     ) -> JobResult:
         """
-        Install GLF OS onto the mounted target — sans AUCUN rebuild final.
+        Install GLF OS onto the mounted target via ``nixos-install --flake``.
 
-        Orchestration « --system » (zéro build pendant l'install finale) :
+        ``nixos-install --flake <target>/etc/nixos#GLF-OS`` réalise toute la
+        closure (build + copie vers le disque cible) en une passe. Contrairement
+        au ``nix build`` préalable, ce chemin de réalisation ne déclenche pas
+        l'assertion interne de ``libnixstore`` observée sur nix 2.34.7.
 
-        1. :meth:`_prebuild_system` construit le toplevel une seule fois puis
-           capture son store-path via ``nix path-info``. (60 → 90 %)
-        2. :meth:`_copy_system_to_target` copie CE chemin sur le disque cible
-           (``nix copy <store-path>``). (90 → 96 %)
-        3. ``nixos-install --root <target> --system <store-path>`` ne build ni
-           n'évalue rien (la closure est déjà présente) — il enregistre juste
-           le profil + le bootloader + l'activation. (96 → 100 %)
+        Barre GRANULAIRE : le TOTAL de la closure est obtenu EN AMONT par
+        :meth:`_closure_total_via_eval` (évaluation seule, sans réalisation, donc
+        sans crash). Ce total sert de dénominateur à ``_run_install_streamed`` :
+        les lignes texte ``copying path '…'`` de ``nixos-install`` font monter la
+        fraction ``Y/total`` de 0 → ~100 %. Si le total est indisponible
+        (``None``), la phase reste indéterminée (repli, jamais de crash).
 
         Le flake reste copié dans ``<target>/etc/nixos`` (fait en amont dans
         :meth:`run`) pour les futurs ``nixos-rebuild`` / glf-update.
-
-        FALLBACK : si le prebuild n'a pas fourni de store-path (build échoué ou
-        sortie inattendue), on retombe sur l'ancien flux ``nixos-install
-        --flake …#GLF-OS`` qui reste correct (il re-construit alors la closure).
         """
-        store_path = self._prebuild_system(target_root, dry_run, context, tmpdir)
-        self._copy_system_to_target(target_root, dry_run, context, tmpdir, store_path)
-
-        closure_total: int | None = None
-        if store_path:
-            logger.info(
-                "Offload active: nixos-install registers prebuilt system %s (no rebuild)",
-                store_path,
-            )
-            closure_total = self._closure_path_count(store_path)
-            logger.info("Offload closure_total=%s (None ⇒ barre indéterminée)", closure_total)
-            cmd = [
-                "nixos-install",
-                "--root",
-                target_root,
-                "--system",
-                store_path,
-                "--no-channel-copy",
-                "--no-root-passwd",
-                "--option",
-                "sandbox",
-                "false",
-                "--option",
-                "build-users-group",
-                "",
-            ]
-        else:
-            logger.warning(
-                "Offload inactive: no prebuilt store path; nixos-install rebuilds via --flake "
-                "(barre indéterminée : pas de total fiable)"
-            )
-            flake_ref = f"{target_root}/etc/nixos#{self._flake_attr()}"
-            cmd = [
-                "nixos-install",
-                "--no-root-passwd",
-                "--option",
-                "sandbox",
-                "false",
-                "--option",
-                "build-users-group",
-                "",
-                "--flake",
-                flake_ref,
-                "--root",
-                target_root,
-            ]
+        closure_total = None if dry_run else self._closure_total_via_eval(target_root, tmpdir)
+        flake_ref = f"{target_root}/etc/nixos#{self._flake_attr()}"
+        cmd = [
+            "nixos-install",
+            "--no-root-passwd",
+            "--option",
+            "sandbox",
+            "false",
+            "--option",
+            "build-users-group",
+            "",
+            "--flake",
+            flake_ref,
+            "--root",
+            target_root,
+        ]
         return self._run_install_streamed(
             _throttled([*cmd, *_substitution_flags()]),
             "Running nixos-install",
             dry_run,
             context,
             tmpdir,
-            pct_start=96,
+            pct_start=60,
             pct_end=100,
             closure_total=closure_total,
             allow_indeterminate=True,
         )
 
-    def _closure_path_count(self, store_path: str) -> int | None:
-        """Nombre de chemins de la closure — dénominateur « Y/total copiés ».
+    def _closure_total_via_eval(self, target_root: str, tmpdir: str | None) -> int | None:
+        """Taille de la closure d'install par ÉVALUATION SEULE (dénominateur barre).
 
-        ``nix path-info -r`` imprime un chemin par ligne pour toute la closure.
-        Best effort : toute erreur retourne ``None`` (barre vivante sans total).
+        ``nix eval --raw …toplevel.drvPath`` évalue le flake et imprime le
+        ``.drv`` du système SANS le réaliser, puis ``nix-store --query
+        --requisites <drv>`` liste toutes les dérivations du graphe de build (là
+        aussi sans build). Le nombre de ``.drv`` sert de total à la barre.
+
+        IMPORTANT : rester en éval-only. Un ``nix build`` (ou ``nix path-info -r``
+        sur une sortie non construite) réaliserait la closure et déclencherait
+        l'assertion interne de nix 2.34.7 — ce que cette méthode évite.
+
+        Best-effort : toute erreur / sortie inattendue retourne ``None`` (la barre
+        retombe en mode indéterminé, l'install n'est jamais interrompue).
         """
-        try:
-            result = subprocess.run(
-                [
-                    "nix",
-                    "path-info",
-                    "-r",
-                    "--extra-experimental-features",
-                    "nix-command flakes",
-                    store_path,
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            logger.warning("Could not size closure %s: %s", store_path, exc)
-            return None
-        if result.returncode != 0:
-            logger.warning("nix path-info failed (exit %s) for %s", result.returncode, store_path)
-            return None
-        count = sum(1 for ln in result.stdout.splitlines() if ln.strip())
-        if count:
-            logger.info("Install closure: %d store paths", count)
-        return count or None
-
-    def _copy_system_to_target(
-        self,
-        target_root: str,
-        dry_run: bool,
-        context: JobContext | None = None,
-        tmpdir: str | None = None,
-        store_path: str | None = None,
-    ) -> None:
-        """Best-effort ``nix copy`` of the system closure onto the target disk.
-
-        This is the phase that actually takes minutes (copying the whole system
-        closure to ``/mnt/target``), and — unlike the ``nixos-install`` wrapper —
-        ``nix copy`` emits the internal-json ``@nix`` activity stream, so the
-        progress bar advances smoothly as each path is copied.
-
-        Quand ``store_path`` est fourni (flux nominal ``--system``) la copie se
-        fait par STORE-PATH exact — aucune évaluation du flake, donc aucun
-        rebuild possible. À défaut (fallback), on copie l'attribut ``toplevel``
-        du flake comme historiquement. Les échecs sont avalés : ``nixos-install``
-        recopiera de toute façon.
-        """
-        if dry_run:
-            return
-        if store_path:
-            source = store_path
-        else:
-            attr = self._flake_attr()
-            source = (
-                f"{target_root}/etc/nixos#nixosConfigurations.{attr}.config.system.build.toplevel"
-            )
-        cmd = _throttled(
-            [
-                "nix",
-                "copy",
-                "--no-check-sigs",
-                "--log-format",
-                "internal-json",
-                "--extra-experimental-features",
-                "nix-command flakes",
-                *_parallelism_flags(),
-                *_substitution_flags(),
-                "--to",
-                target_root,
-                source,
-            ]
-        )
-        try:
-            result = self._run_install_streamed(
-                cmd,
-                "Copying system to target disk",
-                dry_run,
-                context,
-                tmpdir,
-                pct_start=90,
-                pct_end=96,
-            )
-            if result.success:
-                logger.info("System closure copied into target chroot store %s", target_root)
-            else:
-                logger.warning(
-                    "Target pre-copy FAILED (non-fatal): nixos-install will re-copy the "
-                    "whole closure into %s — offload ineffective",
-                    target_root,
-                )
-        except Exception as exc:  # pragma: no cover - defensive, never break install
-            logger.warning("Target copy error (non-fatal): %s", exc)
-
-    def _prebuild_system(
-        self,
-        target_root: str,
-        dry_run: bool,
-        context: JobContext | None = None,
-        tmpdir: str | None = None,
-    ) -> str | None:
-        """``nix build`` unique du toplevel, puis capture de son store-path.
-
-        Le build émet le flux internal-json ``@nix`` (progression réelle) sur
-        STDERR pour piloter la barre (60 → 90). Le store-path n'est PLUS lu sur
-        STDOUT (l'ancien ``--print-out-paths`` mêlé au flux était fragile) : une
-        fois le build réussi (exit 0), :meth:`_capture_store_path` le récupère
-        de façon déterministe via ``nix path-info``.
-
-        Retourne le store-path (str), ou ``None`` si le build échoue ou si la
-        capture échoue — auquel cas l'appelant retombe sur le flux ``--flake``
-        historique. Toute exception est loggée et convertie en ``None`` : le
-        prebuild ne doit jamais casser l'install.
-        """
-        if dry_run:
-            return None
         attr = self._flake_attr()
         toplevel = (
-            f"{target_root}/etc/nixos#nixosConfigurations.{attr}.config.system.build.toplevel"
+            f"{target_root}/etc/nixos#nixosConfigurations.{attr}"
+            ".config.system.build.toplevel.drvPath"
         )
-        cmd = _throttled(
+        env = dict(os.environ)
+        if tmpdir:
+            env["TMPDIR"] = tmpdir
+
+        eval_cmd = _throttled(
             [
                 "nix",
-                "build",
-                "--no-link",
-                # ``log-format`` is a CLI-only option — it is NOT honoured via
-                # NIX_CONFIG/nix.conf. Passing it here is what makes ``nix build``
-                # emit the ``@nix`` internal-json activity stream that _NixProgress
-                # parses to advance the bar. Without it, no @nix lines are produced
-                # and the bar stays frozen.
-                "--log-format",
-                "internal-json",
+                "eval",
+                "--raw",
                 "--extra-experimental-features",
                 "nix-command flakes",
-                *_parallelism_flags(),
-                *_substitution_flags(),
-                "--option",
-                "sandbox",
-                "false",
-                "--option",
-                "build-users-group",
-                "",
                 toplevel,
             ]
         )
         try:
-            built = self._run_prebuild_streamed(
-                cmd,
-                "Building system closure",
-                context,
-                tmpdir,
-                pct_start=60,
-                pct_end=90,
-            )
-        except Exception as exc:  # pragma: no cover - defensive, never break install
-            logger.warning("System prebuild error (non-fatal): %s", exc)
-            return None
-        if not built:
-            return None
-        store_path = self._capture_store_path(toplevel, tmpdir)
-        if store_path is None:
-            logger.warning(
-                "Prebuild succeeded but store-path capture failed; falling back to --flake install"
-            )
-        return store_path
-
-    def _run_prebuild_streamed(
-        self,
-        cmd: list[str],
-        description: str,
-        context: JobContext | None,
-        tmpdir: str | None,
-        pct_start: int,
-        pct_end: int,
-    ) -> bool:
-        """Exécute le ``nix build`` du toplevel en streamant STDERR (progression).
-
-        STDERR porte le flux internal-json ``@nix`` qui pilote la barre
-        (``pct_start`` → ``pct_end``). On NE dépend PLUS de STDOUT pour le
-        store-path (l'ancien ``--print-out-paths`` était fragile) : la capture
-        du chemin est faite séparément par :meth:`_capture_store_path` APRÈS un
-        exit 0. Retourne ``True`` si le build réussit (exit 0), ``False`` sinon.
-        """
-        env = dict(os.environ)
-        if tmpdir:
-            env["TMPDIR"] = tmpdir
-
-        logger.info("Executing: %s", description)
-        logger.debug("Command: %s", " ".join(cmd))
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                env=env,
-                preexec_fn=_raise_stack_limit,
-            )
-        except FileNotFoundError:
-            logger.error("Command not found: %s", cmd[0])
-            return False
-
-        span = max(0, pct_end - pct_start)
-        progress = _NixProgress()
-        error_tail: deque[str] = deque(maxlen=20)
-        if proc.stderr is not None:
-            for raw in proc.stderr:
-                line = raw.rstrip("\n")
-                fraction = progress.feed(line)
-                if fraction is not None and context is not None:
-                    pct = pct_start + round(span * fraction)
-                    context.report_progress(min(pct_end, pct), progress.message())
-                elif not line.startswith("@nix "):
-                    logger.debug("nix build: %s", line)
-                    error_tail.append(line)
-
-        if proc.stdout is not None:
-            proc.stdout.read()
-        code = proc.wait()
-        if code != 0:
-            logger.warning("System prebuild nix build failed (exit %s)", code)
-            for line in error_tail:
-                logger.error("prebuild error: %s", line)
-            return False
-        logger.info("System prebuild nix build succeeded (exit 0)")
-        return True
-
-    def _capture_store_path(self, installable: str, tmpdir: str | None) -> str | None:
-        """Capture DÉTERMINISTE du store-path du toplevel déjà construit.
-
-        Séparé du streaming du build : après un ``nix build`` réussi, une
-        commande courte ``nix path-info <installable>`` imprime le chemin
-        ``/nix/store/…`` de sortie de façon fiable (contrairement à l'ancien
-        ``--print-out-paths`` mêlé au flux internal-json). Best-effort : toute
-        erreur ⇒ ``None`` (l'appelant retombe sur ``--flake``).
-        """
-        env = dict(os.environ)
-        if tmpdir:
-            env["TMPDIR"] = tmpdir
-        cmd = [
-            "nix",
-            "path-info",
-            "--extra-experimental-features",
-            "nix-command flakes",
-            installable,
-        ]
-        logger.info("Capturing store-path via: %s", " ".join(cmd))
-        try:
-            result = subprocess.run(
-                cmd,
+            evaluated = subprocess.run(
+                eval_cmd,
                 capture_output=True,
                 text=True,
                 check=False,
                 env=env,
+                preexec_fn=_raise_stack_limit,
             )
         except (OSError, subprocess.SubprocessError) as exc:
-            logger.warning("store-path capture crashed (nix path-info): %s", exc)
+            logger.warning("Closure eval failed (nix eval): %s", exc)
             return None
-        if result.returncode != 0:
-            logger.warning("store-path capture failed (nix path-info exit %s)", result.returncode)
+        if evaluated.returncode != 0:
+            logger.warning("Closure eval failed (nix eval exit %s)", evaluated.returncode)
             return None
-        paths = [
-            ln.strip() for ln in result.stdout.splitlines() if ln.strip().startswith("/nix/store/")
-        ]
-        if not paths:
-            logger.warning("store-path capture returned no /nix/store path (nix path-info)")
+        drv_path = evaluated.stdout.strip()
+        if not drv_path.endswith(".drv"):
+            logger.warning("Closure eval returned no .drv path (éval-only)")
             return None
-        store_path = paths[-1]
-        logger.info("Captured prebuilt store-path: %s", store_path)
-        return store_path
+
+        query_cmd = _throttled(["nix-store", "--query", "--requisites", drv_path])
+        try:
+            requisites = subprocess.run(
+                query_cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+                preexec_fn=_raise_stack_limit,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.warning("Closure sizing failed (nix-store --query): %s", exc)
+            return None
+        if requisites.returncode != 0:
+            logger.warning("Closure sizing failed (nix-store exit %s)", requisites.returncode)
+            return None
+        count = sum(1 for ln in requisites.stdout.splitlines() if ln.strip().endswith(".drv"))
+        if count:
+            logger.info("Install closure: %d derivations (éval-only)", count)
+        return count or None
 
     def _run_install_streamed(
         self,
@@ -1380,14 +1135,12 @@ class NixosJob(BaseJob):
         """Run a nix/nixos-install command, driving the progress bar over the
         ``pct_start``..``pct_end`` range from whichever output stream is present.
 
-        Two sources feed the bar (see :class:`_NixProgress`):
-
-        - ``@nix`` internal-json events, emitted by ``nix build``/``nix copy``.
-        - the plain-text ``building '…'`` / ``copying path '…' to …`` lines
-          printed by the ``nixos-install`` wrapper (which ignores
-          ``--log-format``). Without this second source the bar froze on the
-          last prebuild value while nixos-install worked on. ``closure_total``,
-          when known, turns the copy counter into a real ``Y/total`` ratio.
+        La barre est alimentée par les lignes texte ``building '…'`` / ``copying
+        path '…' to …`` imprimées par le wrapper ``nixos-install`` (qui ignore
+        ``--log-format`` : il ne produit pas le flux ``@nix``). Voir
+        :meth:`_NixProgress.feed_plain`. ``closure_total``, quand il est connu
+        (obtenu par évaluation seule en amont), transforme le compteur de copies
+        en un ratio réel ``Y/total`` — la barre devient granulaire.
 
         BARRE HONNÊTE : quand ``allow_indeterminate`` est vrai ET qu'aucun total
         fiable n'est connu (``closure_total is None``), la phase passe en mode
@@ -1403,11 +1156,6 @@ class NixosJob(BaseJob):
 
         indeterminate = allow_indeterminate and closure_total is None
 
-        # NOTE: internal-json progress is enabled via the ``--log-format
-        # internal-json`` CLI flag on the ``nix build`` prebuild (see
-        # _prebuild_system) — NOT via NIX_CONFIG, which does not honour
-        # ``log-format``. The nixos-install wrapper doesn't accept the flag, so
-        # its call simply won't stream @nix events (the prebuild already did).
         env = dict(os.environ)
         if tmpdir:
             env["TMPDIR"] = tmpdir

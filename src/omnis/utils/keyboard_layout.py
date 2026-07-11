@@ -35,13 +35,17 @@ def _session_user() -> tuple[str, dict[str, str]] | None:
     """
     if os.geteuid() != 0:
         return None
-    runtime = os.environ.get("XDG_RUNTIME_DIR", "")
     uid: int | None = None
-    if runtime.startswith("/run/user/"):
-        try:
-            uid = int(runtime.rsplit("/", 1)[1])
-        except ValueError:
-            uid = None
+    sudo_uid = os.environ.get("SUDO_UID", "")
+    if sudo_uid.isdigit() and int(sudo_uid) != 0:
+        uid = int(sudo_uid)
+    if uid is None:
+        runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+        if runtime.startswith("/run/user/"):
+            try:
+                uid = int(runtime.rsplit("/", 1)[1])
+            except ValueError:
+                uid = None
     if uid is None:
         uid = 1000
     try:

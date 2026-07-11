@@ -24,7 +24,6 @@ try:
         ERR_NOT_CONFIRMED,
         NixosJob,
         _NixProgress,
-        _parallelism_flags,
         _throttle_cores,
         _throttled,
     )
@@ -845,122 +844,116 @@ class TestHardenTarget:
         assert all(c.args[1:] == (0, 0) for c in cho.call_args_list)  # root:root
         assert chm.called
 
-    def test_prebuild_uses_cli_internal_json_and_tmpdir(self) -> None:
+    def test_install_uses_flake_and_propagates_closure_total(self) -> None:
+        """L'install passe par ``--flake`` avec le total de closure (éval-only)."""
         job = NixosJob()
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         def fake_popen(cmd: list[str], **kwargs: Any) -> MagicMock:
             calls.append((cmd, kwargs.get("env", {})))
             proc = MagicMock()
-            if _base_cmd(cmd)[:2] == ["nix", "build"]:
-                # Le prebuild stream la progression @nix sur STDERR ; STDOUT est
-                # simplement drainé (le store-path n'y est PLUS imprimé).
-                proc.stderr = iter([])
-                proc.stdout = MagicMock()
-                proc.stdout.read.return_value = ""
-            else:
-                proc.stdout = iter([])
+            proc.stdout = iter([])
             proc.wait.return_value = 0
             return proc
 
+        eval_out = MagicMock(returncode=0, stdout="/nix/store/abc-glf-system.drv\n")
+        req_out = MagicMock(
+            returncode=0,
+            stdout="/nix/store/a-x.drv\n/nix/store/b-y.drv\n/nix/store/c-src\n",
+        )
         with (
             patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
-            patch(
-                "omnis.jobs.nixos.subprocess.run",
-                return_value=MagicMock(returncode=0, stdout="/nix/store/abc-glf-system\n"),
-            ),
+            patch("omnis.jobs.nixos.subprocess.run", side_effect=[eval_out, req_out]) as run,
         ):
             result = job._nixos_install("/mnt/target", dry_run=False, tmpdir="/secure/tmp")
+
         assert result.success is True
-        # TMPDIR reaches every install command's environment.
-        assert all(env.get("TMPDIR") == "/secure/tmp" for _cmd, env in calls)
-        # Progress is driven by the prebuild `nix build` with the CLI
-        # ``--log-format internal-json`` flag (NIX_CONFIG does NOT honour it).
-        # The store-path is NO LONGER captured via ``--print-out-paths`` (dropped:
-        # it was fragile); a separate ``nix path-info`` call does it.
-        prebuild = _base_cmd(
-            next(cmd for cmd, _env in calls if _base_cmd(cmd)[:2] == ["nix", "build"])
-        )
-        assert "--log-format" in prebuild
-        assert "internal-json" in prebuild
-        assert "--print-out-paths" not in prebuild
-        # Parallelism capped at ~80 % of the cores.
-        assert "--cores" in prebuild
-        assert "--max-jobs" in prebuild
+        # Le total est obtenu par ÉVALUATION seule : nix eval puis nix-store --query.
+        assert _base_cmd(run.call_args_list[0].args[0])[:3] == ["nix", "eval", "--raw"]
+        assert _base_cmd(run.call_args_list[1].args[0])[:2] == ["nix-store", "--query"]
+        # nixos-install s'exécute via --flake (aucun --system, aucun nix build).
+        install = _base_cmd(calls[-1][0])
+        assert install[0] == "nixos-install"
+        assert "--flake" in install
+        assert "/mnt/target/etc/nixos#GLF-OS" in install
+        assert "--system" not in install
+        assert all(_base_cmd(cmd)[:2] != ["nix", "build"] for cmd, _env in calls)
+        # TMPDIR atteint bien l'environnement de nixos-install.
+        assert calls[-1][1].get("TMPDIR") == "/secure/tmp"
 
-    def test_copies_closure_to_target_with_progress(self) -> None:
-        """The closure is copied to the target via `nix copy --to <target>` with
-        internal-json so the bar advances smoothly during the slow disk copy.
-
-        Le prebuild imprime un store-path, donc la copie ET nixos-install
-        s'appuient sur CE chemin (``--system``) — aucun rebuild final.
-        """
+    def test_install_dry_run_skips_eval_and_runs_nothing(self) -> None:
+        """En dry-run : pas d'évaluation de closure, aucune commande exécutée."""
         job = NixosJob()
-        calls: list[list[str]] = []
-
-        def fake_popen(cmd: list[str], **_kwargs: Any) -> MagicMock:
-            calls.append(cmd)
-            proc = MagicMock()
-            if _base_cmd(cmd)[:2] == ["nix", "build"]:
-                proc.stderr = iter([])
-                proc.stdout = MagicMock()
-                proc.stdout.read.return_value = ""
-            else:
-                proc.stdout = iter([])
-            proc.wait.return_value = 0
-            return proc
-
         with (
-            patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
-            patch(
-                "omnis.jobs.nixos.subprocess.run",
-                return_value=MagicMock(returncode=0, stdout="/nix/store/abc-glf-system\n"),
-            ),
+            patch("omnis.jobs.nixos.subprocess.Popen") as popen,
+            patch("omnis.jobs.nixos.subprocess.run") as run,
         ):
-            job._nixos_install("/mnt/target", dry_run=False, tmpdir="/secure/tmp")
-
-        copy = _base_cmd(next(cmd for cmd in calls if _base_cmd(cmd)[:2] == ["nix", "copy"]))
-        assert "--to" in copy
-        assert "/mnt/target" in copy
-        assert "internal-json" in copy
-        assert "--cores" in copy
-        # La copie se fait par store-path exact (flux --system, zéro rebuild).
-        assert "/nix/store/abc-glf-system" in copy
-        # The copy runs BEFORE nixos-install (so the target store is pre-populated).
-        copy_idx = next(i for i, cmd in enumerate(calls) if _base_cmd(cmd)[:2] == ["nix", "copy"])
-        install_idx = next(i for i, cmd in enumerate(calls) if _base_cmd(cmd)[0] == "nixos-install")
-        assert copy_idx < install_idx
-        # nixos-install n'exécute AUCUN build : il installe le --system préconstruit.
-        install = _base_cmd(next(cmd for cmd in calls if _base_cmd(cmd)[0] == "nixos-install"))
-        assert "--system" in install
-        assert "/nix/store/abc-glf-system" in install
-        assert "--flake" not in install
+            result = job._nixos_install("/mnt/target", dry_run=True)
+        assert result.success is True
+        popen.assert_not_called()
+        run.assert_not_called()
 
 
-class TestClosurePathCount:
-    """`nix path-info -r` feeds the ``Y/total copiés`` denominator (best effort)."""
+class TestClosureTotalViaEval:
+    """AXE : total de closure en ÉVALUATION SEULE (contourne l'assertion nix)."""
 
-    def test_counts_non_empty_lines(self) -> None:
+    def test_counts_derivations_from_requisites(self) -> None:
         job = NixosJob()
-        stdout = "/nix/store/a-x\n/nix/store/b-y\n\n/nix/store/c-z\n"
-        with patch(
-            "omnis.jobs.nixos.subprocess.run",
-            return_value=MagicMock(returncode=0, stdout=stdout),
-        ):
-            assert job._closure_path_count("/nix/store/abc-glf-system") == 3
+        eval_out = MagicMock(returncode=0, stdout="/nix/store/abc-glf-system.drv\n")
+        req_out = MagicMock(
+            returncode=0,
+            stdout="/nix/store/a-x.drv\n/nix/store/b-y.drv\n\n/nix/store/c-src\n",
+        )
+        with patch("omnis.jobs.nixos.subprocess.run", side_effect=[eval_out, req_out]) as run:
+            total = job._closure_total_via_eval("/mnt/target", tmpdir="/secure/tmp")
+        assert total == 2  # deux .drv, la source non-.drv est ignorée
+        eval_cmd = _base_cmd(run.call_args_list[0].args[0])
+        assert eval_cmd[:3] == ["nix", "eval", "--raw"]
+        assert eval_cmd[-1].endswith(".config.system.build.toplevel.drvPath")
+        assert run.call_args_list[0].kwargs["env"].get("TMPDIR") == "/secure/tmp"
+        query_cmd = _base_cmd(run.call_args_list[1].args[0])
+        assert query_cmd == [
+            "nix-store",
+            "--query",
+            "--requisites",
+            "/nix/store/abc-glf-system.drv",
+        ]
 
-    def test_returns_none_on_failure(self) -> None:
+    def test_returns_none_when_eval_fails(self) -> None:
         job = NixosJob()
         with patch(
             "omnis.jobs.nixos.subprocess.run",
             return_value=MagicMock(returncode=1, stdout=""),
-        ):
-            assert job._closure_path_count("/nix/store/abc-glf-system") is None
+        ) as run:
+            assert job._closure_total_via_eval("/mnt/target", None) is None
+        run.assert_called_once()  # nix-store jamais appelé si l'éval échoue
 
-    def test_returns_none_when_tool_missing(self) -> None:
+    def test_returns_none_when_eval_output_not_a_drv(self) -> None:
+        job = NixosJob()
+        with patch(
+            "omnis.jobs.nixos.subprocess.run",
+            return_value=MagicMock(returncode=0, stdout="warning: something\n"),
+        ):
+            assert job._closure_total_via_eval("/mnt/target", None) is None
+
+    def test_returns_none_when_query_fails(self) -> None:
+        job = NixosJob()
+        eval_out = MagicMock(returncode=0, stdout="/nix/store/abc-glf-system.drv\n")
+        req_out = MagicMock(returncode=1, stdout="")
+        with patch("omnis.jobs.nixos.subprocess.run", side_effect=[eval_out, req_out]):
+            assert job._closure_total_via_eval("/mnt/target", None) is None
+
+    def test_returns_none_on_oserror(self) -> None:
         job = NixosJob()
         with patch("omnis.jobs.nixos.subprocess.run", side_effect=OSError("no nix")):
-            assert job._closure_path_count("/nix/store/abc-glf-system") is None
+            assert job._closure_total_via_eval("/mnt/target", None) is None
+
+    def test_returns_none_when_no_derivation_counted(self) -> None:
+        job = NixosJob()
+        eval_out = MagicMock(returncode=0, stdout="/nix/store/abc-glf-system.drv\n")
+        req_out = MagicMock(returncode=0, stdout="/nix/store/only-src\n")
+        with patch("omnis.jobs.nixos.subprocess.run", side_effect=[eval_out, req_out]):
+            assert job._closure_total_via_eval("/mnt/target", None) is None
 
 
 class TestNetworkConfigCopy:
@@ -1046,12 +1039,6 @@ class TestThrottleCores:
         with patch("omnis.jobs.nixos.os.cpu_count", return_value=None):
             assert _throttle_cores() == 1
 
-    def test_parallelism_flags_reflect_cores(self) -> None:
-        with patch("omnis.jobs.nixos.os.cpu_count", return_value=8):
-            flags = _parallelism_flags()
-        # int(8 * 0.8) == 6 cores, one derivation at a time (predictable 80 % cap).
-        assert flags == ["--cores", "6", "--max-jobs", "1"]
-
     def test_substitution_flags_cap_parallel_substitutions(self) -> None:
         from omnis.jobs.nixos import _substitution_flags
 
@@ -1060,85 +1047,6 @@ class TestThrottleCores:
             assert _substitution_flags() == ["--option", "max-substitution-jobs", "2"]
         with patch("omnis.jobs.nixos.os.cpu_count", return_value=1):
             assert _substitution_flags() == ["--option", "max-substitution-jobs", "1"]
-
-
-class TestStorePathCapture:
-    """AXE 3 : capture déterministe du store-path via ``nix path-info``."""
-
-    def test_captures_last_store_path(self) -> None:
-        job = NixosJob()
-        with patch(
-            "omnis.jobs.nixos.subprocess.run",
-            return_value=MagicMock(returncode=0, stdout="/nix/store/xxx-glf-system\n"),
-        ) as run:
-            store_path = job._capture_store_path("attr#toplevel", tmpdir="/secure/tmp")
-        assert store_path == "/nix/store/xxx-glf-system"
-        cmd = run.call_args.args[0]
-        assert cmd[:2] == ["nix", "path-info"]
-        assert run.call_args.kwargs["env"].get("TMPDIR") == "/secure/tmp"
-
-    def test_returns_none_on_nonzero_exit(self) -> None:
-        job = NixosJob()
-        with patch(
-            "omnis.jobs.nixos.subprocess.run",
-            return_value=MagicMock(returncode=1, stdout=""),
-        ):
-            assert job._capture_store_path("attr", None) is None
-
-    def test_returns_none_without_store_path_line(self) -> None:
-        job = NixosJob()
-        with patch(
-            "omnis.jobs.nixos.subprocess.run",
-            return_value=MagicMock(returncode=0, stdout="warning: something\n"),
-        ):
-            assert job._capture_store_path("attr", None) is None
-
-    def test_returns_none_on_oserror(self) -> None:
-        job = NixosJob()
-        with patch("omnis.jobs.nixos.subprocess.run", side_effect=OSError("no nix")):
-            assert job._capture_store_path("attr", None) is None
-
-    def test_prebuild_falls_back_when_capture_fails(self) -> None:
-        """Build OK mais capture KO ⇒ store_path None (fallback ``--flake``)."""
-        job = NixosJob()
-
-        def fake_popen(_cmd: list[str], **_k: Any) -> MagicMock:
-            proc = MagicMock()
-            proc.stderr = iter([])
-            proc.stdout = MagicMock()
-            proc.stdout.read.return_value = ""
-            proc.wait.return_value = 0
-            return proc
-
-        with (
-            patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
-            patch(
-                "omnis.jobs.nixos.subprocess.run",
-                return_value=MagicMock(returncode=1, stdout=""),
-            ),
-        ):
-            store_path = job._prebuild_system("/mnt/target", dry_run=False, tmpdir="/secure/tmp")
-        assert store_path is None
-
-    def test_prebuild_returns_none_when_build_fails(self) -> None:
-        """Build KO ⇒ pas de capture, store_path None."""
-        job = NixosJob()
-
-        def fake_popen(_cmd: list[str], **_k: Any) -> MagicMock:
-            proc = MagicMock()
-            proc.stderr = iter([])
-            proc.stdout = MagicMock()
-            proc.stdout.read.return_value = ""
-            proc.wait.return_value = 1
-            return proc
-
-        with (
-            patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
-            patch("omnis.jobs.nixos.subprocess.run") as run,
-        ):
-            store_path = job._prebuild_system("/mnt/target", dry_run=False)
-        assert store_path is None
-        run.assert_not_called()  # capture never attempted on a failed build
 
 
 class TestIndeterminateInstall:
