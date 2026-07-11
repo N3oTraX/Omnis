@@ -251,7 +251,9 @@ class _NixProgress:
 
     _STORE_PATH_RE = re.compile(r"/nix/store/[a-z0-9]+-(.+?)(?:\.drv|'|$)")
     _BUILDING_RE = re.compile(r"building '([^']+\.drv)'")
-    _COPYING_RE = re.compile(r"copying path '([^']+)' to ")
+    _COPYING_RE = re.compile(r"copying path '([^']+)' (?:to|from) ")
+    _WILL_BUILD_RE = re.compile(r"these (\d+) derivations? will be built")
+    _WILL_FETCH_RE = re.compile(r"these (\d+) paths? will be fetched")
 
     def __init__(self, plain_total: int = 0) -> None:
         self._kind: dict[int, str] = {}
@@ -260,6 +262,8 @@ class _NixProgress:
         self._fraction = 0.0
         self._current_pkg = ""
         self._plain_total = plain_total
+        self._plain_build_expected = 0
+        self._plain_fetch_expected = 0
         self._plain_built = 0
         self._plain_copied = 0
 
@@ -307,6 +311,16 @@ class _NixProgress:
         SÉCURITÉ : seuls des chemins ``/nix/store/…`` sont extraits, jamais une
         sélection utilisateur ni un secret.
         """
+        will_build = self._WILL_BUILD_RE.search(line)
+        if will_build:
+            self._plain_build_expected = int(will_build.group(1))
+            self._plain_total = self._plain_build_expected + self._plain_fetch_expected
+            return None
+        will_fetch = self._WILL_FETCH_RE.search(line)
+        if will_fetch:
+            self._plain_fetch_expected = int(will_fetch.group(1))
+            self._plain_total = self._plain_build_expected + self._plain_fetch_expected
+            return None
         building = self._BUILDING_RE.search(line)
         if building:
             self._plain_built += 1
@@ -325,10 +339,10 @@ class _NixProgress:
             self._current_pkg = match.group(1)
 
     def _plain_fraction(self) -> float:
+        moved = self._plain_built + self._plain_copied
         if self._plain_total > 0:
-            ratio = min(1.0, self._plain_copied / self._plain_total)
+            ratio = min(1.0, moved / self._plain_total)
         else:
-            moved = self._plain_built + self._plain_copied
             ratio = 1.0 - 1.0 / (1.0 + moved / 40.0)
         self._fraction = max(self._fraction, ratio)
         return self._fraction
@@ -1007,17 +1021,15 @@ class NixosJob(BaseJob):
         au ``nix build`` préalable, ce chemin de réalisation ne déclenche pas
         l'assertion interne de ``libnixstore`` observée sur nix 2.34.7.
 
-        Barre GRANULAIRE : le TOTAL de la closure est obtenu EN AMONT par
-        :meth:`_closure_total_via_eval` (évaluation seule, sans réalisation, donc
-        sans crash). Ce total sert de dénominateur à ``_run_install_streamed`` :
-        les lignes texte ``copying path '…'`` de ``nixos-install`` font monter la
-        fraction ``Y/total`` de 0 → ~100 %. Si le total est indisponible
-        (``None``), la phase reste indéterminée (repli, jamais de crash).
+        Barre GRANULAIRE : ``nixos-install`` annonce lui-même le vrai total (« these
+        N derivations will be built » / « these M paths will be fetched ») ;
+        :class:`_NixProgress` le parse et fait monter la fraction ``moved/total``
+        de 0 → 100 % au fil des lignes ``building '…'`` / ``copying path '…'``.
+        Avant l'annonce (ou si absente), la phase reste indéterminée (repli).
 
         Le flake reste copié dans ``<target>/etc/nixos`` (fait en amont dans
         :meth:`run`) pour les futurs ``nixos-rebuild`` / glf-update.
         """
-        closure_total = None if dry_run else self._closure_total_via_eval(target_root, tmpdir)
         flake_ref = f"{target_root}/etc/nixos#{self._flake_attr()}"
         cmd = [
             "nixos-install",
@@ -1041,84 +1053,9 @@ class NixosJob(BaseJob):
             tmpdir,
             pct_start=60,
             pct_end=100,
-            closure_total=closure_total,
+            closure_total=None,
             allow_indeterminate=True,
         )
-
-    def _closure_total_via_eval(self, target_root: str, tmpdir: str | None) -> int | None:
-        """Taille de la closure d'install par ÉVALUATION SEULE (dénominateur barre).
-
-        ``nix eval --raw …toplevel.drvPath`` évalue le flake et imprime le
-        ``.drv`` du système SANS le réaliser, puis ``nix-store --query
-        --requisites <drv>`` liste toutes les dérivations du graphe de build (là
-        aussi sans build). Le nombre de ``.drv`` sert de total à la barre.
-
-        IMPORTANT : rester en éval-only. Un ``nix build`` (ou ``nix path-info -r``
-        sur une sortie non construite) réaliserait la closure et déclencherait
-        l'assertion interne de nix 2.34.7 — ce que cette méthode évite.
-
-        Best-effort : toute erreur / sortie inattendue retourne ``None`` (la barre
-        retombe en mode indéterminé, l'install n'est jamais interrompue).
-        """
-        attr = self._flake_attr()
-        toplevel = (
-            f"{target_root}/etc/nixos#nixosConfigurations.{attr}"
-            ".config.system.build.toplevel.drvPath"
-        )
-        env = dict(os.environ)
-        if tmpdir:
-            env["TMPDIR"] = tmpdir
-
-        eval_cmd = _throttled(
-            [
-                "nix",
-                "eval",
-                "--raw",
-                "--extra-experimental-features",
-                "nix-command flakes",
-                toplevel,
-            ]
-        )
-        try:
-            evaluated = subprocess.run(
-                eval_cmd,
-                capture_output=True,
-                text=True,
-                check=False,
-                env=env,
-                preexec_fn=_raise_stack_limit,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            logger.warning("Closure eval failed (nix eval): %s", exc)
-            return None
-        if evaluated.returncode != 0:
-            logger.warning("Closure eval failed (nix eval exit %s)", evaluated.returncode)
-            return None
-        drv_path = evaluated.stdout.strip()
-        if not drv_path.endswith(".drv"):
-            logger.warning("Closure eval returned no .drv path (éval-only)")
-            return None
-
-        query_cmd = _throttled(["nix-store", "--query", "--requisites", drv_path])
-        try:
-            requisites = subprocess.run(
-                query_cmd,
-                capture_output=True,
-                text=True,
-                check=False,
-                env=env,
-                preexec_fn=_raise_stack_limit,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            logger.warning("Closure sizing failed (nix-store --query): %s", exc)
-            return None
-        if requisites.returncode != 0:
-            logger.warning("Closure sizing failed (nix-store exit %s)", requisites.returncode)
-            return None
-        count = sum(1 for ln in requisites.stdout.splitlines() if ln.strip().endswith(".drv"))
-        if count:
-            logger.info("Install closure: %d derivations (éval-only)", count)
-        return count or None
 
     def _run_install_streamed(
         self,

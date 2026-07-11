@@ -808,6 +808,20 @@ class TestNixProgressPlain:
         assert p.feed('@nix {"action":"result","fields":[3,10,0,0],"id":1,"type":105}') == 0.3
         assert "3/10 built" in p.message()
 
+    def test_parses_nix_announced_totals_and_counts_from(self) -> None:
+        p = _NixProgress()
+        # nixos-install prints its own totals up front.
+        assert p.feed_plain("these 458 derivations will be built:") is None
+        assert p.feed_plain("these 1793 paths will be fetched (3.3 GiB download):") is None
+        # Substitutions use the 'from <cache>' form, which must count too.
+        for _ in range(10):
+            p.feed_plain(
+                "copying path '/nix/store/aaaa-glib-2.88.1' from 'https://cache.nixos.org'..."
+            )
+        assert "10/2251 copiés" in p.message()
+        frac = p.feed_plain(self._BUILD)
+        assert frac == pytest.approx(11 / 2251)
+
     def test_plain_copy_destination_never_reaches_message(self) -> None:
         p = _NixProgress()
         secret = "hunter2-SECRET-passphrase"
@@ -844,8 +858,8 @@ class TestHardenTarget:
         assert all(c.args[1:] == (0, 0) for c in cho.call_args_list)  # root:root
         assert chm.called
 
-    def test_install_uses_flake_and_propagates_closure_total(self) -> None:
-        """L'install passe par ``--flake`` avec le total de closure (éval-only)."""
+    def test_install_uses_flake_no_prebuild(self) -> None:
+        """L'install passe par ``--flake`` (aucun nix build/eval préalable)."""
         job = NixosJob()
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
@@ -856,29 +870,20 @@ class TestHardenTarget:
             proc.wait.return_value = 0
             return proc
 
-        eval_out = MagicMock(returncode=0, stdout="/nix/store/abc-glf-system.drv\n")
-        req_out = MagicMock(
-            returncode=0,
-            stdout="/nix/store/a-x.drv\n/nix/store/b-y.drv\n/nix/store/c-src\n",
-        )
         with (
             patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
-            patch("omnis.jobs.nixos.subprocess.run", side_effect=[eval_out, req_out]) as run,
+            patch("omnis.jobs.nixos.subprocess.run") as run,
         ):
             result = job._nixos_install("/mnt/target", dry_run=False, tmpdir="/secure/tmp")
 
         assert result.success is True
-        # Le total est obtenu par ÉVALUATION seule : nix eval puis nix-store --query.
-        assert _base_cmd(run.call_args_list[0].args[0])[:3] == ["nix", "eval", "--raw"]
-        assert _base_cmd(run.call_args_list[1].args[0])[:2] == ["nix-store", "--query"]
-        # nixos-install s'exécute via --flake (aucun --system, aucun nix build).
+        run.assert_not_called()  # plus d'éval-only : le total vient des annonces nix
         install = _base_cmd(calls[-1][0])
         assert install[0] == "nixos-install"
         assert "--flake" in install
         assert "/mnt/target/etc/nixos#GLF-OS" in install
         assert "--system" not in install
         assert all(_base_cmd(cmd)[:2] != ["nix", "build"] for cmd, _env in calls)
-        # TMPDIR atteint bien l'environnement de nixos-install.
         assert calls[-1][1].get("TMPDIR") == "/secure/tmp"
 
     def test_install_dry_run_skips_eval_and_runs_nothing(self) -> None:
@@ -892,68 +897,6 @@ class TestHardenTarget:
         assert result.success is True
         popen.assert_not_called()
         run.assert_not_called()
-
-
-class TestClosureTotalViaEval:
-    """AXE : total de closure en ÉVALUATION SEULE (contourne l'assertion nix)."""
-
-    def test_counts_derivations_from_requisites(self) -> None:
-        job = NixosJob()
-        eval_out = MagicMock(returncode=0, stdout="/nix/store/abc-glf-system.drv\n")
-        req_out = MagicMock(
-            returncode=0,
-            stdout="/nix/store/a-x.drv\n/nix/store/b-y.drv\n\n/nix/store/c-src\n",
-        )
-        with patch("omnis.jobs.nixos.subprocess.run", side_effect=[eval_out, req_out]) as run:
-            total = job._closure_total_via_eval("/mnt/target", tmpdir="/secure/tmp")
-        assert total == 2  # deux .drv, la source non-.drv est ignorée
-        eval_cmd = _base_cmd(run.call_args_list[0].args[0])
-        assert eval_cmd[:3] == ["nix", "eval", "--raw"]
-        assert eval_cmd[-1].endswith(".config.system.build.toplevel.drvPath")
-        assert run.call_args_list[0].kwargs["env"].get("TMPDIR") == "/secure/tmp"
-        query_cmd = _base_cmd(run.call_args_list[1].args[0])
-        assert query_cmd == [
-            "nix-store",
-            "--query",
-            "--requisites",
-            "/nix/store/abc-glf-system.drv",
-        ]
-
-    def test_returns_none_when_eval_fails(self) -> None:
-        job = NixosJob()
-        with patch(
-            "omnis.jobs.nixos.subprocess.run",
-            return_value=MagicMock(returncode=1, stdout=""),
-        ) as run:
-            assert job._closure_total_via_eval("/mnt/target", None) is None
-        run.assert_called_once()  # nix-store jamais appelé si l'éval échoue
-
-    def test_returns_none_when_eval_output_not_a_drv(self) -> None:
-        job = NixosJob()
-        with patch(
-            "omnis.jobs.nixos.subprocess.run",
-            return_value=MagicMock(returncode=0, stdout="warning: something\n"),
-        ):
-            assert job._closure_total_via_eval("/mnt/target", None) is None
-
-    def test_returns_none_when_query_fails(self) -> None:
-        job = NixosJob()
-        eval_out = MagicMock(returncode=0, stdout="/nix/store/abc-glf-system.drv\n")
-        req_out = MagicMock(returncode=1, stdout="")
-        with patch("omnis.jobs.nixos.subprocess.run", side_effect=[eval_out, req_out]):
-            assert job._closure_total_via_eval("/mnt/target", None) is None
-
-    def test_returns_none_on_oserror(self) -> None:
-        job = NixosJob()
-        with patch("omnis.jobs.nixos.subprocess.run", side_effect=OSError("no nix")):
-            assert job._closure_total_via_eval("/mnt/target", None) is None
-
-    def test_returns_none_when_no_derivation_counted(self) -> None:
-        job = NixosJob()
-        eval_out = MagicMock(returncode=0, stdout="/nix/store/abc-glf-system.drv\n")
-        req_out = MagicMock(returncode=0, stdout="/nix/store/only-src\n")
-        with patch("omnis.jobs.nixos.subprocess.run", side_effect=[eval_out, req_out]):
-            assert job._closure_total_via_eval("/mnt/target", None) is None
 
 
 class TestNetworkConfigCopy:
