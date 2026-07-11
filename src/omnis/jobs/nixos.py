@@ -39,6 +39,7 @@ import json
 import logging
 import os
 import re
+import resource
 import shutil
 import subprocess
 from collections import deque
@@ -211,6 +212,20 @@ def _parallelism_flags() -> list[str]:
     de priorité basse.
     """
     return ["--cores", str(_throttle_cores()), "--max-jobs", "1"]
+
+
+def _raise_stack_limit() -> None:
+    """Porte la pile au max autorisé avant d'exécuter nix (préexec enfant).
+
+    L'évaluation d'une grosse config NixOS récurse profondément ; la pile par
+    défaut (8 Mo) peut déborder → SIGSEGV dans nix. On monte la limite douce à
+    la limite dure (souvent illimitée).
+    """
+    try:
+        _soft, hard = resource.getrlimit(resource.RLIMIT_STACK)
+        resource.setrlimit(resource.RLIMIT_STACK, (hard, hard))
+    except (ValueError, OSError):  # pragma: no cover - best-effort
+        pass
 
 
 def _substitution_flags() -> list[str]:
@@ -1275,6 +1290,7 @@ class NixosJob(BaseJob):
                 text=True,
                 bufsize=1,
                 env=env,
+                preexec_fn=_raise_stack_limit,
             )
         except FileNotFoundError:
             logger.error("Command not found: %s", cmd[0])
@@ -1406,6 +1422,7 @@ class NixosJob(BaseJob):
                 text=True,
                 bufsize=1,
                 env=env,
+                preexec_fn=_raise_stack_limit,
             )
         except FileNotFoundError:
             logger.error("Command not found: %s", cmd[0])
