@@ -5,6 +5,119 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.0] - 2026-07-11
+
+Jalon : première installation GLF OS de bout en bout qui aboutit, avec barre de progression granulaire honnête.
+
+### Added
+
+- Barre de progression **granulaire** pendant `nixos-install` : le dénominateur exact provient des totaux annoncés par nix (« these N derivations will be built » / « these M paths will be fetched »), le compteur suit les builds et les substitutions (copies depuis le cache), et l'affichage bascule dynamiquement d'un mode indéterminé (pulse) à déterminé dès que le total est connu.
+- Changement de **langue** appliqué dynamiquement à toutes les vues et propagé à la configuration d'installation.
+- Changement de **clavier** appliqué en live à la session utilisateur (Wayland via `gsettings`/`input-sources`, X11 via `setxkbmap`), exécuté dans la session de l'utilisateur via `runuser` — Omnis tournant en root, l'uid est résolu depuis `SUDO_UID` pour rester portable (AppImage / multi-DE) — puis écrit dans la config d'installation.
+- 36 fichiers de traduction régénérés (fr_FR et en_US complètes).
+
+### Changed
+
+- Installation NixOS via `nixos-install --flake` seul : abandon de l'offload `nix build`, qui déclenchait une assertion interne de libnixstore (nix 2.34.7) à la réalisation.
+- Throttle CPU/IO pendant l'installation (`nice`/`ionice`, `--cores` et `--max-jobs` à ~80 % des cœurs, `--option max-substitution-jobs`) pour garder le bureau live réactif.
+- Pile nix passée en illimitée pour éviter un `SIGSEGV` au prébuild.
+
+### Fixed
+
+- Montage root/EFI avec type de système de fichiers explicite (`-t <fs>`) au lieu de l'auto-détection blkid périmée, qui tentait FAT sur de l'ext4 (« superbloc erroné »).
+- Démontage récursif de `/mnt/target` avant partitionnement (retry d'installation sûr).
+- Chemin d'écriture des journaux corrigé (`/var/log/omnis-install.log`) : l'anomalie « Failed to save logs: /tmp/omnis.log » est résolue.
+
+## [0.5.5] - 2026-07-10
+
+### Fixed
+
+- Progression fluide pendant la copie du système vers le disque.
+
+## [0.5.4] - 2026-07-09
+
+### Added
+
+- Icônes de catégorie colorées pour les prérequis, pilotées par `theme.yaml`.
+
+### Fixed
+
+- Usernames réservés désormais rejetés ; correction de la progression réelle.
+- Plugin `qsvg` ajouté à `QT_PLUGIN_PATH` (rendu SVG dans l'AppImage).
+- Renommage du résolveur d'icône pour lever la collision avec `iconUrl`.
+
+## [0.5.3] - 2026-07-08
+
+### Added
+
+- Polices embarquées via `<theme>/fonts` avec sélection dans `theme.yaml`.
+
+### Changed
+
+- `theme.yaml` documenté comme référence de branding.
+
+### Fixed
+
+- Polices et `fontconfig` embarqués dans l'AppImage.
+
+## [0.5.2] - 2026-07-08
+
+### Changed
+
+- Smoke test exécuté hors de l'arbre source.
+
+### Fixed
+
+- Backend Qt Quick logiciel par défaut (rendu sans GPU).
+- Moteur d'installation intégré dans l'AppImage (le fork `pkexec` étant impossible depuis le bundle).
+
+## [0.5.1] - 2026-07-08
+
+### Fixed
+
+- Résolution de la configuration embarquée hors du répertoire courant : Omnis localise `share/omnis/config` au lieu de quitter sur « No configuration file found ». Premier AppImage réellement lançable.
+
+## [0.5.0] - 2026-07-08
+
+Installation NixOS de bout en bout, éditeur de partition manuel et livrable AppImage standalone.
+
+### Added
+
+- Job d'installation NixOS : `configuration.nix`, `nixos-generate-config`, `nixos-install`, systemd-boot, LUKS chiffré/non-chiffré, injection de la config GPU multi-vendor, durcissement des répertoires de build nix.
+- Éditeur de partition manuel type GParted : create/delete/format/resize/flags, chemins `/dev` et numéros réels via `parted`, étiquette GPT auto sur disque vierge, blocage `bios_grub`, barre disque segmentée avec espace libre.
+- Écran de choix de l'environnement de bureau (DE + saveurs GLF OS).
+- Livrable AppImage standalone (Nix bundle), `package.nix` pour l'intégration ISO GLF et CI de release.
+- Capture, affichage et upload des journaux d'installation ; icône d'application Omnis.
+- Barre de progression live pendant `nixos-install`.
+
+### Changed
+
+- Pipeline NixOS pur (retrait des jobs packages/users) ; GPU non bloquant.
+- Réception des paramètres GRUB `kbd.*` de l'ISO (langue/clavier).
+- Bump de version 0.1.0 → 0.4.2 → 0.5.0.
+
+### Fixed
+
+- Passphrase LUKS jamais transmise (émission conditionnée à un binding périmé).
+- Cible d'installation gardée montée pour le job nixos (cause d'échec d'installation).
+- Résolution de `config/i18n` dans les layouts packagés ; lancement du moteur via l'entrypoint wrappé (pkexec/Nix).
+- Nombreux correctifs de l'éditeur de partition (taille, synchro slider/champ, application de la file d'opérations en JSON, rafraîchissement après Apply).
+
+## [0.4.x] - 2026-07-01
+
+Jobs d'installation de base et Phase 1 de l'interface (entrée synthétique regroupant la ligne 0.4.x).
+
+### Added
+
+- Jobs : `LocaleJob`, `UsersJob`, `PartitionJob` (avec garde-fous de sécurité), `PackagesJob` (pacman/apt), `InstallJob`, `BootloaderJob`, `FinishedJob`, et chargeur de jobs dynamique.
+- Vues QML Phase 1 : Locale, Users, Partition, Summary, Progress, Finished, avec navigation wizard multi-étapes.
+- Internationalisation : détection automatique de la locale avec cascade de fallback, changement de langue en live, refonte de l'écran de création de compte traduit en 9 langues.
+- Réseau : vérification de la connectivité internet, détection de l'environnement de bureau, support proxy système.
+
+### Fixed
+
+- Boucles de binding QML sur plusieurs vues ; layout LocaleView et boutons dupliqués ; logique de check GPU.
+
 ## [0.3.0] - 2025-12-04
 
 ### Added

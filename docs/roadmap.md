@@ -1,15 +1,15 @@
 # Omnis Installer - Roadmap de Versioning
 
 **Document cree**: 2025-12-08
-**Derniere mise a jour**: 2026-07-08 (v0.5.1)
+**Derniere mise a jour**: 2026-07-11 (v0.6.0)
 **Objectif v1.0.0**: Installation GLFOS fonctionnelle
 **Objectif v2.0.0**: Installeur universel multi-distribution (comme Calamares)
 
 ---
 
-## Etat Actuel (v0.5.1)
+## Etat Actuel (v0.6.0)
 
-Installation NixOS de bout en bout implementee ; AppImage standalone reellement lançable ; validation E2E sur ISO GLF-OS en cours.
+Premiere installation GLF OS de bout en bout qui aboutit sur ISO GLF-OS ; barre de progression granulaire (dénominateur exact via les totaux annoncés par nix) ; langue et clavier appliqués en live a la session et propagés a la config d'installation ; AppImage standalone lançable.
 
 ### Vues QML Integrees dans Main.qml
 
@@ -20,7 +20,7 @@ Installation NixOS de bout en bout implementee ; AppImage standalone reellement 
 | 2 | UsersView | Complete (autologin cable) |
 | 3 | PartitionView | Editeur manuel type GParted (Apply live, GPT auto) |
 | 4 | SummaryView | Complete |
-| 5 | ProgressView | Progression reelle (parse nix internal-json) |
+| 5 | ProgressView | Progression granulaire (totaux annonces par nixos-install, builds + substitutions) |
 | 6 | FinishedView | Complete (boutons, journal, upload logs) |
 
 ### Acquis v0.5.0
@@ -33,6 +33,14 @@ Installation NixOS de bout en bout implementee ; AppImage standalone reellement 
 ### Acquis v0.5.1
 
 - Resolution de la config embarquee hors du CWD : lance depuis n'importe quel dossier (AppImage, install Nix), Omnis localise `share/omnis/config` au lieu de quitter sur `No configuration file found`. Premier AppImage reellement lançable.
+
+### Acquis v0.6.0
+
+- **Installation GLF OS de bout en bout** menee a terme via `nixos-install --flake` (abandon de l'offload `nix build`, qui declenchait une assertion interne de libnixstore avec nix 2.34.7).
+- **Barre de progression granulaire** : denominateur exact issu des totaux annonces par `nixos-install` (derivations a construire + chemins a recuperer), comptage builds + substitutions, bascule dynamique indetermine (pulse) → determine.
+- **Langue** appliquee dynamiquement a toutes les vues + a la config d'install ; **clavier** applique en live a la session utilisateur (via `runuser`, uid depuis `SUDO_UID` ; Wayland `gsettings`, X11 `setxkbmap`) + ecrit dans la config d'install ; 36 fichiers de traduction regeneres.
+- Bureau live reactif pendant l'install : throttle CPU/IO (`nice`/`ionice`, `--cores`/`--max-jobs` ~80 % des cœurs, `--option max-substitution-jobs`) + pile nix illimitee (evite un `SIGSEGV` au prebuild).
+- Montage root/EFI avec type explicite (`-t <fs>`), demontage recursif de `/mnt/target` avant partitionnement, chemin de log corrige (`/var/log/omnis-install.log`).
 
 ---
 
@@ -124,17 +132,19 @@ Installation NixOS de bout en bout implementee ; AppImage standalone reellement 
 
 ---
 
-## Phase 3: IPC Production (v0.6.x)
+## Phase 3: Installation GLF OS E2E (v0.6.x)
 
-### v0.6.0 - IPC Validation Production
+### v0.6.0 - Installation de bout en bout + barre granulaire ✅ (livre)
 
-**Focus**: Separation UI/Engine en production
+**Focus**: Premiere installation GLF OS qui aboutit, progression honnete
 
-- [ ] Tests pkexec elevation
-- [ ] Tests socket permissions (0600/0700)
-- [ ] Tests multi-client concurrent
-- [ ] Security audit IPC
-- [ ] Performance benchmarks
+- [x] Installation NixOS de bout en bout via `nixos-install --flake` (abandon de l'offload `nix build`)
+- [x] Barre de progression granulaire (denominateur exact via totaux nix, builds + substitutions, bascule indetermine → determine)
+- [x] Langue et clavier appliques en live a la session + propagés a la config d'install (36 traductions regenerees)
+- [x] Throttle CPU/IO + pile nix illimitee (bureau live reactif, evite le SIGSEGV)
+- [x] Montage root/EFI type explicite, demontage recursif avant partitionnement, chemin de log corrige
+
+> Note : la validation IPC production (separation UI/Engine, tests pkexec/socket) reste planifiee (voir v0.8.0 « Durcissement production »).
 
 ### v0.6.1 - Error Handling & Recovery
 
@@ -487,6 +497,7 @@ Ce roadmap est maintenu dans `docs/roadmap.md` et versionne avec Git.
   - Ajout correctifs securite CVE dans v0.5.0
   - Comparaison Calamares et gap analysis
   - Voir: `claudedocs/audit-multi-distro-red-team.md`
+- **2026-07-11**: Mise a jour v0.6.0 — installation GLF OS de bout en bout livree, barre de progression granulaire, langue/clavier appliqués en live ; Phase 3 recentree sur l'install E2E (IPC production reportee).
 
 ### References
 
