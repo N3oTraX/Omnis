@@ -1052,6 +1052,15 @@ class TestThrottleCores:
         # int(8 * 0.8) == 6 cores, one derivation at a time (predictable 80 % cap).
         assert flags == ["--cores", "6", "--max-jobs", "1"]
 
+    def test_substitution_flags_cap_parallel_substitutions(self) -> None:
+        from omnis.jobs.nixos import _substitution_flags
+
+        with patch("omnis.jobs.nixos.os.cpu_count", return_value=4):
+            # int(4 * 0.8) == 3 cores → 2 parallel substitutions (leaves headroom).
+            assert _substitution_flags() == ["--option", "max-substitution-jobs", "2"]
+        with patch("omnis.jobs.nixos.os.cpu_count", return_value=1):
+            assert _substitution_flags() == ["--option", "max-substitution-jobs", "1"]
+
 
 class TestStorePathCapture:
     """AXE 3 : capture déterministe du store-path via ``nix path-info``."""

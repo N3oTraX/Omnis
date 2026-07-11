@@ -41,6 +41,7 @@ import os
 import re
 import shutil
 import subprocess
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -210,6 +211,15 @@ def _parallelism_flags() -> list[str]:
     de priorité basse.
     """
     return ["--cores", str(_throttle_cores()), "--max-jobs", "1"]
+
+
+def _substitution_flags() -> list[str]:
+    """Limite les substitutions parallèles (décompression xz/zstd très CPU/IO).
+
+    Le défaut nix (16) sature une VM ; on plafonne pour garder le bureau live
+    réactif. Applicable à ``nix build``/``nix copy``/``nixos-install``.
+    """
+    return ["--option", "max-substitution-jobs", str(max(1, _throttle_cores() - 1))]
 
 
 class _NixProgress:
@@ -1053,7 +1063,7 @@ class NixosJob(BaseJob):
                 target_root,
             ]
         return self._run_install_streamed(
-            _throttled(cmd),
+            _throttled([*cmd, *_substitution_flags()]),
             "Running nixos-install",
             dry_run,
             context,
@@ -1135,6 +1145,7 @@ class NixosJob(BaseJob):
                 "--extra-experimental-features",
                 "nix-command flakes",
                 *_parallelism_flags(),
+                *_substitution_flags(),
                 "--to",
                 target_root,
                 source,
@@ -1202,6 +1213,7 @@ class NixosJob(BaseJob):
                 "--extra-experimental-features",
                 "nix-command flakes",
                 *_parallelism_flags(),
+                *_substitution_flags(),
                 "--option",
                 "sandbox",
                 "false",
@@ -1270,6 +1282,7 @@ class NixosJob(BaseJob):
 
         span = max(0, pct_end - pct_start)
         progress = _NixProgress()
+        error_tail: deque[str] = deque(maxlen=20)
         if proc.stderr is not None:
             for raw in proc.stderr:
                 line = raw.rstrip("\n")
@@ -1279,12 +1292,15 @@ class NixosJob(BaseJob):
                     context.report_progress(min(pct_end, pct), progress.message())
                 elif not line.startswith("@nix "):
                     logger.debug("nix build: %s", line)
+                    error_tail.append(line)
 
         if proc.stdout is not None:
             proc.stdout.read()
         code = proc.wait()
         if code != 0:
             logger.warning("System prebuild nix build failed (exit %s)", code)
+            for line in error_tail:
+                logger.error("prebuild error: %s", line)
             return False
         logger.info("System prebuild nix build succeeded (exit 0)")
         return True
