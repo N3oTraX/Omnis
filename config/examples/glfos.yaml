@@ -273,13 +273,24 @@ jobs:
             # Note: Intel check accepts Xe, Arc, or newer integrated graphics
             intel: "Xe"
 
-  # Selection de la langue et region
+  # Partitionnement
+  - name: partition
+    config:
+      default_filesystem: ext4
+      allow_encryption: true
+      allow_manual_partitioning: true
+      efi_partition_size_mb: 512
+      swap_strategy: auto
+
+  # Selection de la langue et region.
+  # Doit s'executer APRES `partition` : ce job ecrit dans la cible, qui n'est
+  # montee qu'une fois le partitionnement fait (sinon les fichiers atterrissent
+  # sur le tmpfs live puis sont masques par le montage).
   - name: locale
     config:
       default_language: "fr_FR"
       default_timezone: "Europe/Paris"
       show_keyboard_preview: true
-      # Auto-detection configuration
       auto_detection:
         enabled: true
         methods:
@@ -294,15 +305,6 @@ jobs:
         # le GeoIP reseau pour la langue et le clavier.
         override_mode: "prefer_local"  # "auto", "prefer_geoip", "prefer_local"
         confidence_threshold: 0.8
-
-  # Partitionnement
-  - name: partition
-    config:
-      default_filesystem: ext4
-      allow_encryption: true
-      allow_manual_partitioning: true
-      efi_partition_size_mb: 512
-      swap_strategy: auto
 
   # Installation du systeme (NixOS)
   #
