@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from omnis.jobs.base import BaseJob, JobContext, JobResult
-from omnis.utils import disk_detector
+from omnis.utils import disk_detector, disk_release
 
 logger = logging.getLogger(__name__)
 
@@ -813,15 +813,10 @@ class PartitionJob(BaseJob):
                 logger.warning(f"⚠️  Target disk: {disk}")
                 logger.warning("⚠️  All data will be PERMANENTLY LOST!")
 
-            # Une tentative précédente peut avoir laissé la cible montée : un
-            # montage résiduel empêche partprobe de relire la nouvelle table
-            # (nodes stale → « superbloc erroné » au mount). On démonte d'abord.
             if not dry_run:
-                subprocess.run(
-                    ["umount", "-R", context.target_root],
-                    check=False,
-                    capture_output=True,
-                )
+                refusal = self._release_target_disk(disk, context.target_root)
+                if refusal is not None:
+                    return refusal
 
             context.report_progress(10, "Planning partition layout...")
 
@@ -873,6 +868,42 @@ class PartitionJob(BaseJob):
             # SECURITY: clear the passphrase from memory after use.
             passphrase = ""
             del passphrase
+
+    def _release_target_disk(self, disk: str, target_root: str) -> JobResult | None:
+        """
+        Free the target disk before any destructive operation.
+
+        External tools (GParted) and the desktop leave partitions auto-mounted, swap
+        enabled or mappers open, which makes ``wipefs``/``parted`` fail with EBUSY.
+        A residual ``target_root`` mount also makes ``partprobe`` keep stale nodes
+        (« superbloc erroné » on the next mount), so it is torn down too.
+
+        Returns a failing JobResult when the disk must not or cannot be touched,
+        None when it is free.
+        """
+        if disk_release.holds_running_system(disk):
+            return JobResult.fail(
+                f"Refusing to touch {disk}: it backs the system Omnis is running from.",
+                error_code=56,
+            )
+
+        subprocess.run(
+            ["umount", "-R", target_root],
+            check=False,
+            capture_output=True,
+        )
+
+        for action in disk_release.release_disk(disk):
+            logger.info(f"Released target disk: {action}")
+
+        holders = disk_release.disk_holders(disk)
+        if holders:
+            return JobResult.fail(
+                f"Target disk {disk} is still in use: {'; '.join(holders)}",
+                error_code=57,
+            )
+
+        return None
 
     def _list_disks(self) -> list[DiskInfo]:
         """
@@ -2003,35 +2034,38 @@ class PartitionJob(BaseJob):
 
         # Try to unmount EFI
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["umount", str(efi_mount)],
                 check=False,
                 capture_output=True,
             )
-            logger.info(f"Unmounted {efi_mount}")
+            if result.returncode == 0:
+                logger.info(f"Unmounted {efi_mount}")
         except Exception as e:
             logger.debug(f"Failed to unmount {efi_mount}: {e}")
 
         # Try to unmount root
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["umount", target_root],
                 check=False,
                 capture_output=True,
             )
-            logger.info(f"Unmounted {target_root}")
+            if result.returncode == 0:
+                logger.info(f"Unmounted {target_root}")
         except Exception as e:
             logger.debug(f"Failed to unmount {target_root}: {e}")
 
         # Try to deactivate swap partition (legacy path)
         if self._layout.swap_partition:
             try:
-                subprocess.run(
+                result = subprocess.run(
                     ["swapoff", self._layout.swap_partition],
                     check=False,
                     capture_output=True,
                 )
-                logger.info(f"Deactivated swap {self._layout.swap_partition}")
+                if result.returncode == 0:
+                    logger.info(f"Deactivated swap {self._layout.swap_partition}")
             except Exception as e:
                 logger.debug(f"Failed to deactivate swap: {e}")
 

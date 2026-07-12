@@ -483,6 +483,7 @@ class TestSecurityGates:
         with (
             patch.object(job, "validate") as mock_validate,
             patch.object(job, "_partition_auto") as mock_partition,
+            patch.object(job, "_release_target_disk", return_value=None),
         ):
             mock_validate.return_value = JobResult.ok()
             mock_partition.return_value = JobResult.ok()
@@ -1580,3 +1581,52 @@ class TestCleanupHandoff:
         job.run(context)
 
         assert job._succeeded is False
+
+
+class TestTargetDiskRelease:
+    """The target disk must be freed (and the running system protected) before wiping."""
+
+    def test_refuses_disk_backing_the_running_system(self) -> None:
+        job = PartitionJob()
+
+        with patch("omnis.jobs.partition.disk_release.holds_running_system", return_value=True):
+            result = job._release_target_disk("/dev/sda", "/mnt/target")
+
+        assert result is not None
+        assert result.success is False
+        assert result.error_code == 56
+
+    def test_fails_when_a_holder_survives_the_release(self) -> None:
+        job = PartitionJob()
+
+        with (
+            patch("omnis.jobs.partition.disk_release.holds_running_system", return_value=False),
+            patch("omnis.jobs.partition.disk_release.release_disk", return_value=[]),
+            patch(
+                "omnis.jobs.partition.disk_release.disk_holders",
+                return_value=["/dev/sda1 is mounted on /run/media/nixos/GLF"],
+            ),
+            patch("omnis.jobs.partition.subprocess.run"),
+        ):
+            result = job._release_target_disk("/dev/sda", "/mnt/target")
+
+        assert result is not None
+        assert result.success is False
+        assert result.error_code == 57
+        assert "/run/media/nixos/GLF" in result.message
+
+    def test_returns_none_when_disk_is_free(self) -> None:
+        job = PartitionJob()
+
+        with (
+            patch("omnis.jobs.partition.disk_release.holds_running_system", return_value=False),
+            patch(
+                "omnis.jobs.partition.disk_release.release_disk",
+                return_value=["unmounted /dev/sda1 from /run/media/nixos/GLF"],
+            ),
+            patch("omnis.jobs.partition.disk_release.disk_holders", return_value=[]),
+            patch("omnis.jobs.partition.subprocess.run"),
+        ):
+            result = job._release_target_disk("/dev/sda", "/mnt/target")
+
+        assert result is None

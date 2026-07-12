@@ -5,6 +5,23 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.1] - 2026-07-12
+
+Correctifs remontés par les premiers testeurs : partitionnement bloqué après un formatage externe, et installeur en anglais pour les locales régionales.
+
+### Fixed
+
+- **Partitionnement bloqué après GParted** : un disque fraîchement formaté restait monté par le bureau (auto-montage udisks), et `wipefs` échouait en `EBUSY` (« Périphérique ou ressource occupé »). Omnis ne libérait que son propre point de montage. Le disque cible est désormais réellement libéré avant toute écriture : démontage de tous les points de montage qui s'y adossent, `swapoff`, fermeture des mappers LUKS/LVM/md.
+- **Refus explicite du disque système** : Omnis refuse désormais de toucher au disque qui porte le système en cours d'exécution — aussi bien depuis l'ISO live (`/iso`, `/nix/.ro-store`) que depuis l'AppImage sur un système installé (`/`, `/usr`), où la racine est un vrai périphérique bloc. En cas de disque occupé, l'erreur nomme le détenteur au lieu d'afficher un `EBUSY` brut.
+- **Installeur en anglais pour les variantes régionales** : choisir « AZERTY - (Belge) » au démarrage de l'ISO donnait une interface en **anglais**. La locale (`fr_BE`) était bien propagée, mais aucune traduction `fr_BE` n'existe et l'installeur retombait directement sur l'anglais. Un repli par famille de langue résout la locale d'affichage (`fr_BE` → `fr_FR`, `de_CH` → `de_DE`, `fr_CA` → `fr_FR`, `pt_PT` → `pt_BR`), sans modifier la locale système écrite sur la cible. 5 des 9 entrées clavier du menu de démarrage étaient concernées.
+- **Job `locale` exécuté avant `partition`** : il écrivait dans la cible avant son montage, les fichiers atterrissaient sur le tmpfs live puis étaient masqués. Il s'exécute désormais après le partitionnement.
+- **Bouton « Install » non traduit** : `Automatic`, `Manual` et `Install` étaient traduits mais marqués `unfinished`, donc exclus des catalogues `.qm` — ils restaient en anglais dans les 8 langues.
+- Les journaux de nettoyage n'affichent plus « Unmounted » lorsque le démontage a échoué (logs trompeurs).
+
+### Changed
+
+- **8 langues complétées** : `de_DE`, `es_ES`, `it_IT`, `ja_JP`, `ko_KR`, `pt_BR`, `ru_RU` et `zh_CN` étaient proposées avec seulement 110/229 chaînes traduites (la moitié de l'interface en anglais) ; elles passent à 229/229. Ces traductions sont générées et **non relues par un locuteur natif** : voir `docs/i18n/RELECTURE.md`.
+
 ## [0.6.0] - 2026-07-11
 
 Jalon : première installation GLF OS de bout en bout qui aboutit, avec barre de progression granulaire honnête.
