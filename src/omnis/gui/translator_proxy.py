@@ -182,17 +182,21 @@ class TranslatorProxy(QObject):
         # Normalize locale: remove encoding suffix (e.g., "fr_FR.UTF-8" -> "fr_FR")
         normalized_locale = locale.split(".")[0]
 
-        # Try to load translation file
-        qm_file = self._translations_dir / f"omnis_{normalized_locale}.qm"
-        if qm_file.exists():
+        # A regional variant (fr_BE, de_CH, fr_CA...) ships no .qm of its own: fall
+        # back to a locale of the same language so the QML stays translated.
+        for candidate in (
+            normalized_locale,
+            self._python_translator.resolve_locale(normalized_locale),
+        ):
+            qm_file = self._translations_dir / f"omnis_{candidate}.qm"
+            if not qm_file.exists():
+                logger.debug(f"No Qt translation file found: {qm_file}")
+                continue
             if self._qt_translator.load(str(qm_file)):
                 app.installTranslator(self._qt_translator)
                 logger.debug(f"Loaded Qt translation: {qm_file}")
                 return True
-            else:
-                logger.warning(f"Failed to load Qt translation: {qm_file}")
-        else:
-            logger.debug(f"No Qt translation file found: {qm_file}")
+            logger.warning(f"Failed to load Qt translation: {qm_file}")
 
         # Try loading from Qt's locale system as fallback
         qt_locale = QLocale(locale.replace("_", "-"))

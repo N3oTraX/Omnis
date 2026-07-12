@@ -16,6 +16,8 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
+from omnis.i18n.translator import Translator
+
 # Translations directory
 TRANSLATIONS_DIR = Path(__file__).parent.parent.parent / "src" / "omnis" / "gui" / "translations"
 
@@ -360,3 +362,51 @@ class TestTranslationCoverage:
         # Check that at least some files have content
         non_empty = [s for s in sizes if s[1] > 100]
         assert len(non_empty) >= 2, "At least 2 locales should have non-empty translations"
+
+
+class TestRegionalLocaleFallback:
+    """Regional variants booted from the ISO GRUB menu must still show a translated UI.
+
+    The GLF ISO passes kbd.locale=fr_BE / de_CH / fr_CA / pt_PT / en_GB, and none of
+    them ships a .conf of its own: without a language-family fallback the installer
+    silently dropped to English (the Belgian "AZERTY - (Belge)" entry bug).
+    """
+
+    @pytest.mark.parametrize(
+        ("requested", "expected"),
+        [
+            ("fr_BE", "fr_FR"),
+            ("fr_CA", "fr_FR"),
+            ("de_CH", "de_DE"),
+            ("de_AT", "de_DE"),
+            ("en_GB", "en_US"),
+            ("pt_PT", "pt_BR"),
+            ("es_MX", "es_ES"),
+        ],
+    )
+    def test_regional_variant_resolves_to_same_language(
+        self, requested: str, expected: str
+    ) -> None:
+        translator = Translator()
+        assert translator.resolve_locale(requested) == expected
+
+    def test_exact_locale_wins(self) -> None:
+        translator = Translator()
+        assert translator.resolve_locale("fr_FR") == "fr_FR"
+
+    def test_unsupported_language_falls_back_to_english(self) -> None:
+        """GeoIP on a Belgian IP yields nl_BE; Omnis ships no Dutch .conf."""
+        translator = Translator()
+        assert translator.resolve_locale("nl_BE") == "en_US"
+
+    def test_encoding_suffix_is_ignored(self) -> None:
+        """The kernel cmdline carries kbd.locale=fr_BE.UTF-8."""
+        translator = Translator()
+        assert translator.resolve_locale("fr_BE.UTF-8") == "fr_FR"
+
+    def test_belgian_boot_choice_loads_french_strings(self) -> None:
+        translator = Translator(locale="fr_BE")
+        assert translator.get("next", section="buttons") != ""
+        assert translator.get("next", section="buttons") == Translator(locale="fr_FR").get(
+            "next", section="buttons"
+        )

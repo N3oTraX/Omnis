@@ -121,14 +121,39 @@ class Translator:
             self._load_translations()
             return False
 
+    def resolve_locale(self, locale: str) -> str:
+        """
+        Return the best translated locale for ``locale``.
+
+        Regional variants have no translation of their own: the GLF ISO boots with
+        ``kbd.locale=fr_BE``/``de_CH``/``fr_CA``, and the locale view offers them as
+        system locales. They must still show a translated UI, so fall back to a
+        locale of the same language (fr_BE -> fr_FR) before giving up on English.
+        """
+        locale = locale.split(".")[0]
+        available = self.available_locales
+        if locale in available:
+            return locale
+
+        language = locale.split("_")[0]
+        same_language = [code for code in available if code.split("_")[0] == language]
+        if not same_language:
+            return self._fallback_locale
+
+        canonical = f"{language}_{language.upper()}"
+        return canonical if canonical in same_language else same_language[0]
+
     def _load_translations(self) -> None:
         """Load translation files for current and fallback locales."""
         # Load fallback first
         if self._fallback_locale != self._locale:
             self._fallback_translations = self._load_locale_file(self._fallback_locale)
 
-        # Load current locale
-        self._translations = self._load_locale_file(self._locale)
+        resolved = self.resolve_locale(self._locale)
+        if resolved != self._locale:
+            logger.info(f"No translations for {self._locale}, using {resolved}")
+
+        self._translations = self._load_locale_file(resolved)
 
         if not self._translations:
             logger.warning(f"No translations found for locale {self._locale}, using fallback")
