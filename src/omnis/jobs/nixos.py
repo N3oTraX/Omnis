@@ -440,6 +440,15 @@ class NixosJob(BaseJob):
     name = "nixos"
     description = "Generate NixOS configuration and install GLF OS"
 
+    # nixos-generate-config and nixos-install are live-ISO only: they cannot be
+    # bundled into the AppImage. Declaring them here turns "the disk is wiped and
+    # now we are stuck" into an upfront, actionable refusal.
+    required_tools = (
+        "nixos-generate-config",
+        "nixos-install",
+        ("mkpasswd", "openssl"),
+    )
+
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         """Initialize the NixOS install job."""
         super().__init__(config)

@@ -375,9 +375,9 @@ def _is_target_busy(target: str) -> bool:
     live-source probe to detect the running system's medium. Mocked in tests.
     """
     tail = target.rsplit("/", 1)[-1]
-    live = disk_detector._live_source()
-    if live and (live == target or live.rsplit("/", 1)[-1] == tail):
-        return True
+    for live in disk_detector._live_sources():
+        if live == target or live.rsplit("/", 1)[-1] == tail:
+            return True
     try:
         result = subprocess.run(
             ["findmnt", "-no", "TARGET", target],
@@ -656,6 +656,20 @@ class PartitionJob(BaseJob):
 
     name = "partition"
     description = "Disk partitioning and formatting"
+
+    # Filesystem-specific tools (mkfs.*) stay out: which one is needed depends on
+    # the user's choice and refusing to start over an unused mkfs would be wrong.
+    required_tools = (
+        "wipefs",
+        "sgdisk",
+        "parted",
+        "partprobe",
+        "udevadm",
+        "lsblk",
+        "findmnt",
+        "mount",
+        "umount",
+    )
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         """Initialize the partition job."""

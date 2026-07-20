@@ -14,7 +14,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from omnis.jobs.base import BaseJob, JobContext, JobResult, JobStatus
+from omnis.jobs.base import ERR_MISSING_TOOLS, BaseJob, JobContext, JobResult, JobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -408,6 +408,37 @@ class Engine:
         """Get ordered list of job names."""
         return [job.name for job in self.jobs]
 
+    def run_preflight(self) -> JobResult:
+        """
+        Check the tooling of every configured job before any of them runs.
+
+        The job list is executed in order and ``partition`` wipes the target long
+        before ``nixos`` looks for ``nixos-generate-config``. Checking upfront is
+        what keeps a missing tool from costing a disk: a tester lost one that way
+        on the 0.6.0 ISO.
+
+        Returns:
+            JobResult.ok() when every job's tooling resolves, the first failure
+            otherwise, with all missing tools collected in ``data``.
+        """
+        missing: dict[str, list[str]] = {}
+        for job in self.jobs:
+            result = job.preflight()
+            if not result.success:
+                tools = result.data.get("missing_tools", [])
+                missing[job.name] = list(tools)
+
+        if not missing:
+            return JobResult.ok()
+
+        detail = "; ".join(f"{job}: {', '.join(tools)}" for job, tools in missing.items())
+        logger.error("Preflight failed, required tools are missing -- %s", detail)
+        return JobResult.fail(
+            f"Missing required tools -- {detail}",
+            error_code=ERR_MISSING_TOOLS,
+            data={"missing_tools": missing},
+        )
+
     def run_all(self, context: JobContext | None = None) -> bool:
         """
         Execute all jobs sequentially.
@@ -427,6 +458,12 @@ class Engine:
         self.state.is_running = True
         self.state.is_finished = False
         self.state.last_error = None
+
+        preflight = self.run_preflight()
+        if not preflight.success:
+            self.state.last_error = preflight.message
+            self.state.is_running = False
+            return False
 
         for index, job in enumerate(self.jobs):
             self.state.current_job_index = index

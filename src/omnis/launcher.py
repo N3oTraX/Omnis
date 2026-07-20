@@ -48,6 +48,25 @@ class LauncherError(Exception):
     pass
 
 
+def socket_is_present(socket_path: Path) -> bool:
+    """
+    Return whether ``socket_path`` exists, without ever raising.
+
+    ``Path.exists()`` stats the path and only swallows ENOENT/ENOTDIR/EBADF/
+    ELOOP: EACCES propagates. The engine creates ``/run/omnis`` as 0700 root, so
+    the unprivileged UI has no search permission on it and every probe after the
+    first engine start raised PermissionError instead of returning False --
+    which is why relaunching the installer failed until the next reboot (/run is
+    a tmpfs, the directory outlives the process). Treat any OSError as absent:
+    an unreachable socket is, from the UI's point of view, no socket at all.
+    """
+    try:
+        return socket_path.exists()
+    except OSError as exc:
+        logger.debug("Cannot stat %s (%s), treating as absent", socket_path, exc)
+        return False
+
+
 class EngineProcess:
     """
     Manages the Engine subprocess.
@@ -173,7 +192,7 @@ class EngineProcess:
                 raise LauncherError(f"Engine process died with code {returncode}: {stderr}")
 
             # Check if socket exists
-            if self.socket_path.exists():
+            if socket_is_present(self.socket_path):
                 # Try to connect
                 try:
                     client = create_ui_client(self.socket_path)
@@ -202,8 +221,10 @@ class EngineProcess:
 
         logger.info("Stopping engine process")
 
-        # Try graceful shutdown via IPC
-        if self.socket_path.exists():
+        # Try graceful shutdown via IPC. stop() runs from the start-up error
+        # handler too, so nothing here may raise: an exception would replace the
+        # real failure with a misleading traceback.
+        if socket_is_present(self.socket_path):
             try:
                 client = create_ui_client(self.socket_path)
                 client.connect()

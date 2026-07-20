@@ -601,6 +601,10 @@ class EngineBridge(QObject):
     jobCompleted = Signal(str, bool)  # job_name, success
     errorOccurred = Signal(str, str)  # job_name, error_message
     requirementsChanged = Signal()  # emitted when requirements check completes
+    # Emitted when startInstallation() declines to start. Without it the refusal
+    # was a silent return: QML had already switched to the Installing view and
+    # had no way to learn the engine never started.
+    installationRefused = Signal(str, str)  # reason_code, human_readable_message
 
     # Network settings signals
     networkSettingsLaunched = Signal(str)  # command that was launched
@@ -1669,6 +1673,29 @@ class EngineBridge(QObject):
         """Get total number of jobs."""
         return len(self._engine.jobs)
 
+    def _installation_blocker(self) -> tuple[str, str] | None:
+        """
+        Return the reason the installation must not start, or None.
+
+        Checked before anything is written to disk. A dry run stays exempt: it
+        touches nothing and is the mode used for UI work.
+        """
+        if self._dry_run:
+            return None
+
+        if hasattr(os, "geteuid") and os.geteuid() != 0:
+            return (
+                "not-root",
+                "Omnis must run as root to install. Relaunch it with administrator "
+                "privileges (the AppImage needs sudo/pkexec).",
+            )
+
+        preflight = self._engine.run_preflight()
+        if not preflight.success:
+            return ("missing-tools", preflight.message)
+
+        return None
+
     @Slot()
     def startInstallation(self) -> None:
         """Start the installation process in a separate thread."""
@@ -1676,6 +1703,17 @@ class EngineBridge(QObject):
         if self._thread is not None and self._thread.isRunning():
             if self._debug:
                 print("[Engine] Installation already in progress")
+            self.installationRefused.emit(
+                "already-running", "An installation is already in progress."
+            )
+            return
+
+        blocker = self._installation_blocker()
+        if blocker is not None:
+            reason, message = blocker
+            if self._debug:
+                print(f"[Engine] Installation refused ({reason}): {message}")
+            self.installationRefused.emit(reason, message)
             return
 
         self.installationStarted.emit()
@@ -1729,6 +1767,9 @@ class EngineBridge(QObject):
         while an installation is still running.
         """
         if self._thread is not None and self._thread.isRunning():
+            self.installationRefused.emit(
+                "already-running", "An installation is already in progress."
+            )
             return
 
         self._installation_status = "idle"

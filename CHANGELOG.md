@@ -5,6 +5,19 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+Correctifs bloquants issus des tests de la première ISO d'installation (ticket glf-os#222).
+Analyse complète et suivi des 31 points remontés : `docs/suivi-tests-iso-0.6.0.md`.
+
+### Fixed
+
+- **Impossible de relancer l'installeur après l'avoir fermé** : le moteur privilégié créait `/run/omnis` en `0700 root`, et l'interface non privilégiée levait une `PermissionError` en sondant le socket au lieu de le considérer comme absent. Le premier lancement passait, tous les suivants échouaient **jusqu'au redémarrage** (`/run` est un tmpfs), sans le moindre message quand l'installeur était lancé depuis le menu d'applications. Le sondage ne lève plus, et le moteur cède désormais la propriété du socket à l'utilisateur qui l'a lancé.
+- **Outils manquants détectés après l'effacement du disque** : `udevadm`, `mkpasswd`/`openssl`, `nixos-generate-config` et `nixos-install` n'étaient réclamés qu'à l'exécution, soit **après** le `wipefs` du disque cible — un testeur s'est retrouvé avec un disque effacé et une installation irrécupérable. Tous les outils requis par les jobs configurés sont désormais vérifiés **avant le démarrage du premier job**, et `udevadm`, `mkpasswd` et `openssl` sont maintenant embarqués dans le paquet.
+- **Le bouton « Réessayer » pouvait rejouer le partitionnement** : l'interface basculait sur l'écran d'installation sans attendre le moteur, et les refus côté moteur étaient silencieux. La bascule suit désormais le signal `installationStarted`, le bouton est inerte pendant une installation, et tout refus est remonté à l'utilisateur.
+- **Aucune barrière sans droits root** : l'AppImage laissait dérouler tout l'assistant avant d'échouer sur `Permission denied: '/mnt/target'`. L'installation est maintenant refusée d'emblée, avec un message expliquant qu'il faut relancer avec les droits administrateur.
+- **Le média d'installation était proposé comme disque cible** : l'exclusion reposait sur une sonde unique (`findmnt /`) inopérante sur un live ISO, où la racine est un tmpfs — la clé USB portant l'installeur apparaissait donc dans la liste. La détection croise désormais plusieurs sources : fichiers de backing des périphériques loop, points de montage du live et racines de montage amovible.
+
 ## [0.6.1] - 2026-07-12
 
 Correctifs remontés par les premiers testeurs : partitionnement bloqué après un formatage externe, et installeur en anglais pour les locales régionales.
