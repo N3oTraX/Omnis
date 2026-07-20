@@ -312,6 +312,9 @@ class TestIsLiveDisk:
             assert set(disk.keys()) == {
                 "name",
                 "model",
+                "serial",
+                "wwn",
+                "transport",
                 "size",
                 "sizeBytes",
                 "sizeSectors",

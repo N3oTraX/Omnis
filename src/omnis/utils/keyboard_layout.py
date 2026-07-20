@@ -17,58 +17,14 @@ from __future__ import annotations
 
 import logging
 import os
-import pwd
 import shutil
 import subprocess
+
+from omnis.utils.session import wrap_in_user_session
 
 logger = logging.getLogger(__name__)
 
 _COMMAND_TIMEOUT = 5  # seconds
-
-
-def _session_user() -> tuple[str, dict[str, str]] | None:
-    """Utilisateur de la session graphique + env DBus, quand on tourne en root.
-
-    L'installeur s'exécute en root (sudo) ; ``gsettings`` doit viser le dconf de
-    la session GNOME de l'utilisateur, pas celui de root. Retourne ``None`` si on
-    n'est pas root (on est déjà l'utilisateur) ou si l'uid est introuvable.
-    """
-    if os.geteuid() != 0:
-        return None
-    uid: int | None = None
-    sudo_uid = os.environ.get("SUDO_UID", "")
-    if sudo_uid.isdigit() and int(sudo_uid) != 0:
-        uid = int(sudo_uid)
-    if uid is None:
-        runtime = os.environ.get("XDG_RUNTIME_DIR", "")
-        if runtime.startswith("/run/user/"):
-            try:
-                uid = int(runtime.rsplit("/", 1)[1])
-            except ValueError:
-                uid = None
-    if uid is None:
-        uid = 1000
-    try:
-        user = pwd.getpwuid(uid).pw_name
-    except KeyError:
-        return None
-    env = {
-        "XDG_RUNTIME_DIR": f"/run/user/{uid}",
-        "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus",
-    }
-    return user, env
-
-
-def _in_session(cmd: list[str]) -> list[str] | None:
-    """Enrobe ``cmd`` pour l'exécuter dans la session de l'utilisateur si root."""
-    su = _session_user()
-    if su is None:
-        return cmd
-    user, env = su
-    if not shutil.which("runuser"):
-        return None
-    env_args = [f"{k}={v}" for k, v in env.items()]
-    return ["runuser", "-u", user, "--", "env", *env_args, *cmd]
 
 
 def build_xkb_layout_string(layout: str, variant: str) -> str:
@@ -114,14 +70,14 @@ def apply_keyboard_layout_live(layout: str, variant: str = "") -> bool:
 def _apply_via_gsettings(xkb_layout: str) -> bool:
     """Apply the layout via GNOME's input-sources (GNOME Wayland/X11)."""
     sources_value = f"[('xkb', '{xkb_layout}')]"
-    set_sources = _in_session(
+    set_sources = wrap_in_user_session(
         ["gsettings", "set", "org.gnome.desktop.input-sources", "sources", sources_value]
     )
-    set_current = _in_session(
+    set_current = wrap_in_user_session(
         ["gsettings", "set", "org.gnome.desktop.input-sources", "current", "0"]
     )
     if set_sources is None or set_current is None:
-        logger.warning("Cannot reach the user session (runuser missing) for gsettings")
+        logger.warning("Cannot reach the user session for gsettings")
         return False
     try:
         subprocess.run(set_sources, check=True, timeout=_COMMAND_TIMEOUT)
@@ -138,9 +94,9 @@ def _apply_via_setxkbmap(layout: str, variant: str) -> bool:
     cmd = ["setxkbmap", layout]
     if variant:
         cmd += ["-variant", variant]
-    wrapped = _in_session(cmd)
+    wrapped = wrap_in_user_session(cmd)
     if wrapped is None:
-        logger.warning("Cannot reach the user session (runuser missing) for setxkbmap")
+        logger.warning("Cannot reach the user session for setxkbmap")
         return False
     try:
         subprocess.run(wrapped, check=True, timeout=_COMMAND_TIMEOUT)

@@ -100,13 +100,62 @@ class TestNixosJobBasics:
 
     def test_default_flake_config(self) -> None:
         job = NixosJob()
-        assert job._flake_source() == "/iso/nixos"
+        with patch.object(NixosJob, "_resolve_flake_source", return_value=None):
+            assert job._flake_source() == "/iso/nixos"
         assert job._flake_attr() == "GLF-OS"
 
     def test_config_overrides_flake(self) -> None:
         job = NixosJob(config={"flake_source": "/custom/src", "flake_attr": "CUSTOM"})
-        assert job._flake_source() == "/custom/src"
+        with patch.object(NixosJob, "_resolve_flake_source", return_value=None):
+            assert job._flake_source() == "/custom/src"
         assert job._flake_attr() == "CUSTOM"
+
+
+class TestFlakeSourceResolution:
+    """The GLF flake path must be probed, not hard-coded (real ISOs ship /iso-cfg)."""
+
+    def test_candidates_start_with_the_configured_path(self) -> None:
+        job = NixosJob(config={"flake_source": "/custom/src"})
+        assert job._flake_candidates()[0] == "/custom/src"
+        assert "/iso-cfg" in job._flake_candidates()
+
+    def test_default_candidates_cover_the_known_layouts(self) -> None:
+        assert NixosJob()._flake_candidates() == ["/iso/nixos", "/iso-cfg", "/etc/nixos"]
+
+    def test_configured_path_is_not_duplicated(self) -> None:
+        job = NixosJob(config={"flake_source": "/iso-cfg"})
+        assert job._flake_candidates().count("/iso-cfg") == 1
+
+    def test_resolves_to_the_second_candidate(self, tmp_path: Any) -> None:
+        """The shipped ISO has no /iso/nixos: resolution must fall through to /iso-cfg."""
+        iso_cfg = tmp_path / "iso-cfg"
+        iso_cfg.mkdir()
+        (iso_cfg / "flake.nix").write_text("{}", encoding="utf-8")
+
+        job = NixosJob()
+        candidates = [str(tmp_path / "iso" / "nixos"), str(iso_cfg), str(tmp_path / "etc")]
+        with patch.object(NixosJob, "_flake_candidates", return_value=candidates):
+            assert job._resolve_flake_source() == str(iso_cfg)
+            assert job._flake_source() == str(iso_cfg)
+
+    def test_directory_without_flake_nix_is_rejected(self, tmp_path: Any) -> None:
+        (tmp_path / "iso-cfg").mkdir()
+        job = NixosJob()
+        with patch.object(NixosJob, "_flake_candidates", return_value=[str(tmp_path / "iso-cfg")]):
+            assert job._resolve_flake_source() is None
+
+    def test_validation_error_lists_every_path_tried(self, tmp_path: Any) -> None:
+        job = NixosJob()
+        candidates = [str(tmp_path / "a"), str(tmp_path / "b"), str(tmp_path / "c")]
+        with (
+            patch.object(NixosJob, "_flake_candidates", return_value=candidates),
+            patch("omnis.jobs.nixos.Path.is_dir", return_value=True),
+        ):
+            result = job.validate(_context(dry_run=False))
+
+        assert result.success is False
+        for candidate in candidates:
+            assert candidate in result.message
 
     def test_job_class_is_loadable_name(self) -> None:
         # The dynamic loader picks a class ending in 'Job' inheriting BaseJob.
@@ -436,6 +485,7 @@ class TestInstallSequence:
             patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
             patch("omnis.jobs.nixos.Path.is_dir", return_value=True),
             patch("omnis.jobs.nixos.Path.exists", return_value=True),
+            patch("omnis.jobs.nixos.Path.is_file", return_value=True),
             patch("omnis.jobs.nixos.Path.mkdir"),
             patch("omnis.jobs.nixos.Path.write_text"),
         ):
@@ -483,6 +533,7 @@ class TestInstallSequence:
             patch("omnis.jobs.nixos.subprocess.run", side_effect=fake_run),
             patch("omnis.jobs.nixos.Path.is_dir", return_value=True),
             patch("omnis.jobs.nixos.Path.exists", return_value=True),
+            patch("omnis.jobs.nixos.Path.is_file", return_value=True),
         ):
             result = job.run(_context(dry_run=False, confirmed=True))
 
@@ -520,6 +571,7 @@ class TestSecurityGuards:
             patch("omnis.jobs.nixos.subprocess.run") as mock_run,
             patch("omnis.jobs.nixos.Path.is_dir", return_value=True),
             patch("omnis.jobs.nixos.Path.exists", return_value=True),
+            patch("omnis.jobs.nixos.Path.is_file", return_value=True),
         ):
             result = job.run(_context(dry_run=False, confirmed=False))
         assert result.success is False
@@ -542,6 +594,7 @@ class TestSecurityGuards:
             patch("omnis.jobs.nixos.subprocess.Popen", side_effect=fake_popen),
             patch("omnis.jobs.nixos.Path.is_dir", return_value=True),
             patch("omnis.jobs.nixos.Path.exists", return_value=True),
+            patch("omnis.jobs.nixos.Path.is_file", return_value=True),
             patch("omnis.jobs.nixos.Path.mkdir"),
             patch("omnis.jobs.nixos.Path.write_text"),
         ):
@@ -653,6 +706,30 @@ class TestCleanup:
         cmd = mock_run.call_args[0][0]
         assert cmd[:2] == ["umount", "-R"]
         assert cmd[2] == "/mnt/target"
+
+    def test_cleanup_logs_success_only_on_exit_zero(self, caplog: Any) -> None:
+        job = NixosJob()
+        with (
+            patch("omnis.jobs.nixos.subprocess.run") as mock_run,
+            caplog.at_level(logging.INFO, logger="omnis.jobs.nixos"),
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            job.cleanup(_context(dry_run=False))
+        assert "Unmounted /mnt/target (recursive)" in caplog.text
+
+    def test_cleanup_warns_instead_of_claiming_success(self, caplog: Any) -> None:
+        """A failed umount must never be logged as an unmount."""
+        job = NixosJob()
+        with (
+            patch("omnis.jobs.nixos.subprocess.run") as mock_run,
+            caplog.at_level(logging.INFO, logger="omnis.jobs.nixos"),
+        ):
+            mock_run.return_value = MagicMock(returncode=32, stdout="", stderr="target is busy")
+            job.cleanup(_context(dry_run=False))
+
+        assert "Unmounted /mnt/target (recursive)" not in caplog.text
+        assert "Failed to unmount /mnt/target" in caplog.text
+        assert "target is busy" in caplog.text
 
     def test_cleanup_never_raises(self) -> None:
         job = NixosJob()

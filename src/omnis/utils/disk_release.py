@@ -67,12 +67,45 @@ def _mountpoints(device: str) -> list[str]:
 
 
 def _swap_devices() -> set[str]:
+    """Return the first column of every ``/proc/swaps`` entry.
+
+    Entries are block devices OR swapfile paths: Omnis creates its swap as a
+    file under ``target_root``, which is never a member of the target disk.
+    """
     try:
         with open("/proc/swaps", encoding="utf-8") as handle:
             lines = handle.read().splitlines()[1:]
     except OSError:
         return set()
     return {fields[0] for line in lines if (fields := line.split())}
+
+
+def _backing_device(path: str) -> str:
+    """Return the block device carrying ``path`` ("" when it cannot be resolved)."""
+    result = _run(["findmnt", "-no", "SOURCE", "-T", path])
+    if result.returncode != 0:
+        return ""
+    source = result.stdout.strip().splitlines()
+    if not source:
+        return ""
+    # btrfs reports ``/dev/sda2[/subvol]``; keep the device part only.
+    return source[0].strip().split("[", 1)[0]
+
+
+def _swap_holders(members: list[str]) -> list[tuple[str, bool]]:
+    """Return ``(entry, is_member)`` for every swap entry backed by ``members``.
+
+    ``is_member`` is False for a swapfile: the entry is a path, resolved to its
+    filesystem's device before deciding whether it belongs to the target disk.
+    """
+    member_set = set(members)
+    holders: list[tuple[str, bool]] = []
+    for entry in sorted(_swap_devices()):
+        if entry in member_set:
+            holders.append((entry, True))
+        elif _backing_device(entry) in member_set:
+            holders.append((entry, False))
+    return holders
 
 
 def holds_running_system(disk: str) -> bool:
@@ -86,12 +119,12 @@ def holds_running_system(disk: str) -> bool:
 
 def disk_holders(disk: str) -> list[str]:
     """Return a human-readable list of everything still holding ``disk``."""
-    swaps = _swap_devices()
+    members = disk_members(disk)
     holders: list[str] = []
-    for member in disk_members(disk):
+    for member in members:
         holders.extend(f"{member} is mounted on {target}" for target in _mountpoints(member))
-        if member in swaps:
-            holders.append(f"{member} is in use as swap")
+    for entry, is_member in _swap_holders(members):
+        holders.append(f"{entry} is in use as {'swap' if is_member else 'a swap file'}")
     return holders
 
 
@@ -99,13 +132,22 @@ def release_disk(disk: str) -> list[str]:
     """
     Free ``disk`` so wipefs/parted can open it exclusively.
 
-    Unmounts every mountpoint backed by the disk (deepest first), disables swap and
-    tears down stacked mappers. Best-effort: whatever survives is reported by
-    :func:`disk_holders`. Callers must reject a disk backing the running system
-    (see :func:`holds_running_system`) before calling this.
+    Disables swap FIRST, then unmounts every mountpoint backed by the disk
+    (deepest first), then tears down stacked mappers. The ordering matters: an
+    active swapfile living under a mountpoint keeps that mountpoint busy, so
+    ``umount -R`` would fail while the swap is still on.
+
+    Best-effort: whatever survives is reported by :func:`disk_holders`. Callers
+    must reject a disk backing the running system (see
+    :func:`holds_running_system`) before calling this.
     """
     actions: list[str] = []
     members = disk_members(disk)
+
+    for entry, is_member in _swap_holders(members):
+        if _run(["swapoff", entry]).returncode == 0:
+            label = "swap on" if is_member else "swap file"
+            actions.append(f"disabled {label} {entry}")
 
     mounts = [(target, member) for member in members for target in _mountpoints(member)]
     for target, member in sorted(mounts, key=lambda mount: mount[0].count("/"), reverse=True):
@@ -113,11 +155,6 @@ def release_disk(disk: str) -> list[str]:
             continue
         if _run(["umount", "-R", target]).returncode == 0:
             actions.append(f"unmounted {member} from {target}")
-
-    swaps = _swap_devices()
-    for member in members:
-        if member in swaps and _run(["swapoff", member]).returncode == 0:
-            actions.append(f"disabled swap on {member}")
 
     for member, kind in reversed(_member_types(disk)):
         if kind == "crypt" and _run(["cryptsetup", "close", member]).returncode == 0:

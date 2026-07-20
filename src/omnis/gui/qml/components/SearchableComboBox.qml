@@ -40,10 +40,12 @@ Item {
 
     // Filter function with enhanced timezone search
     function filterItems(searchText) {
-        if (!searchText || searchText.length === 0) {
+        // Trimmed: a stray leading/trailing space would otherwise empty the list
+        var query = searchText ? searchText.trim() : ""
+        if (query.length === 0) {
             filteredModel = model
         } else {
-            var lowerSearch = searchText.toLowerCase()
+            var lowerSearch = query.toLowerCase()
             var filtered = []
             for (var i = 0; i < model.length; i++) {
                 var item = model[i].toLowerCase()

@@ -10,6 +10,7 @@ Verifies that:
 
 from __future__ import annotations
 
+import configparser
 import re
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -20,6 +21,9 @@ from omnis.i18n.translator import Translator
 
 # Translations directory
 TRANSLATIONS_DIR = Path(__file__).parent.parent.parent / "src" / "omnis" / "gui" / "translations"
+
+# INI catalogs directory
+I18N_DIR = Path(__file__).parent.parent.parent / "config" / "i18n"
 
 # All locales declared in the bridge.py LOCALE_NATIVE_NAMES
 # This list should match the locales defined in bridge.py
@@ -362,6 +366,75 @@ class TestTranslationCoverage:
         # Check that at least some files have content
         non_empty = [s for s in sizes if s[1] > 100]
         assert len(non_empty) >= 2, "At least 2 locales should have non-empty translations"
+
+
+class TestFrenchIniCatalog:
+    """The French .conf catalog must be accented, like the Qt .ts catalog.
+
+    An unaccented .conf mixed with the accented Qt translations showed both
+    spellings on the same screen.
+    """
+
+    ACCENTED = "àâäçéèêëîïôöùûüÿœÀÂÄÇÉÈÊËÎÏÔÖÙÛÜŸŒ"
+
+    @staticmethod
+    def _load_fr() -> configparser.ConfigParser:
+        parser = configparser.ConfigParser(interpolation=None)
+        read = parser.read(I18N_DIR / "fr_FR.conf", encoding="utf-8")
+        assert read, "config/i18n/fr_FR.conf is missing or unreadable"
+        return parser
+
+    def test_fr_catalog_is_parsable(self) -> None:
+        """fr_FR.conf must stay a valid UTF-8 INI file."""
+        parser = self._load_fr()
+        assert "common" in parser.sections()
+        assert parser["common"]["app_name"]
+
+    def test_fr_catalog_is_accented(self) -> None:
+        """A substantial share of the French values must carry accents."""
+        parser = self._load_fr()
+        accented = [
+            value
+            for section in parser.sections()
+            for value in parser[section].values()
+            if any(char in self.ACCENTED for char in value)
+        ]
+        assert len(accented) > 50, f"Only {len(accented)} accented French strings"
+
+    @pytest.mark.parametrize(
+        ("section", "key", "expected"),
+        [
+            ("common", "success", "Succès"),
+            ("common", "powered_by", "Propulsé par {app_name}"),
+            ("welcome", "checking_requirements", "Vérification de la configuration requise..."),
+            ("locale", "region", "Région"),
+            ("packages", "flavors_title", "Éditions Disponibles"),
+            ("finished", "title", "Installation Terminée !"),
+            ("errors", "retry", "Réessayer"),
+        ],
+    )
+    def test_fr_known_strings(self, section: str, key: str, expected: str) -> None:
+        """Spot-check accented values, including capitals."""
+        assert self._load_fr()[section][key] == expected
+
+    def test_fr_placeholders_are_preserved(self) -> None:
+        """Format placeholders must survive re-accentuation."""
+        parser = self._load_fr()
+        assert "{distro_name}" in parser["welcome"]["title"]
+        assert "{value} Go" in parser["requirements"]["ram_current"]
+        assert "{percent}" in parser["install"]["progress"]
+        assert "{seconds}" in parser["finished"]["auto_reboot"]
+
+    def test_fr_keys_match_english_catalog(self) -> None:
+        """Re-accentuation must not touch section names or keys."""
+        fr = self._load_fr()
+        en = configparser.ConfigParser(interpolation=None)
+        en.read(I18N_DIR / "en_US.conf", encoding="utf-8")
+
+        for section in en.sections():
+            assert section in fr.sections(), f"Missing section in fr_FR.conf: {section}"
+            missing = set(en[section].keys()) - set(fr[section].keys())
+            assert not missing, f"Missing keys in fr_FR.conf [{section}]: {sorted(missing)}"
 
 
 class TestRegionalLocaleFallback:

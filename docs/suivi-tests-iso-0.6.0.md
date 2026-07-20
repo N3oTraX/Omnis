@@ -4,7 +4,7 @@ Ticket : gaming-linux-fr/glf-os/glf-os#222
 Testeurs : @Didic, @Pensionman, @Jeepyto, @Kuraudo
 Base analysée : Omnis `develop` (v0.6.1), glf-os `feat/omnis-installer`, ISO `25.11.20260218.6d41bc2`
 
-Légende statut : ✅ corrigé · 🔧 correctif identifié · 🔍 à confirmer · 💡 évolution · ❎ non-bug
+Légende statut : ✅ corrigé · 🔍 à confirmer avec les testeurs · 💡 évolution · ❎ non-bug
 
 ---
 
@@ -25,13 +25,25 @@ l'absence de `mkpasswd`, et le risque de rejouer un wipe via le bouton Retry.
 
 ---
 
-## 2. Bloquants (P0) — ✅ corrigés, en attente de validation sur ISO
+> **État au 2026-07-20 — tous les points côté Omnis sont corrigés sur `develop`.**
+>
+> Restent ouverts, hors dépôt Omnis ou en attente d'information :
+> le correctif `kbd.*` de l'entrée de démarrage française (section 7), le choix de
+> canal stable/testing (P3-1, dépend d'une option NixOS côté distribution), et les
+> trois points en attente d'information des testeurs (section 8).
+>
+> **Validation sur la VM700** : `ruff check` et `ruff format` propres ; **mypy strict
+> sans erreur sur 40 fichiers** ; **1042 tests unitaires au vert** (contre 952 avant
+> ces travaux). Les 13 échecs restants sont préexistants et environnementaux —
+> démontré en rejouant la suite sur la base non modifiée : 12 tests d'intégration
+> QML que l'environnement de test ad-hoc ne peut pas charger faute de modules Qt, et
+> un test d'écriture dans `/var/log`. Le paquet Nix build et l'interface se charge
+> sans aucune erreur QML.
+>
+> **Reste à valider sur une ISO reconstruite** : aucun de ces correctifs n'a encore
+> été éprouvé en conditions réelles de live USB.
 
-Les cinq sont implémentés sur `develop` (non publié). Validé sur la VM700 : lint et
-format propres, 952 tests unitaires au vert (les 13 échecs restants sont préexistants
-et environnementaux — vérifié en rejouant la base non modifiée), paquet Nix qui build,
-interface QML qui se charge sans erreur, et comportements P0 exercés un par un.
-Reste à valider sur une vraie ISO reconstruite.
+## 2. Bloquants (P0) — ✅ corrigés
 
 ### P0-1 — Aucun contrôle préalable des outils requis : le disque est effacé avant l'échec
 *Remonté par @Kuraudo (bugs 2, 5, 6)*
@@ -47,7 +59,7 @@ Aucun preflight n'existe : `SystemRequirementsChecker.check_all()`
 (`partition.py:1120`), et le job `nixos` s'exécute deux jobs plus tard. D'où le scénario
 vécu : disque effacé, puis blocage irrécupérable.
 
-🔧 Compléter `runtimeTools` **et** ajouter un check `is_critical` « outils requis » qui
+✅ Compléter `runtimeTools` **et** ajouter un check `is_critical` « outils requis » qui
 `shutil.which()` la liste complète des binaires de tous les jobs activés, avant l'écran de
 résumé. Les deux volets ensemble — compléter la liste seule laisserait le piège armé pour
 le prochain outil oublié.
@@ -71,7 +83,7 @@ drwx------ 2 root root /run/omnis
 exists() RAISED PermissionError [Errno 13] Permission denied: '/run/omnis/ipc.sock'
 ```
 
-🔧 Blinder les deux `Path.exists()` (`try/except OSError → False`), rendre `stop()` défensif,
+✅ Blinder les deux `Path.exists()` (`try/except OSError → False`), rendre `stop()` défensif,
 créer `/run/omnis` via `systemd-tmpfiles` avec un mode et un groupe exploitables.
 À trancher au passage : le mode fork ne sert aujourd'hui à rien, `main.py:357-366` retombant
 de toute façon sur le bridge direct. Le supprimer réglerait la classe entière de problèmes.
@@ -85,7 +97,7 @@ Les garde-fous Python (`bridge.py:1675`, `:1727`) retournent en silence sans ém
 signal, donc QML n'apprend jamais que l'appel a été rejeté. Chaque cycle **relance la liste
 de jobs depuis le job 0**, job `partition` inclus.
 
-🔧 `enabled:` sur le bouton Retry, bascule de vue pilotée par le signal `installationStarted`
+✅ `enabled:` sur le bouton Retry, bascule de vue pilotée par le signal `installationStarted`
 plutôt qu'en amont, et signal de refus quand le garde-fou `isRunning()` se déclenche.
 
 ### P0-4 — Aucune barrière quand l'installeur tourne sans droits root
@@ -96,7 +108,7 @@ En AppImage, `main.py:456` force `--no-fork` (moteur intégré) et se contente d
 d'échouer sur `Permission denied: '/mnt/target'`. `check_root_privileges()`
 (`launcher.py:403`) existe mais n'est appelé nulle part.
 
-🔧 Refus bloquant en tête de `startInstallation()` (`bridge.py:1672`) + check `is_critical`
+✅ Refus bloquant en tête de `startInstallation()` (`bridge.py:1672`) + check `is_critical`
 dans l'écran de prérequis.
 
 ### P0-5 — Le média live est proposé comme disque cible
@@ -110,13 +122,13 @@ piste alternative n'existe dans le code (ni `findiso=`, ni loop backing file, ni
 Le garde-fou de dernier recours `holds_running_system()` ne rattrape pas non plus, le
 squashfs étant monté via un loop device qui n'apparaît pas comme enfant de `sdb`.
 
-🔧 Détection multi-sources (backing file des `loop*`, `findiso=`/`root=` du cmdline,
+✅ Détection multi-sources (backing file des `loop*`, `findiso=`/`root=` du cmdline,
 croisement `findmnt` sur `/iso`, `/nix/.ro-store`), et à défaut de certitude, désélection
 par défaut plutôt qu'exclusion silencieuse.
 
 ---
 
-## 3. Fonctionnels majeurs (P1)
+## 3. Fonctionnels majeurs (P1) — ✅ corrigés
 
 ### P1-1 — « Langue FR au boot → installeur en anglais »
 *Remonté par @Didic (1), @Pensionman (3) — @Jeepyto non touché*
@@ -142,7 +154,7 @@ Wi-Fi *depuis* l'installeur.
 
 Le comportement était donc **non déterministe et dépendant du réseau**.
 
-🔧 Côté glf-os : ajouter `boot.kernelParams = [ "kbd.layout=fr" "kbd.keymap=fr"
+✅ Côté glf-os : ajouter `boot.kernelParams = [ "kbd.layout=fr" "kbd.keymap=fr"
 "kbd.locale=fr_FR.UTF-8" ]` à la config de base. Côté Omnis, en défense : replier sur
 `LANG` / `localectl` de la session live avant le GeoIP.
 
@@ -159,7 +171,7 @@ Bug secondaire découvert : `"qwerty"` **n'est pas une variante XKB valide**, et
 ailleurs `_update_keyboard_variants()` n'étant appelé que dans la branche de confiance, le
 combo « Variante » reste vide quand la détection échoue.
 
-🔧 Appeler `_update_keyboard_variants()` inconditionnellement et remplacer le défaut
+✅ Appeler `_update_keyboard_variants()` inconditionnellement et remplacer le défaut
 `"qwerty"` par `""`.
 
 ### P1-3 — « Taper Europe/Paris en entier ne renvoie aucun résultat »
@@ -184,7 +196,7 @@ Chemin unique codé en dur (`nixos.py:453`), aucun repli. Vérifié : l'ISO cont
 `iso-cfg/` et **pas** de répertoire `nixos/`. En live, le module ISO surcharge la valeur,
 donc le bug ne se manifeste que hors live — mais le défaut de conception est réel.
 
-🔧 Résolution par liste de candidats (`flake_source` explicite, `/iso/nixos`, `/iso-cfg`,
+✅ Résolution par liste de candidats (`flake_source` explicite, `/iso/nixos`, `/iso-cfg`,
 `/etc/nixos`), premier contenant `flake.nix` ; échec listant les chemins essayés.
 
 ### P1-5 — Disque « busy », SSD à déverrouiller via KDE Partition Manager
@@ -204,7 +216,7 @@ vérification post-libération avec liste des holders). Trois trous subsistent :
 3. **Journal ext4 orphelin** — provoqué par le `umount -l` de `finished.py:188`, que
    `release_disk()` ne peut plus résoudre au run suivant.
 
-🔧 Inverser l'ordre, étendre le `swapoff` aux swapfiles (`findmnt -no SOURCE -T`), brancher
+✅ Inverser l'ordre, étendre le `swapoff` aux swapfiles (`findmnt -no SOURCE -T`), brancher
 la libération sur le chemin manuel, bannir `umount -l`.
 
 ### P1-6 — L'espace disque n'affiche qu'un seul disque
@@ -216,12 +228,12 @@ secondaire plus grand que son NVMe. Les NVMe sont bien énumérés, ce n'est pas
 manquant. Ce check relit `/sys/block` à la main et ignore `disk_detector.list_disks()`, donc
 il compte aussi la clé USB live.
 
-🔧 Consommer `disk_detector.list_disks()` et afficher une ligne par disque ; statut global
+✅ Consommer `disk_detector.list_disks()` et afficher une ligne par disque ; statut global
 « au moins un disque ≥ minimum ».
 
 ---
 
-## 4. UX et confort (P2)
+## 4. UX et confort (P2) — ✅ corrigés
 
 ### P2-1 — « Votre système remplit toutes les exigences » malgré des points orange
 *Remonté par @Didic (2)*
@@ -230,7 +242,7 @@ Le message n'a que **deux états**, pilotés par `canProceed`, vrai dès qu'aucu
 critique — donc vrai en présence d'avertissements (`RequirementsOverlay.qml:109`).
 `all_passed` existe côté Python (`requirements.py:67`) mais n'est pas exposé.
 
-🔧 Exposer `hasWarnings` et passer à un message à 3 états + pastille orange.
+✅ Exposer `hasWarnings` et passer à un message à 3 états + pastille orange.
 1 nouvelle chaîne i18n à propager dans les 37 `.ts`.
 
 ### P2-2 — Boutons radio et cases à cocher illisibles
@@ -245,7 +257,7 @@ l'indicateur : **≈ 1.68:1**, là où WCAG 2.1 exige 3:1. Même défaut sur 6 `
 Aucune clé de `theme.yaml` ne peut corriger ça en l'état, ces contrôles passant par la
 palette Qt et non par le thème.
 
-🔧 Définir un `indicator: Rectangle` explicite sur le modèle de `UsersView.qml:715-749`
+✅ Définir un `indicator: Rectangle` explicite sur le modèle de `UsersView.qml:715-749`
 (déjà correct dans le projet) : anneau, bordure `primary` si coché / `text_muted` sinon,
 pastille pleine. Donne ≈ 4.6:1.
 
@@ -262,7 +274,7 @@ croix rouge et la jauge indique « Faible » en rouge — l'utilisateur conclut 
 c'est obligatoire. Deux testeurs sur quatre s'en sont plaints : le message est à revoir, pas
 la règle.
 
-🔧 Rendre les 4 critères visuellement non bloquants (icône neutre plutôt que croix rouge) —
+✅ Rendre les 4 critères visuellement non bloquants (icône neutre plutôt que croix rouge) —
 règle sans doute l'essentiel de la plainte. Optionnellement, case « autoriser un mot de
 passe faible » abaissant le minimum, avec avertissement.
 
@@ -276,7 +288,7 @@ mais la connexion exige un agent secret enregistré sur le bus de **session** po
 la passphrase. Root n'y a pas accès → échec silencieux. Par le menu GNOME, l'outil tourne
 dans la session utilisateur, avec l'agent → ça marche.
 
-🔧 Le patron correct existe déjà dans le dépôt : `keyboard_layout.py:29-71` (`_in_session()`)
+✅ Le patron correct existe déjà dans le dépôt : `keyboard_layout.py:29-71` (`_in_session()`)
 résout `SUDO_UID`, reconstruit `XDG_RUNTIME_DIR` + `DBUS_SESSION_BUS_ADDRESS` et enrobe en
 `runuser`. À factoriser et appliquer au lancement réseau.
 
@@ -288,7 +300,7 @@ démarré au *lancement* de l'outil et non à sa fermeture. Choisir un SSID et s
 passphrase prend bien plus de 5 s → l'unique recheck tombe dans le vide. Le PID de l'outil
 est jeté (`Popen` fire-and-forget), et aucun bouton « Revérifier » n'existe.
 
-🔧 Polling borné (`repeat: true`, 3 s, arrêt sur connexion ou après N essais) + bouton
+✅ Polling borné (`repeat: true`, 3 s, arrêt sur connexion ou après N essais) + bouton
 « Revérifier » explicite dans l'en-tête des prérequis.
 
 ### P2-6 — L'aperçu disque ne reflète aucun choix d'options
@@ -304,7 +316,7 @@ Cas « hibernation » : la couleur violette est bien déclarée, mappée et pré
 légende, mais elle ne pourra **jamais** s'afficher, la stratégie `hibernate` créant un
 **fichier** de swap et non une partition. La légende promet ce que l'architecture ne produit pas.
 
-🔧 Extraire de `_partition_auto()` une fonction pure `plan_auto_layout(...)`, l'exposer sur
+✅ Extraire de `_partition_auto()` une fonction pure `plan_auto_layout(...)`, l'exposer sur
 le bridge et y brancher l'histobar en mode auto. Émettre le swapfile comme pseudo-segment,
 ou basculer `hibernate` sur une vraie partition swap (plus robuste pour le resume de toute façon).
 
@@ -320,7 +332,7 @@ Point aggravant : la sélection est stockée et re-résolue **par nom** (`bridge
 `:2412`). Un rafraîchissement qui permuterait `sda`/`sdb` sélectionnerait silencieusement le
 mauvais disque.
 
-🔧 Ajouter `SERIAL,WWN` aux colonnes lsblk, afficher `model` + série tronquée, et indexer la
+✅ Ajouter `SERIAL,WWN` aux colonnes lsblk, afficher `model` + série tronquée, et indexer la
 sélection sur un identifiant stable.
 
 ### P2-8 — La VF n'a pas d'accents
@@ -337,7 +349,7 @@ avec `FONTCONFIG_FILE` forcé), l'encodage est explicite (`configparser` en UTF-
 l'allemand, l'espagnol, l'italien, le portugais, le russe et le CJK passent par le **même
 chemin de code** sans problème.
 
-🔧 Ré-accentuer `config/i18n/fr_FR.conf` (255 lignes, mécanique).
+✅ Ré-accentuer `config/i18n/fr_FR.conf` (255 lignes, mécanique).
 
 ### P2-9 — GPU récent non reconnu
 *Remonté par @Kuraudo (bug 8)* — 🔍 **partiellement à confirmer**
@@ -351,7 +363,7 @@ log seul ne peut donc pas produire un avertissement.** Si un WARN a bien été o
 vient d'un autre chemin — probablement une détection en iGPU si la base `pci.ids` de l'ISO
 est trop ancienne pour Navi 44.
 
-🔧 Remplacer la liste plate par un parseur structuré produisant un tuple ordonnable
+✅ Remplacer la liste plate par un parseur structuré produisant un tuple ordonnable
 (génération, tier, suffixe), auto-extensible aux séries futures ; garder une liste
 d'exceptions. 🔍 Demander une sortie `lspci -v` au testeur pour trancher sur le WARN.
 
@@ -363,7 +375,7 @@ returncode jamais consulté). Même défaut pour la fermeture LUKS (`partition.p
 À l'inverse `_release_target_disk()` ne logge **rien du tout**, ni succès ni échec, sur une
 étape critique.
 
-🔧 Propager les codes de retour aux logs.
+✅ Propager les codes de retour aux logs.
 
 ---
 

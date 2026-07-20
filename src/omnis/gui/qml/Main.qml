@@ -211,6 +211,7 @@ ApplicationWindow {
                 showRequirements: engine.showRequirements
                 requirements: engine.requirementsModel
                 canProceed: engine.canProceed
+                hasWarnings: engine.hasRequirementWarnings
                 isCheckingRequirements: engine.isCheckingRequirements
 
                 primaryColor: root.primaryColor
@@ -234,9 +235,10 @@ ApplicationWindow {
                 onConfigureNetworkRequested: {
                     console.log("Launching network configuration...")
                     engine.launchNetworkSettings()
-                    // Schedule a recheck after a delay to allow user to configure network
-                    networkRecheckTimer.start()
+                    networkRecheckTimer.restartPolling()
                 }
+
+                onRecheckRequirementsRequested: engine.recheckInternetStatus()
 
                 Behavior on opacity {
                     NumberAnimation { duration: 300 }
@@ -726,6 +728,13 @@ ApplicationWindow {
             currentStep = 7  // Go to Finished view
         }
 
+        // recheckInternetStatus() relance déjà la vérification des prérequis :
+        // ici on se contente d'arrêter le sondage dès que la connexion est là.
+        function onInternetStatusChanged(connected) {
+            if (connected)
+                networkRecheckTimer.stop()
+        }
+
         function onInstallationRefused(reason, message) {
             console.warn("Installation refused (" + reason + "):", message)
             isInstalling = false
@@ -772,14 +781,30 @@ ApplicationWindow {
         onActivated: navigateNext()
     }
 
-    // Timer to recheck network status after user configures WiFi
+    // Sondage borné après ouverture des réglages réseau. Un tir unique à 5 s
+    // partait au LANCEMENT de l'outil, pas à sa fermeture : choisir un réseau et
+    // saisir une phrase de passe prend bien plus que ça, et le seul essai tombait
+    // systématiquement dans le vide — les prérequis restaient au rouge.
     Timer {
         id: networkRecheckTimer
-        interval: 5000  // 5 seconds delay to allow network connection
-        repeat: false
+        property int attemptsLeft: 0
+        readonly property int maxAttempts: 40  // ~2 min à 3 s d'intervalle
+
+        interval: 3000
+        repeat: true
         onTriggered: {
+            if (attemptsLeft <= 0) {
+                stop()
+                return
+            }
+            attemptsLeft -= 1
             console.log("Rechecking internet connectivity...")
             engine.recheckInternetStatus()
+        }
+
+        function restartPolling() {
+            attemptsLeft = maxAttempts
+            restart()
         }
     }
 

@@ -22,7 +22,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # lsblk columns requested (bytes for SIZE, plus topology/identity fields).
-_LSBLK_COLUMNS = "NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,MODEL,RM,HOTPLUG,TRAN,ROTA,PARTTYPENAME,START"
+# SERIAL/WWN identify a disk across reboots, where the sdX name does not.
+_LSBLK_COLUMNS = (
+    "NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,MODEL,SERIAL,WWN,RM,HOTPLUG,TRAN,ROTA,PARTTYPENAME,START"
+)
 
 # Disk geometry constants (lsblk reports START in 512-byte sectors).
 _SECTOR_SIZE = 512
@@ -231,6 +234,9 @@ def _mock_disks() -> list[dict[str, Any]]:
         {
             "name": "sda",
             "model": "Mock SSD 500G",
+            "serial": "MOCK-SSD-0001",
+            "wwn": "0x5000000000000001",
+            "transport": "sata",
             "size": _format_size(500 * 1024**3),
             "sizeBytes": 500 * 1024**3,
             "type": "SSD",
@@ -253,6 +259,9 @@ def _mock_disks() -> list[dict[str, Any]]:
         {
             "name": "nvme0n1",
             "model": "Mock NVMe 1T",
+            "serial": "MOCK-NVME-0002",
+            "wwn": "eui.0000000000000002",
+            "transport": "nvme",
             "size": _format_size(1024**4),
             "sizeBytes": 1024**4,
             "type": "SSD",
@@ -322,10 +331,18 @@ def _compute_segments(disk_sectors: int, partitions: list[dict[str, Any]]) -> li
     return segments
 
 
+def compute_segments(disk_sectors: int, partitions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Public entry point to lay an arbitrary partition list out over a disk."""
+    return _compute_segments(disk_sectors, partitions)
+
+
 def _build_disk(device: dict[str, Any]) -> dict[str, Any]:
     """Build a single disk dict (UI contract) from an lsblk disk node."""
     size_bytes = int(device.get("size", 0) or 0)
     model = (device.get("model") or "").strip()
+    serial = (device.get("serial") or "").strip()
+    wwn = (device.get("wwn") or "").strip()
+    transport = (device.get("tran") or "").strip()
     is_rotational = _coerce_bool(device.get("rota"))
     removable = _coerce_bool(device.get("hotplug")) or _coerce_bool(device.get("rm"))
 
@@ -339,6 +356,9 @@ def _build_disk(device: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": device.get("name", ""),
         "model": model,
+        "serial": serial,
+        "wwn": wwn,
+        "transport": transport,
         "size": _format_size(size_bytes),
         "sizeBytes": size_bytes,
         "sizeSectors": disk_sectors,
@@ -357,7 +377,8 @@ def list_disks() -> list[dict[str, Any]]:
     Returns a list of dicts following the shared UI histobar contract::
 
         {
-          "name": str, "model": str, "size": str, "sizeBytes": int,
+          "name": str, "model": str, "serial": str, "wwn": str,
+          "transport": str, "size": str, "sizeBytes": int,
           "type": "SSD" | "HDD", "removable": bool,
           "partitions": [
             {"name": str, "sizeBytes": int, "fstype": str, "partType": str}

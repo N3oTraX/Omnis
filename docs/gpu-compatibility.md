@@ -11,6 +11,8 @@ The Omnis Installer includes a GPU compatibility checker that:
 3. Classifies GPUs as dedicated (dGPU) or integrated (iGPU)
 4. Validates against configurable minimum requirements
 
+Ranking is done by **parsing the model name**, not by looking it up in a list. A card released after this document was written is ranked correctly as long as its name follows the usual naming scheme, so the tables below never need to be updated to accept a newer generation.
+
 ## Configuration
 
 GPU requirements are configured in the distribution's config file (e.g., `config/examples/glfos.yaml`) under the `jobs` section for the `welcome` job:
@@ -47,9 +49,36 @@ jobs:
 | `overrides.amd` | str | Minimum AMD model (empty = no minimum) |
 | `overrides.intel` | str | Minimum Intel model (empty = no minimum) |
 
+## Model Ranking
+
+`compare_models()` in `src/omnis/jobs/gpu.py` ranks a detected model against the configured minimum in two steps.
+
+### 1. Structured parsing (primary)
+
+`parse_model()` turns a model name into an orderable tuple:
+
+| Component | Meaning | Examples |
+|-----------|---------|----------|
+| series prefix | Product line, used for identification | `RX`, `RTX`, `GTX`, `GT`, `Arc` |
+| series letter | Generation letter, only used by letter-numbered lines | `A` in `Arc A770`, `B` in `Arc B580` |
+| number | Generation **and** tier in one integer | `9070` = RDNA 4, tier 70 |
+| suffix | Variant weight, summed for compound suffixes | `GRE` 1, `XT`/`SUPER` 2, `Ti` 3, `XTX` 4 |
+
+Comparison order is **generation, then tier, then suffix**. Because the leading digits of the number encode the generation, a plain integer comparison already ranks `RX 9060` above `RX 7900`, and the suffix weights break ties so that `RX 9070 XT` outranks `RX 9070` and `RTX 4070 Ti SUPER` outranks `RTX 4070 Ti`.
+
+The practical consequence: **any card of a generation at or above the minimum passes without being listed anywhere**. An `RX 9060 XT` clears an `RX 560` minimum even though it appears in no table.
+
+### 2. Exception table (fallback)
+
+Names that do not follow the `<series> [letter]<number> [suffix]` pattern cannot be parsed — AMD `Vega 8`, APU iGPUs such as `Radeon 780M`, and the whole Intel `HD` / `UHD` / `Iris` / `Xe` family, whose ordering is not numeric (`UHD 630` predates `Xe`, `UHD 770` succeeds it). Those fall back to the ordered lists below, matched by name. When an entry is contained in the detected name the most specific (longest) match wins, so `Iris Xe MAX` is not shadowed by the shorter `Xe`.
+
+### 3. Permissive by default
+
+If neither step can rank a model, the check **passes** and logs the comparison. An incomplete GPU table must never block an installation.
+
 ## GPU Model Index
 
-Below is the complete index of supported GPU models, organized by vendor and type. Models are listed in ascending order of performance - higher positions indicate better/newer GPUs.
+The lists below are the exception table, and remain useful as a readability reference. Models are listed in ascending order of performance - higher positions indicate better/newer GPUs. Only the entries the parser cannot rank (AMD iGPUs, Intel iGPUs) are load-bearing; the dGPU lists are ranked by the parser and are kept for documentation only.
 
 ### NVIDIA
 
@@ -150,6 +179,8 @@ Below is the complete index of supported GPU models, organized by vendor and typ
 | 29 | RX 7900 XTX | RDNA 3 | |
 | 30 | RX 9070 | RDNA 4 | Next-gen |
 | 31 | RX 9070 XT | RDNA 4 | Latest |
+
+Other RDNA 4 cards (`RX 9060 XT`, ...) and any future series are ranked by the parser and do not need an entry here.
 
 #### Integrated GPUs (iGPU)
 
@@ -283,10 +314,12 @@ The model detection relies on `lspci` output. If detection fails:
 
 1. Run `lspci -v | grep -A 10 VGA` to see raw output
 2. Check if the model string matches patterns in `gpu.py`
-3. Submit an issue with `lspci` output for model database updates
+3. Submit an issue with `lspci` output
+
+A recent card being rejected is a bug, not a missing table entry: the parser is meant to rank it. A card that cannot be ranked at all is accepted and logged as `Unrankable model comparison, assuming compatible: ...`.
 
 ### Override Not Working
 
-1. Verify the model name exactly matches the index (case-sensitive)
+1. Minimums are matched case-insensitively; `"rx 560"` and `"RX 560"` are equivalent
 2. Check YAML syntax in config file
-3. Models not in the index are treated as "unknown" and may not compare correctly
+3. Use a minimum the parser understands (`RX 560`, `GTX 1650`, `Arc A380`). A minimum it cannot rank — such as the Intel `Xe` reference point — only compares against models in the same exception table, and anything outside it is accepted

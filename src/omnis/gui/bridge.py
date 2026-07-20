@@ -21,6 +21,7 @@ from omnis.jobs.base import JobStatus
 from omnis.jobs.locale import LocaleJob
 from omnis.jobs.partition import (
     PartitionOperation,
+    plan_auto_layout,
     simulate_operations,
     validate_operations,
     validate_operations_applicable,
@@ -291,6 +292,14 @@ class PartitionApplyWorker(QObject):
             context = JobContext(
                 selections={"disk": self._disk, "partition_operations": self._operations}
             )
+            # This path calls _apply_operations directly instead of going through
+            # PartitionJob.run(), so it used to skip the disk release entirely:
+            # the manual editor could hit a still-mounted disk and fail on EBUSY.
+            if not self._dry_run:
+                blocked = job._release_target_disk(self._disk, context.target_root)
+                if blocked is not None:
+                    self.finished.emit(False, blocked.message)
+                    return
             result = job._apply_operations(
                 context, self._disk, context.selections, dry_run=self._dry_run
             )
@@ -748,6 +757,7 @@ class EngineBridge(QObject):
         self._requirements_checker: SystemRequirementsChecker | None = None
         self._requirements_model: list[dict[str, Any]] = []
         self._can_proceed: bool = True
+        self._has_requirement_warnings: bool = False
         self._is_checking_requirements: bool = False
         self._show_requirements: bool = True
 
@@ -1272,7 +1282,7 @@ class EngineBridge(QObject):
             "locale": "en_US.UTF-8",
             "timezone": "UTC",
             "keymap": "us",
-            "keyboardVariant": "qwerty",
+            "keyboardVariant": "",
             "username": "",
             "fullName": "",
             "hostname": "",
@@ -1603,6 +1613,17 @@ class EngineBridge(QObject):
             return True
         return self._can_proceed
 
+    @Property(bool, notify=requirementsChanged)
+    def hasRequirementWarnings(self) -> bool:
+        """
+        Whether the checks passed but some recommendations are not met.
+
+        ``canProceed`` alone cannot say this: it is already true with warnings,
+        so the panel announced "your system meets all requirements" next to
+        orange indicators.
+        """
+        return self._has_requirement_warnings
+
     @Property(bool, constant=True)
     def skipValidation(self) -> bool:
         """Dev flag: bypass all per-screen validation gating (design testing)."""
@@ -1644,11 +1665,15 @@ class EngineBridge(QObject):
                     "requiredValue": check.required_value,
                     "recommendedValue": check.recommended_value,
                     "details": check.details,
+                    "data": check.data,
                 }
             )
 
         # Update state
         self._can_proceed = result.can_continue
+        self._has_requirement_warnings = any(
+            entry["status"] == "warn" for entry in self._requirements_model
+        )
         self._is_checking_requirements = False
 
         # Hide panel if no checks are configured/enabled
@@ -1916,9 +1941,13 @@ class EngineBridge(QObject):
             self._selections["keymap"] = self._locale_detection_result.keymap
             if self._debug:
                 print("[Engine] Applied auto-detected locale settings")
-            # Emit signal to update QML UI with detected values
-            self._update_keyboard_variants(self._selections["keymap"])
             self.selectionsChanged.emit()
+
+        # Outside the confidence branch on purpose: when detection fails the
+        # variants model stayed empty and keyboardVariant kept its "qwerty"
+        # default, which is not a valid XKB variant and was written as-is into
+        # the target's services.xserver.xkb.
+        self._update_keyboard_variants(str(self._selections.get("keymap", "us")))
 
     @Slot()
     def loadLocaleData(self) -> None:
@@ -2027,7 +2056,7 @@ class EngineBridge(QObject):
     @Property(str, notify=selectionsChanged)
     def selectedKeyboardVariant(self) -> str:
         """Get selected keyboard variant."""
-        return str(self._selections.get("keyboardVariant", "qwerty"))
+        return str(self._selections.get("keyboardVariant", ""))
 
     @Slot(str)
     def setSelectedKeyboardVariant(self, variant: str) -> None:
@@ -2043,8 +2072,10 @@ class EngineBridge(QObject):
         # Extract base layout code (e.g., "us" from "us" or "fr_CA" from "fr")
         base_layout = keymap.split("_")[0] if "_" in keymap else keymap
 
-        # Get variants for this layout (default to qwerty if unknown)
-        self._keyboard_variants_model = self._keyboard_variants.get(base_layout, ["qwerty"])
+        # An unknown layout falls back to the empty XKB variant, never to
+        # "qwerty": that is a keyboard shape, not a variant name, and NixOS
+        # rejects it in services.xserver.xkb.variant.
+        self._keyboard_variants_model = self._keyboard_variants.get(base_layout, [""])
 
         # Auto-select first variant if current one is not available
         current_variant = self._selections.get("keyboardVariant", "")
@@ -2639,6 +2670,27 @@ class EngineBridge(QObject):
         segments = geom.get("segments", []) if geom else []
         operations = self._parsed_operations()
         return simulate_operations(segments, operations)
+
+    @Property(list, notify=selectionsChanged)
+    def plannedSegments(self) -> list[dict[str, Any]]:
+        """
+        Geometry the selected disk WOULD have after automatic partitioning.
+
+        The auto-mode preview used to render the disk's current partitions, so
+        changing filesystem, swap or encryption produced no visible change at
+        all. This projects the user's choices onto the disk instead.
+        """
+        geom = self._selected_disk_geometry()
+        if not geom:
+            return []
+        planned = plan_auto_layout(
+            int(geom.get("sizeSectors", 0) or 0),
+            filesystem=str(self._selections.get("filesystem", "ext4")),
+            swap_strategy=str(self._selections.get("swap_strategy", "file")),
+            encryption=bool(self._selections.get("encryption", False)),
+            efi_size_mb=int(self._selections.get("efi_size_mb", 512) or 512),
+        )
+        return disk_detector.compute_segments(int(geom.get("sizeSectors", 0) or 0), planned)
 
     @Property(list, notify=partitionOperationsChanged)
     def commandPreview(self) -> list[str]:

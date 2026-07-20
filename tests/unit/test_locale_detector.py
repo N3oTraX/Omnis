@@ -1,6 +1,7 @@
 """Unit tests for LocaleDetector."""
 
 import json
+import shutil
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -22,6 +23,15 @@ except ImportError:
 
 # Skip entire module if omnis locale detector is not available
 pytestmark = pytest.mark.skipif(not HAS_LOCALE_DETECTOR, reason="LocaleDetector not available")
+
+
+@pytest.fixture(autouse=True)
+def neutral_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the developer's own session locale out of every detection result."""
+    for var in ("LANG", "LC_ALL", "LC_CTYPE"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(LocaleDetector, "LOCALE_CONF_PATH", Path("/nonexistent/locale.conf"))
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
 
 
 # =============================================================================
@@ -93,6 +103,7 @@ class TestLocaleDetectorConfig:
         assert config.geoip_enabled is True
         assert config.geoip_timeout == 2.0
         assert config.cmdline_enabled is True
+        assert config.session_enabled is True
         assert config.efi_enabled is True
         assert config.override_mode == "auto"
         assert config.confidence_threshold == 0.8
@@ -104,6 +115,7 @@ class TestLocaleDetectorConfig:
             geoip_enabled=False,
             geoip_timeout=5.0,
             cmdline_enabled=False,
+            session_enabled=False,
             efi_enabled=False,
             override_mode="prefer_geoip",
             confidence_threshold=0.5,
@@ -112,6 +124,7 @@ class TestLocaleDetectorConfig:
         assert config.geoip_enabled is False
         assert config.geoip_timeout == 5.0
         assert config.cmdline_enabled is False
+        assert config.session_enabled is False
         assert config.efi_enabled is False
         assert config.override_mode == "prefer_geoip"
         assert config.confidence_threshold == 0.5
@@ -150,6 +163,7 @@ class TestLocaleDetectorInit:
             "methods": {
                 "geoip": {"enabled": True, "timeout": 3.0},
                 "cmdline": {"enabled": False},
+                "session": {"enabled": False},
                 "efi": {"enabled": True},
             },
             "override_mode": "prefer_local",
@@ -404,6 +418,230 @@ class TestCmdlineDetection:
 
 
 # =============================================================================
+# Session Detection Tests
+# =============================================================================
+
+
+LOCALECTL_STATUS = """   System Locale: LANG=fr_FR.UTF-8
+       VC Keymap: fr-latin9
+      X11 Layout: fr
+     X11 Variant: oss
+"""
+
+LOCALECTL_STATUS_NO_X11 = """   System Locale: LANG=de_DE.UTF-8
+       VC Keymap: de
+      X11 Layout: n/a
+"""
+
+
+class TestSessionDetection:
+    """Tests for live-session locale detection.
+
+    The GLF ISO French boot entry passes no kbd.* kernel parameter, so an
+    offline live boot used to fall through to the en_US default. The session
+    locale is the remaining reliable local signal.
+    """
+
+    def test_session_from_lang(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """LANG should drive the detection."""
+        monkeypatch.setenv("LANG", "fr_FR.UTF-8")
+        result = LocaleDetector()._detect_session()
+
+        assert result is not None
+        assert result.language == "fr_FR.UTF-8"
+        assert result.timezone == "Europe/Paris"
+        assert result.keymap == "fr"
+        assert result.source == "session"
+
+    def test_session_confidence_clears_threshold(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Session confidence must be above the default 0.8 threshold."""
+        monkeypatch.setenv("LANG", "fr_FR.UTF-8")
+        result = LocaleDetector()._detect_session()
+
+        assert result is not None
+        assert result.confidence >= 0.85
+        assert result.confidence > LocaleDetectorConfig().confidence_threshold
+
+    def test_session_env_priority(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """LANG should win over LC_ALL and LC_CTYPE."""
+        monkeypatch.setenv("LANG", "de_DE.UTF-8")
+        monkeypatch.setenv("LC_ALL", "es_ES.UTF-8")
+        monkeypatch.setenv("LC_CTYPE", "it_IT.UTF-8")
+        result = LocaleDetector()._detect_session()
+
+        assert result is not None
+        assert result.language == "de_DE.UTF-8"
+
+    def test_session_falls_through_to_lc_all(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A C fallback in LANG should not shadow a real LC_ALL."""
+        monkeypatch.setenv("LANG", "C.UTF-8")
+        monkeypatch.setenv("LC_ALL", "pt_PT.UTF-8")
+        result = LocaleDetector()._detect_session()
+
+        assert result is not None
+        assert result.language == "pt_PT.UTF-8"
+
+    @pytest.mark.parametrize("value", ["C", "C.UTF-8", "POSIX", "en_US.UTF-8", "en_US", ""])
+    def test_session_ignores_fallback_locales(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        """C/POSIX/en_US must not be reported as a detected session locale."""
+        monkeypatch.setenv("LANG", value)
+        assert LocaleDetector()._detect_session() is None
+
+    def test_session_normalizes_missing_encoding(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A locale without an encoding suffix should get .UTF-8."""
+        monkeypatch.setenv("LANG", "fr_FR")
+        result = LocaleDetector()._detect_session()
+
+        assert result is not None
+        assert result.language == "fr_FR.UTF-8"
+
+    def test_session_from_locale_conf(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """/etc/locale.conf should be read when the environment is unset."""
+        locale_conf = tmp_path / "locale.conf"
+        locale_conf.write_text('LANG="it_IT.UTF-8"\nLC_TIME=it_IT.UTF-8\n', encoding="utf-8")
+        monkeypatch.setattr(LocaleDetector, "LOCALE_CONF_PATH", locale_conf)
+        result = LocaleDetector()._detect_session()
+
+        assert result is not None
+        assert result.language == "it_IT.UTF-8"
+        assert result.timezone == "Europe/Rome"
+        assert result.keymap == "it"
+
+    def test_session_env_wins_over_locale_conf(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The environment takes precedence over /etc/locale.conf."""
+        locale_conf = tmp_path / "locale.conf"
+        locale_conf.write_text("LANG=it_IT.UTF-8\n", encoding="utf-8")
+        monkeypatch.setattr(LocaleDetector, "LOCALE_CONF_PATH", locale_conf)
+        monkeypatch.setenv("LANG", "fr_FR.UTF-8")
+        result = LocaleDetector()._detect_session()
+
+        assert result is not None
+        assert result.language == "fr_FR.UTF-8"
+
+    def test_session_missing_locale_conf(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A missing /etc/locale.conf should not raise."""
+        monkeypatch.setattr(LocaleDetector, "LOCALE_CONF_PATH", Path("/nonexistent/locale.conf"))
+        assert LocaleDetector()._detect_session() is None
+
+    def test_session_from_localectl(self) -> None:
+        """localectl should provide both the locale and the X11 layout."""
+        with (
+            patch("shutil.which", return_value="/usr/bin/localectl"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = Mock(returncode=0, stdout=LOCALECTL_STATUS)
+            result = LocaleDetector()._detect_session()
+
+        assert result is not None
+        assert result.language == "fr_FR.UTF-8"
+        assert result.keymap == "fr"  # X11 Layout, not the VC "fr-latin9"
+        assert result.source == "session"
+
+    def test_session_localectl_vc_keymap_fallback(self) -> None:
+        """VC Keymap is used when no X11 layout is configured."""
+        with (
+            patch("shutil.which", return_value="/usr/bin/localectl"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = Mock(returncode=0, stdout=LOCALECTL_STATUS_NO_X11)
+            result = LocaleDetector()._detect_session()
+
+        assert result is not None
+        assert result.keymap == "de"
+
+    def test_session_localectl_absent(self) -> None:
+        """No localectl binary means no session result."""
+        with (
+            patch("shutil.which", return_value=None),
+            patch("subprocess.run") as mock_run,
+        ):
+            assert LocaleDetector()._detect_session() is None
+            mock_run.assert_not_called()
+
+
+class TestSessionCascade:
+    """Tests for the position of the session source in the detection cascade."""
+
+    def test_session_wins_over_geoip(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The session locale is tried before the network lookup."""
+        monkeypatch.setenv("LANG", "fr_FR.UTF-8")
+
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            result = LocaleDetector().detect()
+
+        mock_urlopen.assert_not_called()
+        assert result.source == "session"
+        assert result.language == "fr_FR.UTF-8"
+
+    def test_cmdline_wins_over_session(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """override_mode=prefer_local: the GRUB choice still wins."""
+        monkeypatch.setenv("LANG", "fr_FR.UTF-8")
+        cmdline = "BOOT_IMAGE=/boot/vmlinuz kbd.layout=de kbd.locale=de_DE.UTF-8"
+
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "read_text", return_value=cmdline),
+        ):
+            result = LocaleDetector(LocaleDetectorConfig(override_mode="prefer_local")).detect()
+
+        assert result.source == "cmdline"
+        assert result.language == "de_DE.UTF-8"
+
+    def test_session_offline_avoids_english_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Offline live boot without kbd.* params must not fall back to en_US."""
+        monkeypatch.setenv("LANG", "fr_FR.UTF-8")
+        cmdline = "BOOT_IMAGE=/boot/vmlinuz root=/dev/sda1 quiet"
+
+        with (
+            patch("urllib.request.urlopen", side_effect=OSError("Network unreachable")),
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "read_text", return_value=cmdline),
+        ):
+            result = LocaleDetector(LocaleDetectorConfig(override_mode="prefer_local")).detect()
+
+        assert result.source == "session"
+        assert result.language == "fr_FR.UTF-8"
+        assert result.keymap == "fr"
+
+    def test_prefer_geoip_keeps_session_as_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """override_mode=prefer_geoip: GeoIP first, session when it fails."""
+        monkeypatch.setenv("LANG", "fr_FR.UTF-8")
+        config = LocaleDetectorConfig(override_mode="prefer_geoip")
+        mock_response = json.dumps(
+            {"status": "success", "countryCode": "DE", "timezone": "Europe/Berlin"}
+        ).encode()
+
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.return_value.__enter__.return_value.read.return_value = mock_response
+            result = LocaleDetector(config).detect()
+        assert result.source == "geoip"
+
+        with patch("urllib.request.urlopen", side_effect=OSError("Network unreachable")):
+            fallback = LocaleDetector(config).detect()
+        assert fallback.source == "session"
+        assert fallback.language == "fr_FR.UTF-8"
+
+    def test_session_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Session detection should be skippable."""
+        monkeypatch.setenv("LANG", "fr_FR.UTF-8")
+        config = LocaleDetectorConfig(
+            geoip_enabled=False,
+            cmdline_enabled=False,
+            session_enabled=False,
+            efi_enabled=False,
+        )
+        result = LocaleDetector(config).detect()
+
+        assert result.source == "default"
+
+
+# =============================================================================
 # EFI Detection Tests
 # =============================================================================
 
@@ -531,7 +769,12 @@ class TestCascadeFallback:
     def test_cascade_fallback_to_default(self) -> None:
         """Detection should fall back to default when all methods fail."""
         # Disable all detection methods except default
-        config = LocaleDetectorConfig(geoip_enabled=False, cmdline_enabled=False, efi_enabled=False)
+        config = LocaleDetectorConfig(
+            geoip_enabled=False,
+            cmdline_enabled=False,
+            session_enabled=False,
+            efi_enabled=False,
+        )
         detector = LocaleDetector(config)
         result = detector.detect()
 
@@ -570,7 +813,12 @@ class TestDisabledMethods:
 
     def test_cmdline_disabled(self) -> None:
         """Cmdline should be skipped when disabled."""
-        config = LocaleDetectorConfig(geoip_enabled=False, cmdline_enabled=False, efi_enabled=False)
+        config = LocaleDetectorConfig(
+            geoip_enabled=False,
+            cmdline_enabled=False,
+            session_enabled=False,
+            efi_enabled=False,
+        )
         detector = LocaleDetector(config)
 
         with patch.object(Path, "read_text") as mock_read:
@@ -579,7 +827,12 @@ class TestDisabledMethods:
 
     def test_efi_disabled(self) -> None:
         """EFI should be skipped when disabled."""
-        config = LocaleDetectorConfig(geoip_enabled=False, cmdline_enabled=False, efi_enabled=False)
+        config = LocaleDetectorConfig(
+            geoip_enabled=False,
+            cmdline_enabled=False,
+            session_enabled=False,
+            efi_enabled=False,
+        )
         detector = LocaleDetector(config)
 
         with patch("subprocess.run") as mock_run:

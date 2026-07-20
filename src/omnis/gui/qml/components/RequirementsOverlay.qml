@@ -17,12 +17,27 @@ Rectangle {
 
     // Signals
     signal configureNetworkClicked()
+    signal recheckRequested()
 
     // Properties from parent/backend
     property var requirements: []
     property bool canProceed: true
+    // canProceed only reflects blocking checks: warnings must be surfaced
+    // separately, otherwise orange indicators are reported as a full pass.
+    property bool hasWarnings: false
     property bool isLoading: false
     property string summaryText: ""
+
+    readonly property color overallStatusColor: !canProceed ? errorColor
+                                                            : (hasWarnings ? warningColor
+                                                                           : successColor)
+    readonly property string defaultSummaryText: {
+        if (!canProceed)
+            return qsTr("Some requirements not met")
+        if (hasWarnings)
+            return qsTr("Your system meets the minimum requirements, but some recommendations are not met")
+        return qsTr("Your system meets all requirements")
+    }
 
     // Theme-based requirement icons (object with ram_pass, ram_warn, etc.)
     property var requirementIcons: ({})
@@ -83,15 +98,15 @@ Rectangle {
                 width: 40
                 height: 40
                 radius: 20
-                color: canProceed ? Qt.rgba(successColor.r, successColor.g, successColor.b, 0.2)
-                                  : Qt.rgba(errorColor.r, errorColor.g, errorColor.b, 0.2)
+                color: Qt.rgba(root.overallStatusColor.r, root.overallStatusColor.g,
+                               root.overallStatusColor.b, 0.2)
 
                 Text {
                     anchors.centerIn: parent
-                    text: canProceed ? "✓" : "!"
+                    text: (canProceed && !hasWarnings) ? "✓" : "!"
                     font.pixelSize: 20
                     font.bold: true
-                    color: canProceed ? successColor : errorColor
+                    color: root.overallStatusColor
                 }
             }
 
@@ -107,11 +122,42 @@ Rectangle {
                 }
 
                 Text {
-                    text: summaryText || (canProceed ? qsTr("Your system meets all requirements")
-                                                     : qsTr("Some requirements not met"))
+                    width: parent.width
+                    text: summaryText || root.defaultSummaryText
                     font.pixelSize: 13
                     color: textMutedColor
+                    wrapMode: Text.WordWrap
                 }
+            }
+
+            Button {
+                id: recheckButton
+                Layout.alignment: Qt.AlignVCenter
+                text: qsTr("Re-check")
+                font.pixelSize: 12
+                enabled: !root.isLoading
+
+                background: Rectangle {
+                    implicitWidth: 100
+                    implicitHeight: 30
+                    radius: 6
+                    color: recheckButton.pressed ? Qt.darker(root.primaryColor, 1.2) :
+                           recheckButton.hovered ? Qt.lighter(root.primaryColor, 1.1) : root.primaryColor
+                    border.color: Qt.lighter(root.primaryColor, 1.3)
+                    border.width: 1
+                    opacity: recheckButton.enabled ? 1.0 : 0.5
+                }
+
+                contentItem: Text {
+                    text: recheckButton.text
+                    font: recheckButton.font
+                    color: root.textColor
+                    opacity: recheckButton.enabled ? 1.0 : 0.5
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                onClicked: root.recheckRequested()
             }
         }
 

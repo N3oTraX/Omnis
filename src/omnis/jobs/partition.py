@@ -69,6 +69,76 @@ def _detect_ram_mb() -> int:
     return 8192
 
 
+def swapfile_size_mb(strategy: str, ram_mb: int = 0) -> int:
+    """
+    Return the swapfile size the ``file``/``hibernate`` strategies would create.
+
+    Hibernation needs room for the whole memory image, a plain swapfile does not.
+    Shared with the UI so the disk preview announces the size that will actually
+    be created.
+    """
+    ram = ram_mb or _detect_ram_mb()
+    if strategy == "hibernate":
+        return max(ram, 8192)
+    if strategy == "file":
+        return min(ram, 8192) if ram else 4096
+    return 0
+
+
+def plan_auto_layout(
+    disk_sectors: int,
+    *,
+    filesystem: str = "ext4",
+    swap_strategy: str = "file",
+    encryption: bool = False,
+    efi_size_mb: int = 512,
+    legacy_swap_gb: int = 0,
+    ram_mb: int = 0,
+) -> list[dict[str, Any]]:
+    """
+    Compute the partitions automatic mode would create, without touching a disk.
+
+    Mirrors the geometry of :meth:`PartitionJob._partition_auto` (ESP from 1 MiB,
+    root filling the rest, optional trailing legacy swap partition) so the UI can
+    show the planned layout instead of the disk's current state -- previously the
+    preview never reflected any of the chosen options.
+
+    Swapfile strategies produce no partition; the planned file is reported on the
+    root entry as ``swapfileBytes`` so the preview can still show it.
+    """
+    sectors_per_mb = (1024 * 1024) // _SECTOR_SIZE
+    usable_end = max(0, disk_sectors - _GPT_TAIL)
+
+    use_swap_partition = swap_strategy in ("", None) and legacy_swap_gb > 0
+    swap_sectors = legacy_swap_gb * 1024 * sectors_per_mb if use_swap_partition else 0
+
+    efi_start = _ALIGN
+    efi_end = (efi_size_mb + 1) * sectors_per_mb - 1
+    root_start = efi_end + 1
+    root_end = max(root_start, usable_end - swap_sectors)
+
+    def entry(index: int, start: int, end: int, fstype: str, part_type: str) -> dict[str, Any]:
+        size_sectors = max(0, end - start + 1)
+        return {
+            "name": f"p{index}",
+            "startSector": start,
+            "endSector": end,
+            "sizeSectors": size_sectors,
+            "sizeBytes": size_sectors * _SECTOR_SIZE,
+            "fstype": fstype,
+            "partType": part_type,
+        }
+
+    root = entry(2, root_start, root_end, filesystem, "linux")
+    root["encrypted"] = encryption
+    root["swapfileBytes"] = swapfile_size_mb(swap_strategy, ram_mb) * 1024 * 1024
+
+    planned = [entry(1, efi_start, efi_end, "vfat", "efi"), root]
+    if use_swap_partition:
+        planned.append(entry(3, root_end + 1, usable_end, "swap", "swap"))
+    return planned
+
+
 @dataclass
 class PartitionOperation:
     """
@@ -901,22 +971,32 @@ class PartitionJob(BaseJob):
                 error_code=56,
             )
 
-        subprocess.run(
+        umount = subprocess.run(
             ["umount", "-R", target_root],
             check=False,
             capture_output=True,
+            text=True,
         )
+        if umount.returncode == 0:
+            logger.info(f"Unmounted residual target root {target_root}")
+        else:
+            logger.debug(f"Nothing to unmount at {target_root}: {(umount.stderr or '').strip()}")
 
-        for action in disk_release.release_disk(disk):
-            logger.info(f"Released target disk: {action}")
+        actions = disk_release.release_disk(disk)
+        for action in actions:
+            logger.info(f"Released target disk {disk}: {action}")
+        if not actions:
+            logger.info(f"Target disk {disk}: nothing had to be released")
 
         holders = disk_release.disk_holders(disk)
         if holders:
+            logger.error(f"Target disk {disk} is still held by: {'; '.join(holders)}")
             return JobResult.fail(
                 f"Target disk {disk} is still in use: {'; '.join(holders)}",
                 error_code=57,
             )
 
+        logger.info(f"Target disk {disk} is free for partitioning")
         return None
 
     def _list_disks(self) -> list[DiskInfo]:
@@ -2052,9 +2132,12 @@ class PartitionJob(BaseJob):
                 ["umount", str(efi_mount)],
                 check=False,
                 capture_output=True,
+                text=True,
             )
             if result.returncode == 0:
                 logger.info(f"Unmounted {efi_mount}")
+            else:
+                logger.debug(f"Not unmounted {efi_mount}: {(result.stderr or '').strip()}")
         except Exception as e:
             logger.debug(f"Failed to unmount {efi_mount}: {e}")
 
@@ -2064,9 +2147,12 @@ class PartitionJob(BaseJob):
                 ["umount", target_root],
                 check=False,
                 capture_output=True,
+                text=True,
             )
             if result.returncode == 0:
                 logger.info(f"Unmounted {target_root}")
+            else:
+                logger.debug(f"Not unmounted {target_root}: {(result.stderr or '').strip()}")
         except Exception as e:
             logger.debug(f"Failed to unmount {target_root}: {e}")
 
@@ -2077,21 +2163,34 @@ class PartitionJob(BaseJob):
                     ["swapoff", self._layout.swap_partition],
                     check=False,
                     capture_output=True,
+                    text=True,
                 )
                 if result.returncode == 0:
                     logger.info(f"Deactivated swap {self._layout.swap_partition}")
+                else:
+                    logger.warning(
+                        f"Failed to deactivate swap {self._layout.swap_partition}: "
+                        f"{(result.stderr or '').strip()}"
+                    )
             except Exception as e:
                 logger.debug(f"Failed to deactivate swap: {e}")
 
         # Try to close the LUKS mapper if it was opened
         if self._layout.encrypted:
             try:
-                subprocess.run(
+                result = subprocess.run(
                     ["cryptsetup", "luksClose", self._layout.luks_mapper_name],
                     check=False,
                     capture_output=True,
+                    text=True,
                 )
-                logger.info(f"Closed LUKS mapper {self._layout.luks_mapper_name}")
+                if result.returncode == 0:
+                    logger.info(f"Closed LUKS mapper {self._layout.luks_mapper_name}")
+                else:
+                    logger.warning(
+                        f"Failed to close LUKS mapper {self._layout.luks_mapper_name}: "
+                        f"{(result.stderr or '').strip()}"
+                    )
             except Exception as e:
                 logger.debug(f"Failed to close LUKS mapper: {e}")
 
