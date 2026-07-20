@@ -1,8 +1,10 @@
 """Unit tests for FinishedJob."""
 
 import json
+import logging
 import tempfile
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -294,42 +296,68 @@ class TestSafeUnmount:
         mock_run.assert_called_once()
         assert "umount" in mock_run.call_args[0][0]
 
+    @patch("omnis.jobs.finished.time.sleep")
     @patch("omnis.jobs.finished.subprocess.run")
     @patch("omnis.jobs.finished.os.path.ismount")
-    def test_unmount_lazy_fallback(self, mock_ismount: Mock, mock_run: Mock) -> None:
-        """Should use lazy unmount if normal unmount fails."""
+    def test_unmount_retries_a_busy_target(
+        self, mock_ismount: Mock, mock_run: Mock, mock_sleep: Mock
+    ) -> None:
+        """A transiently busy mount succeeds on a later plain umount attempt."""
         mock_ismount.return_value = True
 
-        # First call (normal unmount) fails, second call (lazy) succeeds
         from subprocess import CalledProcessError
 
         mock_run.side_effect = [
-            CalledProcessError(1, "umount", stderr="Device busy"),
-            MagicMock(returncode=0),  # Lazy unmount succeeds
+            CalledProcessError(1, "umount", stderr="target is busy"),
+            MagicMock(returncode=0),
         ]
 
         job = FinishedJob()
         result = job._safe_unmount(Path("/mnt/busy"))
 
-        # Should succeed with lazy unmount
         assert result is True
         assert mock_run.call_count == 2
+        mock_sleep.assert_called_once()
 
+    @patch("omnis.jobs.finished.time.sleep")
     @patch("omnis.jobs.finished.subprocess.run")
     @patch("omnis.jobs.finished.os.path.ismount")
-    def test_unmount_failure(self, mock_ismount: Mock, mock_run: Mock) -> None:
-        """Should return False if all unmount attempts fail."""
+    def test_unmount_never_falls_back_to_lazy(
+        self, mock_ismount: Mock, mock_run: Mock, _mock_sleep: Mock
+    ) -> None:
+        """``umount -l`` leaves the ext4 journal thread holding the device: banned."""
         mock_ismount.return_value = True
 
-        # Both normal and lazy unmount fail
+        from subprocess import CalledProcessError
+
+        mock_run.side_effect = CalledProcessError(1, "umount", stderr="target is busy")
+
+        job = FinishedJob()
+        assert job._safe_unmount(Path("/mnt/stuck")) is False
+
+        for call in mock_run.call_args_list:
+            assert "-l" not in call[0][0]
+
+    @patch("omnis.jobs.finished.time.sleep")
+    @patch("omnis.jobs.finished.subprocess.run")
+    @patch("omnis.jobs.finished.os.path.ismount")
+    def test_unmount_failure_is_explicit_and_logged(
+        self, mock_ismount: Mock, mock_run: Mock, _mock_sleep: Mock, caplog: Any
+    ) -> None:
+        """Should return False and log the failure after exhausting the attempts."""
+        mock_ismount.return_value = True
+
         from subprocess import CalledProcessError
 
         mock_run.side_effect = CalledProcessError(1, "umount", stderr="Error")
 
         job = FinishedJob()
-        result = job._safe_unmount(Path("/mnt/stuck"))
+        with caplog.at_level(logging.ERROR, logger="omnis.jobs.finished"):
+            result = job._safe_unmount(Path("/mnt/stuck"), attempts=2)
 
         assert result is False
+        assert mock_run.call_count == 2
+        assert "Giving up on unmounting /mnt/stuck" in caplog.text
 
 
 # =============================================================================

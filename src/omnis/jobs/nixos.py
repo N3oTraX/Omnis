@@ -165,6 +165,11 @@ DEFAULT_USER_GROUPS = (
 # Fallback stateVersion when ``nixos-version`` cannot be queried (dry-run/mock).
 DEFAULT_STATE_VERSION = "25.11"
 
+# Directories probed, in order, for the GLF flake. The shipped ISO carries it
+# under ``/iso-cfg``; ``/iso/nixos`` covers the older layout and ``/etc/nixos``
+# an already-installed host. A directory only counts when it holds a flake.nix.
+FLAKE_SOURCE_CANDIDATES = ("/iso/nixos", "/iso-cfg", "/etc/nixos")
+
 # Error codes (kept distinct from the partition job's 30-52 range).
 ERR_NO_TARGET = 60
 ERR_TARGET_MISSING = 61
@@ -440,6 +445,15 @@ class NixosJob(BaseJob):
     name = "nixos"
     description = "Generate NixOS configuration and install GLF OS"
 
+    # nixos-generate-config and nixos-install are live-ISO only: they cannot be
+    # bundled into the AppImage. Declaring them here turns "the disk is wiped and
+    # now we are stuck" into an upfront, actionable refusal.
+    required_tools = (
+        "nixos-generate-config",
+        "nixos-install",
+        ("mkpasswd", "openssl"),
+    )
+
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         """Initialize the NixOS install job."""
         super().__init__(config)
@@ -450,9 +464,23 @@ class NixosJob(BaseJob):
     # Configuration helpers
     # -------------------------------------------------------------------------
 
+    def _flake_candidates(self) -> list[str]:
+        """Return the flake source directories to probe, in priority order."""
+        configured = str(self._config.get("flake_source", "") or "")
+        candidates = [configured] if configured else []
+        candidates += [c for c in FLAKE_SOURCE_CANDIDATES if c != configured]
+        return candidates
+
+    def _resolve_flake_source(self) -> str | None:
+        """Return the first candidate directory actually holding a ``flake.nix``."""
+        for candidate in self._flake_candidates():
+            if (Path(candidate) / "flake.nix").is_file():
+                return candidate
+        return None
+
     def _flake_source(self) -> str:
-        """Return the GLF flake source directory (default ``/iso/nixos``)."""
-        return str(self._config.get("flake_source", "/iso/nixos"))
+        """Return the resolved GLF flake source, or the first candidate."""
+        return self._resolve_flake_source() or self._flake_candidates()[0]
 
     def _flake_attr(self) -> str:
         """Return the flake attribute to install (default ``GLF-OS``)."""
@@ -771,10 +799,10 @@ class NixosJob(BaseJob):
                     f"Target root not mounted: {target_root}",
                     error_code=ERR_TARGET_MISSING,
                 )
-            flake_source = self._flake_source()
-            if not Path(flake_source).exists():
+            if self._resolve_flake_source() is None:
+                tried = ", ".join(self._flake_candidates())
                 return JobResult.fail(
-                    f"GLF flake source not found: {flake_source}",
+                    f"GLF flake source not found (no flake.nix in any of: {tried})",
                     error_code=ERR_FLAKE_SOURCE_MISSING,
                 )
 
@@ -1217,12 +1245,21 @@ class NixosJob(BaseJob):
 
         # ``umount -R`` unmounts the target and everything below it (ESP, etc.).
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["umount", "-R", target_root],
                 check=False,
                 capture_output=True,
+                text=True,
             )
-            logger.info("Unmounted %s (recursive)", target_root)
+            if result.returncode == 0:
+                logger.info("Unmounted %s (recursive)", target_root)
+            else:
+                logger.warning(
+                    "Failed to unmount %s (exit %s): %s",
+                    target_root,
+                    result.returncode,
+                    (result.stderr or "").strip(),
+                )
         except Exception as e:  # noqa: BLE001 - cleanup must never raise
             logger.debug("Failed to unmount %s: %s", target_root, e)
 

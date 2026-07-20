@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 from typing import Any
@@ -64,6 +64,10 @@ class GPUInfo:
 # =============================================================================
 # GPU Model Database
 # =============================================================================
+# Ranking is primarily done by parsing the model name (see parse_model), so a
+# card does not need to be listed here to be accepted. These lists are the
+# exception table for names the parser cannot rank: Vega APUs, "Radeon 780M"
+# style iGPUs, Intel HD/UHD/Iris/Xe, etc.
 # Models are listed in ascending order of performance/capability
 # Index position determines the hierarchy (higher index = better GPU)
 
@@ -245,9 +249,90 @@ def _normalize_model_name(name: str) -> str:
     return name.strip()
 
 
+# Series prefixes the parser knows how to rank. Longest first so that "GTX"
+# is not truncated to "GT".
+_SERIES_PREFIXES = ("GTX", "RTX", "GT", "RX", "ARC")
+
+# Model suffix weights, summed so compound suffixes ("Ti SUPER") outrank the
+# parts they are built from.
+_SUFFIX_WEIGHTS = {"GRE": 1, "XT": 2, "SUPER": 2, "TI": 3, "XTX": 4}
+
+_MODEL_RE = re.compile(
+    r"\b(" + "|".join(_SERIES_PREFIXES) + r")\s*([A-Z])?\s*(\d{3,5})\b(.*)$",
+)
+
+_SUFFIX_SPLIT_RE = re.compile(r"[^A-Z0-9]+")
+
+
+@dataclass(frozen=True, order=True)
+class ParsedModel:
+    """
+    Orderable view of a GPU model name.
+
+    Fields are declared in comparison order. ``number`` carries both the
+    generation and the tier (9070 is RDNA 4, tier 70), so comparing it as an
+    integer ranks generations first and tiers second. ``series_rank`` only
+    matters for letter-numbered lines such as Intel Arc, where B580 supersedes
+    A770 despite the lower number.
+    """
+
+    series_rank: int
+    number: int
+    suffix_rank: int
+    prefix: str = field(default="", compare=False)
+
+
+def _suffix_rank(suffix: str) -> int:
+    """
+    Score a trailing suffix such as ``" Ti SUPER"`` or ``" XTX"``.
+
+    Stops at the first unrecognised token so multi-model lspci strings like
+    ``"XT/7900 XTX"`` are scored on their own suffix only.
+    """
+    rank = 0
+    for token in _SUFFIX_SPLIT_RE.split(suffix):
+        if not token:
+            continue
+        weight = _SUFFIX_WEIGHTS.get(token)
+        if weight is None:
+            break
+        rank += weight
+    return rank
+
+
+def parse_model(model: str) -> ParsedModel | None:
+    """
+    Parse a GPU model name into an orderable tuple.
+
+    Args:
+        model: GPU model name, e.g. ``"Radeon RX 9060 XT"``
+
+    Returns:
+        A :class:`ParsedModel`, or None when the name does not follow the
+        ``<series> [letter]<number> [suffix]`` pattern (Vega APUs, Intel
+        HD/UHD/Iris, ...). Those fall back to the exception table.
+    """
+    match = _MODEL_RE.search(_normalize_model_name(model))
+    if not match:
+        return None
+
+    prefix, letter, number, suffix = match.groups()
+    return ParsedModel(
+        series_rank=ord(letter) - ord("A") + 1 if letter else 0,
+        number=int(number),
+        suffix_rank=_suffix_rank(suffix),
+        prefix=prefix,
+    )
+
+
 def get_model_index(model: str, model_list: list[str]) -> int:
     """
     Get the index of a GPU model in a model list.
+
+    Entries contained in the queried name win over entries merely containing
+    it, and the most specific one of each kind is preferred: "Iris Xe MAX"
+    resolves to itself rather than to the shorter "Xe", while "Xe" resolves to
+    "Xe" rather than to the longer "Iris Xe".
 
     Args:
         model: GPU model name to find
@@ -257,18 +342,30 @@ def get_model_index(model: str, model_list: list[str]) -> int:
         Index in list, or -1 if not found
     """
     normalized = _normalize_model_name(model)
+    contained: list[tuple[int, int]] = []
+    containing: list[tuple[int, int]] = []
 
     for idx, list_model in enumerate(model_list):
-        list_normalized = _normalize_model_name(list_model)
-        if list_normalized in normalized or normalized in list_normalized:
-            return idx
+        candidate = _normalize_model_name(list_model)
+        if candidate in normalized:
+            contained.append((len(candidate), idx))
+        elif normalized in candidate:
+            containing.append((len(candidate), idx))
 
+    if contained:
+        return max(contained)[1]
+    if containing:
+        return min(containing)[1]
     return -1
 
 
 def compare_models(model: str, min_model: str, model_list: list[str]) -> bool:
     """
     Check if a GPU model meets the minimum requirement.
+
+    Names that parse are compared structurally, which makes any card of a
+    generation at or above the minimum pass without being listed. Everything
+    else falls back to the ordered exception table.
 
     Args:
         model: Detected GPU model
@@ -278,12 +375,17 @@ def compare_models(model: str, min_model: str, model_list: list[str]) -> bool:
     Returns:
         True if model meets or exceeds minimum
     """
+    parsed = parse_model(model)
+    parsed_min = parse_model(min_model)
+    if parsed is not None and parsed_min is not None:
+        return parsed >= parsed_min
+
     model_idx = get_model_index(model, model_list)
     min_idx = get_model_index(min_model, model_list)
 
     if model_idx < 0 or min_idx < 0:
-        # Unknown model - assume it's newer/better
-        logger.debug(f"Unknown model comparison: {model} vs {min_model}")
+        # Never block an installation on an incomplete model table.
+        logger.info(f"Unrankable model comparison, assuming compatible: {model} vs {min_model}")
         return True
 
     return model_idx >= min_idx
@@ -450,13 +552,15 @@ class GPUDetector:
         if vendor == GPUVendor.NVIDIA:
             name = re.sub(r"NVIDIA Corporation\s*", "", name, flags=re.IGNORECASE)
             # Extract GeForce/Quadro model
-            match = re.search(r"(GeForce\s+)?(GTX|RTX|GT)\s*\d+\s*(Ti|SUPER)?", name, re.IGNORECASE)
+            match = re.search(
+                r"(GeForce\s+)?(GTX|RTX|GT)\s*\d+(\s+(Ti|SUPER))*", name, re.IGNORECASE
+            )
             if match:
                 return match.group(0).strip()
         elif vendor == GPUVendor.AMD:
             name = re.sub(r"Advanced Micro Devices.*?\[|\]", "", name, flags=re.IGNORECASE)
             # Extract RX/Radeon model
-            match = re.search(r"(Radeon\s+)?(RX\s*\d+\s*(XT)?)", name, re.IGNORECASE)
+            match = re.search(r"(Radeon\s+)?RX\s*\d+(\s*(XTX|XT|GRE))?", name, re.IGNORECASE)
             if match:
                 return match.group(0).strip()
             # Check for Vega iGPU

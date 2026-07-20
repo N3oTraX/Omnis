@@ -211,6 +211,7 @@ ApplicationWindow {
                 showRequirements: engine.showRequirements
                 requirements: engine.requirementsModel
                 canProceed: engine.canProceed
+                hasWarnings: engine.hasRequirementWarnings
                 isCheckingRequirements: engine.isCheckingRequirements
 
                 primaryColor: root.primaryColor
@@ -234,9 +235,10 @@ ApplicationWindow {
                 onConfigureNetworkRequested: {
                     console.log("Launching network configuration...")
                     engine.launchNetworkSettings()
-                    // Schedule a recheck after a delay to allow user to configure network
-                    networkRecheckTimer.start()
+                    networkRecheckTimer.restartPolling()
                 }
+
+                onRecheckRequirementsRequested: engine.recheckInternetStatus()
 
                 Behavior on opacity {
                     NumberAnimation { duration: 300 }
@@ -509,6 +511,7 @@ ApplicationWindow {
                 opacity: visible ? 1 : 0
 
                 success: installationSuccess
+                installing: root.isInstalling
                 errorMessage: engine.errorMessage
                 summary: engine.installationSummary
 
@@ -532,7 +535,11 @@ ApplicationWindow {
                 onViewLogsClicked: fullLogDialog.open()
                 onRetryClicked: {
                     // Repart d'un état propre : réinitialise le moteur/journal
-                    // puis relance l'installation depuis le début.
+                    // puis relance l'installation depuis le début. Le garde
+                    // isInstalling évite de rejouer le partitionnement pendant
+                    // la fenêtre où le thread précédent n'est pas encore sorti.
+                    if (root.isInstalling)
+                        return
                     engine.resetInstallation()
                     progressView.logMessages = []
                     startInstallation()
@@ -692,10 +699,12 @@ ApplicationWindow {
         }
     }
 
+    // La vue ne bascule plus ici : c'est onInstallationStarted qui la commande.
+    // Basculer en amont laissait l'utilisateur sur l'écran Installing alors que
+    // le moteur avait refusé de démarrer, et un Retry rejouait alors toute la
+    // liste de jobs — partitionnement destructif compris.
     function startInstallation() {
         engine.applySelectionsToContext()
-        currentStep = 6  // Progress view
-        isInstalling = true
         engine.startInstallation()
     }
 
@@ -710,12 +719,28 @@ ApplicationWindow {
 
         function onInstallationStarted() {
             isInstalling = true
+            currentStep = 6  // Progress view
         }
 
         function onInstallationFinished(success) {
             isInstalling = false
             installationSuccess = success
             currentStep = 7  // Go to Finished view
+        }
+
+        // recheckInternetStatus() relance déjà la vérification des prérequis :
+        // ici on se contente d'arrêter le sondage dès que la connexion est là.
+        function onInternetStatusChanged(connected) {
+            if (connected)
+                networkRecheckTimer.stop()
+        }
+
+        function onInstallationRefused(reason, message) {
+            console.warn("Installation refused (" + reason + "):", message)
+            isInstalling = false
+            refusalDialog.reasonCode = reason
+            refusalDialog.detail = message
+            refusalDialog.open()
         }
 
         function onJobProgress(jobName, percent, message) {
@@ -756,18 +781,86 @@ ApplicationWindow {
         onActivated: navigateNext()
     }
 
-    // Timer to recheck network status after user configures WiFi
+    // Sondage borné après ouverture des réglages réseau. Un tir unique à 5 s
+    // partait au LANCEMENT de l'outil, pas à sa fermeture : choisir un réseau et
+    // saisir une phrase de passe prend bien plus que ça, et le seul essai tombait
+    // systématiquement dans le vide — les prérequis restaient au rouge.
     Timer {
         id: networkRecheckTimer
-        interval: 5000  // 5 seconds delay to allow network connection
-        repeat: false
+        property int attemptsLeft: 0
+        readonly property int maxAttempts: 40  // ~2 min à 3 s d'intervalle
+
+        interval: 3000
+        repeat: true
         onTriggered: {
+            if (attemptsLeft <= 0) {
+                stop()
+                return
+            }
+            attemptsLeft -= 1
             console.log("Rechecking internet connectivity...")
             engine.recheckInternetStatus()
+        }
+
+        function restartPolling() {
+            attemptsLeft = maxAttempts
+            restart()
         }
     }
 
     // Full installation log dialog (opened from FinishedView "View Full Logs")
+    // Affiché quand le moteur refuse de démarrer l'installation (pas de droits
+    // root, outillage manquant). Sans ce retour l'utilisateur restait devant un
+    // écran figé sans savoir que rien n'avait démarré.
+    Dialog {
+        id: refusalDialog
+
+        property string reasonCode: ""
+        property string detail: ""
+
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(parent ? parent.width * 0.7 : 640, 640)
+        modal: true
+        focus: true
+        padding: 24
+        standardButtons: Dialog.Ok
+        title: reasonCode === "not-root"
+               ? qsTr("Administrator privileges required")
+               : qsTr("Cannot start the installation")
+
+        background: Rectangle {
+            color: surfaceColor
+            radius: 12
+            border.color: warningColor
+            border.width: 1
+        }
+
+        header: Rectangle {
+            color: "transparent"
+            implicitHeight: refusalTitle.implicitHeight + 24
+
+            Text {
+                id: refusalTitle
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: 24
+                text: refusalDialog.title
+                font.pixelSize: 20
+                font.bold: true
+                color: textColor
+            }
+        }
+
+        Text {
+            width: parent.width
+            text: refusalDialog.detail
+            wrapMode: Text.WordWrap
+            font.pixelSize: 14
+            color: textColor
+        }
+    }
+
     Dialog {
         id: fullLogDialog
 

@@ -61,7 +61,7 @@ class TestApplyViaGsettings:
                 clear=True,
             ),
             patch("omnis.utils.keyboard_layout.os.geteuid", return_value=0),
-            patch("omnis.utils.keyboard_layout.pwd.getpwuid", return_value=pw),
+            patch("omnis.utils.session.pwd.getpwuid", return_value=pw),
             patch("omnis.utils.keyboard_layout.shutil.which", return_value="/run/wrappers/bin/su"),
             patch("omnis.utils.keyboard_layout.subprocess.run") as mock_run,
         ):

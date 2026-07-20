@@ -13,11 +13,11 @@
 
 | Métrique | Valeur |
 |----------|--------|
-| Version | `0.6.0` |
+| Version | `0.6.1` |
 | Python | `>=3.11` |
 | GUI | PySide6 (Qt6) + QML |
 | Livrable | AppImage standalone (Nix bundle, CI sur tag) |
-| Tests | 939 tests unitaires |
+| Tests | 963 tests unitaires |
 | i18n | 37 locales supportées |
 | Licence | GPL-3.0-or-later |
 
@@ -133,7 +133,7 @@ cd Omnis
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-# Lancer les tests (939 tests)
+# Lancer les tests (963 tests)
 pytest
 
 # Démarrer l'installeur GLF OS (mode développement)
@@ -247,7 +247,7 @@ python -c "from omnis.core.engine import Engine; print('OK')"
 ### Commandes Développement
 
 ```bash
-# Lancer tous les tests (939 tests)
+# Lancer tous les tests (963 tests)
 pytest -v
 
 # Tests IPC uniquement
@@ -337,6 +337,16 @@ Documentation complète : [`docs/architecture/overview.md`](docs/architecture/ov
 ---
 
 ## État du Projet
+
+### v0.6.1 - Retours des premiers testeurs ✅
+
+Correctifs remontés par les premiers tests sur ISO :
+
+- [x] **Partitionnement bloqué après un formatage externe** : un disque fraîchement formaté restait monté par le bureau (auto-montage udisks) et `wipefs` échouait en `EBUSY`. Le disque cible est désormais réellement libéré avant toute écriture (démontage de tous les points de montage qui s'y adossent, `swapoff`, fermeture des mappers LUKS/LVM/md)
+- [x] **Refus explicite du disque système** : Omnis refuse de toucher au disque portant le système en cours — depuis l'ISO live (`/iso`, `/nix/.ro-store`) comme depuis l'AppImage sur un système installé (`/`, `/usr`) ; en cas de disque occupé, l'erreur nomme le détenteur au lieu d'un `EBUSY` brut
+- [x] **Installeur en anglais pour les variantes régionales** : repli par famille de langue (`fr_BE` → `fr_FR`, `de_CH` → `de_DE`, `fr_CA` → `fr_FR`, `pt_PT` → `pt_BR`) pour la langue d'affichage, sans modifier la locale système écrite sur la cible (5 des 9 entrées clavier du menu de démarrage étaient concernées)
+- [x] **8 langues complétées** (`de`, `es`, `it`, `ja`, `ko`, `pt`, `ru`, `zh`) : de 110/229 à 229/229 chaînes — traductions générées, **non relues par des locuteurs natifs** (voir [`docs/i18n/RELECTURE.md`](docs/i18n/RELECTURE.md))
+- [x] Job `locale` exécuté après `partition` (il écrivait dans la cible avant son montage), bouton « Install » traduit, journaux de nettoyage non trompeurs
 
 ### v0.6.0 - Installation GLF OS de bout en bout + barre granulaire ✅
 
@@ -480,7 +490,8 @@ Thèmes :
 | v0.4.2 | Stabilisation UI | ✅ Terminé |
 | v0.5.0 | Install NixOS + éditeur partition + packaging AppImage | ✅ Terminé |
 | v0.5.1 | AppImage lançable (fix résolution config) | ✅ Terminé |
-| v0.6.0 | Installation GLF OS E2E + barre granulaire + langue/clavier live | ✅ Actuel |
+| v0.6.0 | Installation GLF OS E2E + barre granulaire + langue/clavier live | ✅ Terminé |
+| v0.6.1 | Libération du disque cible + i18n des variantes régionales | ✅ Actuel |
 | v0.7.0 | Slimming AppImage + intégration module GLF-OS | 🔲 À faire |
 | v0.8.0 | Durcissement production (Polkit, IPC) | 🔲 À faire |
 | v1.0.0 | Première release stable | 🔲 Release |

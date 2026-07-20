@@ -219,7 +219,7 @@ class TestListDisks:
         assert "nvme0n1" in names
 
     @patch("omnis.utils.disk_detector.subprocess.run")
-    def test_non_block_live_source_excludes_nothing(self, mock_run: MagicMock) -> None:
+    def test_unidentifiable_live_medium_excludes_nothing(self, mock_run: MagicMock) -> None:
         payload = {
             "blockdevices": [
                 {
@@ -231,11 +231,73 @@ class TestListDisks:
                 }
             ]
         }
-        # airootfs (live ISO) is not a block device.
+        # airootfs (live ISO) is not a block device, and no other probe resolves.
         mock_run.side_effect = _make_run(payload, "airootfs").side_effect
 
         disks = disk_detector.list_disks()
         assert [d["name"] for d in disks] == ["sda"]
+
+    @patch("omnis.utils.disk_detector._live_sources")
+    @patch("omnis.utils.disk_detector.subprocess.run")
+    def test_excludes_live_medium_found_behind_a_loop_device(
+        self, mock_run: MagicMock, mock_sources: MagicMock
+    ) -> None:
+        """
+        A live ISO booted from a USB stick (Ventoy) must not be offered as target.
+
+        Its root is a tmpfs, so resolving ``/`` yields nothing; the medium is only
+        reachable through the backing file of the squashfs loop device. Before
+        this was handled, the stick the installer was running from showed up as
+        an installable disk.
+        """
+        payload = {
+            "blockdevices": [
+                {
+                    "name": "sda",
+                    "size": 256 * 1024**3,
+                    "type": "disk",
+                    "rota": False,
+                    "children": [],
+                },
+                {
+                    "name": "sdb",
+                    "size": 32 * 1024**3,
+                    "type": "disk",
+                    "rota": False,
+                    "children": [{"name": "sdb1", "size": 32 * 1024**3, "type": "part"}],
+                },
+            ]
+        }
+        mock_run.side_effect = _make_run(payload, "tmpfs").side_effect
+        mock_sources.return_value = {"/dev/sdb1"}
+
+        names = [d["name"] for d in disk_detector.list_disks()]
+        assert names == ["sda"]
+
+
+class TestIsLiveDisk:
+    """Tests for matching a disk against the collected live sources."""
+
+    _DISK = {
+        "name": "sdb",
+        "children": [{"name": "sdb1"}, {"name": "sdb2"}],
+    }
+
+    def test_matches_partition_of_the_disk(self) -> None:
+        assert disk_detector._is_live_disk(self._DISK, {"/dev/sdb1"}) is True
+
+    def test_matches_the_disk_itself(self) -> None:
+        assert disk_detector._is_live_disk(self._DISK, {"/dev/sdb"}) is True
+
+    def test_matches_when_only_one_source_of_several_hits(self) -> None:
+        sources = {"/dev/sda1", "/dev/sdb2", "/dev/nvme0n1p1"}
+        assert disk_detector._is_live_disk(self._DISK, sources) is True
+
+    def test_ignores_unrelated_disks(self) -> None:
+        assert disk_detector._is_live_disk(self._DISK, {"/dev/sda1"}) is False
+
+    def test_no_sources_excludes_nothing(self) -> None:
+        assert disk_detector._is_live_disk(self._DISK, set()) is False
 
     @patch("omnis.utils.disk_detector.subprocess.run")
     def test_fallback_on_lsblk_missing(self, mock_run: MagicMock) -> None:
@@ -250,6 +312,9 @@ class TestListDisks:
             assert set(disk.keys()) == {
                 "name",
                 "model",
+                "serial",
+                "wwn",
+                "transport",
                 "size",
                 "sizeBytes",
                 "sizeSectors",

@@ -12,6 +12,8 @@ import subprocess
 from enum import Enum
 from typing import ClassVar
 
+from omnis.utils.session import wrap_in_user_session
+
 logger = logging.getLogger(__name__)
 
 
@@ -174,10 +176,19 @@ class NetworkHelper:
             logger.error(msg)
             return (False, msg)
 
+        # Connecting to a Wi-Fi network needs the NetworkManager secret agent
+        # registered on the *session* bus, which root cannot reach: launched as
+        # root the tool lists networks but silently fails to connect.
+        launch_cmd = wrap_in_user_session(cmd)
+        if launch_cmd is None:
+            msg = "Cannot reach the user session to launch the network configuration tool"
+            logger.error(msg)
+            return (False, msg)
+
         try:
             # Launch the command in the background (non-blocking)
             process = subprocess.Popen(
-                cmd,
+                launch_cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,

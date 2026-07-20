@@ -4,11 +4,15 @@ Base Job interface for Omnis Installer.
 All installation jobs must inherit from BaseJob and implement the required methods.
 """
 
+import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any
+
+# Error code reported when a job's external tooling is missing.
+ERR_MISSING_TOOLS = 90
 
 
 class JobStatus(Enum):
@@ -105,6 +109,15 @@ class BaseJob(ABC):
     # Human-readable description
     description: str = "Base job"
 
+    # External binaries this job shells out to. Checked by :meth:`preflight`
+    # before ANY job runs, so a missing tool is reported while the disk is still
+    # intact -- the partition job wipes before the nixos job ever looks for
+    # nixos-generate-config, and a tester lost a disk that way.
+    #
+    # An entry may be a tuple to express interchangeable tools: ``("mkpasswd",
+    # "openssl")`` passes as soon as either one resolves.
+    required_tools: tuple[str | tuple[str, ...], ...] = ()
+
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         """
         Initialize the job with optional configuration.
@@ -164,6 +177,33 @@ class BaseJob(ABC):
             JobResult.ok() if valid, JobResult.fail() otherwise
         """
         return JobResult.ok()
+
+    def preflight(self) -> JobResult:
+        """
+        Check that every external tool this job needs is reachable.
+
+        Runs for all jobs before the first one executes, so an incomplete
+        environment (an AppImage missing ``udevadm``/``mkpasswd``, a host with no
+        ``nixos-generate-config``) is caught while the target disk is still
+        untouched.
+
+        Returns:
+            JobResult.ok() when every tool resolves, JobResult.fail() otherwise
+        """
+        missing: list[str] = []
+        for requirement in self.required_tools:
+            alternatives = (requirement,) if isinstance(requirement, str) else requirement
+            if any(shutil.which(tool) is not None for tool in alternatives):
+                continue
+            missing.append(" or ".join(alternatives))
+
+        if not missing:
+            return JobResult.ok()
+        return JobResult.fail(
+            f"Job '{self.name}' requires missing tool(s): {', '.join(missing)}",
+            error_code=ERR_MISSING_TOOLS,
+            data={"job": self.name, "missing_tools": missing},
+        )
 
     def cleanup(self, _context: JobContext) -> None:
         """

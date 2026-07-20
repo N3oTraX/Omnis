@@ -16,12 +16,16 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # lsblk columns requested (bytes for SIZE, plus topology/identity fields).
-_LSBLK_COLUMNS = "NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,MODEL,RM,HOTPLUG,TRAN,ROTA,PARTTYPENAME,START"
+# SERIAL/WWN identify a disk across reboots, where the sdX name does not.
+_LSBLK_COLUMNS = (
+    "NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,MODEL,SERIAL,WWN,RM,HOTPLUG,TRAN,ROTA,PARTTYPENAME,START"
+)
 
 # Disk geometry constants (lsblk reports START in 512-byte sectors).
 _SECTOR_SIZE = 512
@@ -75,68 +79,137 @@ def _classify_part_type(fstype: str, parttypename: str) -> str:
     return "other"
 
 
-def _live_source() -> str | None:
-    """
-    Return the block-device source backing the live root filesystem.
+# Mountpoints that only ever exist on live media. Resolving each one back to its
+# backing block device is what lets us recognise the installation medium.
+_LIVE_MOUNTPOINTS = (
+    "/iso",
+    "/iso-cfg",
+    "/nix/.ro-store",
+    "/run/initramfs/live",
+)
 
-    Uses ``findmnt -no SOURCE /``. On a live ISO the root is often an overlay,
-    tmpfs or airootfs which is NOT a block device; in that case we return
-    ``None`` so the caller excludes nothing.
+# Where desktops automount removable media (Ventoy sticks land here).
+_MEDIA_ROOTS = ("/run/media", "/media")
+
+
+def _findmnt_source(target: str) -> str | None:
+    """
+    Return the block device backing ``target`` (a mountpoint or any file path).
+
+    ``findmnt -T`` walks up to the enclosing mountpoint, so this works for a
+    plain file (a loop backing file, for instance) as well as a directory.
     """
     try:
         result = subprocess.run(
-            ["findmnt", "-no", "SOURCE", "/"],
+            ["findmnt", "-no", "SOURCE", "-T", target],
             check=False,
             capture_output=True,
             text=True,
         )
     except (FileNotFoundError, OSError) as exc:
-        logger.warning("findmnt unavailable, cannot detect live disk: %s", exc)
+        logger.warning("findmnt unavailable, cannot resolve %s: %s", target, exc)
         return None
 
     if result.returncode != 0:
         return None
 
-    source = result.stdout.strip()
-    if not source:
-        return None
-
-    # Non-block-device sources (live ISO): exclude nothing.
-    if not source.startswith("/dev/"):
-        logger.debug("Live root source is not a block device: %s", source)
-        return None
-
-    return source
+    # btrfs reports "/dev/sda2[/@subvol]" -- keep only the device.
+    source = result.stdout.strip().split("[", 1)[0]
+    return source if source.startswith("/dev/") else None
 
 
-def _is_live_disk(device: dict[str, Any], live_source: str | None) -> bool:
+def _loop_backing_sources() -> set[str]:
+    """
+    Return the block devices holding the backing files of active loop devices.
+
+    A live ISO mounts its squashfs through a loop device whose backing file sits
+    on the installation medium. The loop device is not a child of that medium in
+    lsblk's tree, so this is the only way to tie the two together -- and it is
+    exactly what makes a Ventoy stick recognisable.
+    """
+    sources: set[str] = set()
+    for backing in Path("/sys/block").glob("loop*/loop/backing_file"):
+        try:
+            path = backing.read_text().strip()
+        except OSError:
+            continue
+        # The kernel appends " (deleted)" for unlinked backing files.
+        path = path.removesuffix(" (deleted)")
+        if not path:
+            continue
+        source = _findmnt_source(path)
+        if source:
+            sources.add(source)
+    return sources
+
+
+def _live_sources() -> set[str]:
+    """
+    Return every block device that appears to back the running live system.
+
+    Deliberately over-collects. A single probe is not enough: on a live ISO
+    ``/`` is a tmpfs or overlay, so resolving it yields nothing and the medium
+    would be offered as an installation target. We therefore combine the root
+    source, the loop backing files, the well-known live mountpoints and the
+    removable-media roots.
+    """
+    sources: set[str] = set()
+
+    root_source = _findmnt_source("/")
+    if root_source:
+        sources.add(root_source)
+
+    sources |= _loop_backing_sources()
+
+    candidates = list(_LIVE_MOUNTPOINTS)
+    for media_root in _MEDIA_ROOTS:
+        root = Path(media_root)
+        if not root.is_dir():
+            continue
+        try:
+            candidates.extend(str(child) for child in root.iterdir() if child.is_dir())
+        except OSError:
+            continue
+
+    for target in candidates:
+        if not Path(target).exists():
+            continue
+        source = _findmnt_source(target)
+        if source:
+            sources.add(source)
+
+    if not sources:
+        logger.warning("No live medium identified: every disk will be offered as a target")
+    else:
+        logger.debug("Live sources: %s", ", ".join(sorted(sources)))
+    return sources
+
+
+def _device_aliases(device: dict[str, Any]) -> set[str]:
+    """Return the device paths and kernel names a disk and its children answer to."""
+    aliases: set[str] = set()
+    name = device.get("name", "")
+    if name:
+        aliases |= {name, f"/dev/{name}"}
+    for child in device.get("children", []):
+        child_name = child.get("name", "")
+        if child_name:
+            aliases |= {child_name, f"/dev/{child_name}"}
+    return aliases
+
+
+def _is_live_disk(device: dict[str, Any], live_sources: set[str]) -> bool:
     """
     Return True if ``device`` (an lsblk disk node) carries the live system.
 
-    Walks the disk's children (partitions) and compares their device path /
-    name against the live source. Also handles the degenerate case where the
-    live source IS the disk itself.
+    Matches the disk itself and any of its partitions against every source
+    gathered by :func:`_live_sources`.
     """
-    if not live_source:
+    if not live_sources:
         return False
 
-    name = device.get("name", "")
-    disk_path = f"/dev/{name}"
-
-    if live_source in (disk_path, name):
-        return True
-
-    live_tail = live_source.rsplit("/", 1)[-1]
-    for child in device.get("children", []):
-        child_name = child.get("name", "")
-        child_path = f"/dev/{child_name}"
-        if live_source in (child_path, child_name):
-            return True
-        # Defensive: /dev/mapper/* or dm-* devices may sit above the partition.
-        if child_name and child_name == live_tail:
-            return True
-
-    return False
+    aliases = _device_aliases(device)
+    return any(source in aliases or source.rsplit("/", 1)[-1] in aliases for source in live_sources)
 
 
 def _finalize_mock_disk(disk: dict[str, Any]) -> dict[str, Any]:
@@ -161,6 +234,9 @@ def _mock_disks() -> list[dict[str, Any]]:
         {
             "name": "sda",
             "model": "Mock SSD 500G",
+            "serial": "MOCK-SSD-0001",
+            "wwn": "0x5000000000000001",
+            "transport": "sata",
             "size": _format_size(500 * 1024**3),
             "sizeBytes": 500 * 1024**3,
             "type": "SSD",
@@ -183,6 +259,9 @@ def _mock_disks() -> list[dict[str, Any]]:
         {
             "name": "nvme0n1",
             "model": "Mock NVMe 1T",
+            "serial": "MOCK-NVME-0002",
+            "wwn": "eui.0000000000000002",
+            "transport": "nvme",
             "size": _format_size(1024**4),
             "sizeBytes": 1024**4,
             "type": "SSD",
@@ -252,10 +331,18 @@ def _compute_segments(disk_sectors: int, partitions: list[dict[str, Any]]) -> li
     return segments
 
 
+def compute_segments(disk_sectors: int, partitions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Public entry point to lay an arbitrary partition list out over a disk."""
+    return _compute_segments(disk_sectors, partitions)
+
+
 def _build_disk(device: dict[str, Any]) -> dict[str, Any]:
     """Build a single disk dict (UI contract) from an lsblk disk node."""
     size_bytes = int(device.get("size", 0) or 0)
     model = (device.get("model") or "").strip()
+    serial = (device.get("serial") or "").strip()
+    wwn = (device.get("wwn") or "").strip()
+    transport = (device.get("tran") or "").strip()
     is_rotational = _coerce_bool(device.get("rota"))
     removable = _coerce_bool(device.get("hotplug")) or _coerce_bool(device.get("rm"))
 
@@ -269,6 +356,9 @@ def _build_disk(device: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": device.get("name", ""),
         "model": model,
+        "serial": serial,
+        "wwn": wwn,
+        "transport": transport,
         "size": _format_size(size_bytes),
         "sizeBytes": size_bytes,
         "sizeSectors": disk_sectors,
@@ -287,7 +377,8 @@ def list_disks() -> list[dict[str, Any]]:
     Returns a list of dicts following the shared UI histobar contract::
 
         {
-          "name": str, "model": str, "size": str, "sizeBytes": int,
+          "name": str, "model": str, "serial": str, "wwn": str,
+          "transport": str, "size": str, "sizeBytes": int,
           "type": "SSD" | "HDD", "removable": bool,
           "partitions": [
             {"name": str, "sizeBytes": int, "fstype": str, "partType": str}
@@ -315,7 +406,7 @@ def list_disks() -> list[dict[str, Any]]:
         logger.warning("lsblk output unusable (%s), using mock disks", exc)
         return _mock_disks()
 
-    live_source = _live_source()
+    live_sources = _live_sources()
     disks: list[dict[str, Any]] = []
 
     for device in data.get("blockdevices", []):
@@ -328,7 +419,7 @@ def list_disks() -> list[dict[str, Any]]:
         if name.startswith(("zram", "loop", "ram", "fd", "sr", "nbd")):
             continue
         # Exclude the disk carrying the running system.
-        if _is_live_disk(device, live_source):
+        if _is_live_disk(device, live_sources):
             logger.debug("Excluding live disk: %s", name)
             continue
         disks.append(_build_disk(device))

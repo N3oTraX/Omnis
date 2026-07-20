@@ -8,7 +8,9 @@ Uses length-prefixed messages for reliable framing.
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
+import pwd
 import socket
 import struct
 from pathlib import Path
@@ -35,6 +37,57 @@ DEFAULT_RECEIVE_TIMEOUT = 300.0  # 5 minutes for long operations
 # Length prefix format: unsigned 4-byte integer, big-endian
 LENGTH_PREFIX_FORMAT = ">I"
 LENGTH_PREFIX_SIZE = struct.calcsize(LENGTH_PREFIX_FORMAT)
+
+logger = logging.getLogger(__name__)
+
+
+def _launching_user() -> tuple[int, int] | None:
+    """
+    Return the (uid, gid) of the user who escalated us, or None.
+
+    pkexec exports PKEXEC_UID, sudo exports SUDO_UID/SUDO_GID. Anything else
+    (a plain root shell, the ISO autostart) yields None.
+    """
+    for uid_var, gid_var in (("PKEXEC_UID", ""), ("SUDO_UID", "SUDO_GID")):
+        raw_uid = os.environ.get(uid_var)
+        if not raw_uid:
+            continue
+        try:
+            uid = int(raw_uid)
+        except ValueError:
+            continue
+        raw_gid = os.environ.get(gid_var) if gid_var else None
+        if raw_gid:
+            with contextlib.suppress(ValueError):
+                return uid, int(raw_gid)
+        try:
+            return uid, pwd.getpwuid(uid).pw_gid
+        except KeyError:
+            return uid, uid
+    return None
+
+
+def _hand_over_to_launching_user(path: Path) -> None:
+    """
+    Give ``path`` to the user that launched the engine, keeping mode 0600/0700.
+
+    The engine runs as root while the UI stays unprivileged, so a root-owned
+    0700 directory and 0600 socket are unreachable from the UI side: every probe
+    raised EACCES and relaunching the installer was impossible until reboot
+    (/run is a tmpfs, the directory outlived the process). Handing ownership to
+    the invoking user keeps the socket private to that user *and* to root, which
+    is the access model this IPC channel actually needs.
+
+    Best effort: a failure here is not fatal, the caller still has a usable
+    socket when UI and engine share a uid.
+    """
+    owner = _launching_user()
+    if owner is None:
+        return
+    try:
+        os.chown(path, owner[0], owner[1])
+    except OSError as exc:
+        logger.warning("Could not hand %s over to uid %d: %s", path, owner[0], exc)
 
 
 class UnixSocketTransport:
@@ -87,6 +140,7 @@ class UnixSocketTransport:
             if socket_dir == Path("/run/omnis"):
                 with contextlib.suppress(PermissionError):
                     os.chmod(socket_dir, 0o700)
+                _hand_over_to_launching_user(socket_dir)
         except OSError as e:
             raise IPCConnectionError(
                 f"Failed to create socket directory: {e}",
@@ -113,6 +167,7 @@ class UnixSocketTransport:
 
             # Set secure permissions on socket file
             os.chmod(self.socket_path, 0o600)  # Owner read/write only
+            _hand_over_to_launching_user(self.socket_path)
 
             sock.listen(5)  # Allow up to 5 pending connections
             sock.settimeout(self.connection_timeout)

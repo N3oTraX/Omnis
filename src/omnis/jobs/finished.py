@@ -14,6 +14,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,11 @@ from typing import Any
 from omnis.jobs.base import BaseJob, JobContext, JobResult
 
 logger = logging.getLogger(__name__)
+
+# A freshly written target can stay busy for a moment (journal flush, udisks
+# probing). Retry a normal umount rather than falling back to a lazy one.
+UNMOUNT_ATTEMPTS = 4
+UNMOUNT_RETRY_DELAY = 1.0
 
 
 class FinishedJob(BaseJob):
@@ -149,13 +155,19 @@ class FinishedJob(BaseJob):
             # Non-critical: continue even if log saving fails
             return JobResult.ok(f"Log saving failed (non-critical): {e}")
 
-    def _safe_unmount(self, mount_point: Path, lazy: bool = False) -> bool:
+    def _safe_unmount(self, mount_point: Path, attempts: int = UNMOUNT_ATTEMPTS) -> bool:
         """
-        Safely unmount a filesystem.
+        Unmount a filesystem, retrying a few times while it is still busy.
+
+        Lazy unmount (``umount -l``) is deliberately NOT used as a fallback: it
+        detaches the tree while the ext4 journal thread (``jbd2/<dev>``) keeps
+        holding the block device, so the next run's ``wipefs`` fails with EBUSY
+        on a disk that has no mount and no swap left to release. A busy target
+        must surface as an explicit, logged failure instead.
 
         Args:
             mount_point: Path to unmount
-            lazy: If True, use lazy unmount (-l) for busy filesystems
+            attempts: Number of ``umount`` attempts before giving up
 
         Returns:
             True if unmounted successfully, False otherwise
@@ -164,49 +176,36 @@ class FinishedJob(BaseJob):
             logger.debug(f"Mount point {mount_point} not mounted, skipping")
             return True
 
-        # Try normal unmount first
-        try:
-            cmd = ["umount", str(mount_point)]
-            subprocess.run(
-                cmd,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            logger.info(f"Unmounted {mount_point}")
-            return True
-
-        except subprocess.CalledProcessError as e:
-            if not lazy:
-                logger.warning(f"Failed to unmount {mount_point}: {e.stderr}")
-                logger.info("Retrying with lazy unmount...")
-                return self._safe_unmount(mount_point, lazy=True)
-
-            # Try lazy unmount
+        last_error = ""
+        for attempt in range(1, attempts + 1):
             try:
-                cmd = ["umount", "-l", str(mount_point)]
                 subprocess.run(
-                    cmd,
+                    ["umount", str(mount_point)],
                     check=True,
                     capture_output=True,
                     text=True,
                     timeout=10,
                 )
-                logger.info(f"Lazy unmounted {mount_point}")
+                logger.info(f"Unmounted {mount_point}")
                 return True
-
-            except subprocess.CalledProcessError as lazy_error:
-                logger.error(f"Failed to lazy unmount {mount_point}: {lazy_error.stderr}")
+            except subprocess.CalledProcessError as e:
+                last_error = (e.stderr or "").strip() or f"exit code {e.returncode}"
+            except subprocess.TimeoutExpired:
+                last_error = "umount timed out"
+            except FileNotFoundError:
+                logger.error("umount command not found")
                 return False
 
-        except subprocess.TimeoutExpired:
-            logger.error(f"Unmount timeout for {mount_point}")
-            return False
+            logger.warning(
+                f"Failed to unmount {mount_point} (attempt {attempt}/{attempts}): {last_error}"
+            )
+            if attempt < attempts:
+                time.sleep(UNMOUNT_RETRY_DELAY)
 
-        except FileNotFoundError:
-            logger.error("umount command not found")
-            return False
+        logger.error(
+            f"Giving up on unmounting {mount_point} after {attempts} attempts: {last_error}"
+        )
+        return False
 
     def _cleanup_mounts(self, context: JobContext) -> JobResult:
         """
@@ -262,14 +261,20 @@ class FinishedJob(BaseJob):
             swap_path = context.selections["swap"]
             if swap_path:
                 try:
-                    subprocess.run(
+                    swapoff = subprocess.run(
                         ["swapoff", swap_path],
-                        check=False,  # Don't fail if already off
+                        check=False,  # Already-off swap is not an error here
                         capture_output=True,
                         text=True,
                         timeout=10,
                     )
-                    logger.info(f"Deactivated swap (from layout): {swap_path}")
+                    if swapoff.returncode == 0:
+                        logger.info(f"Deactivated swap (from layout): {swap_path}")
+                    else:
+                        logger.warning(
+                            f"Could not deactivate swap (from layout) {swap_path}: "
+                            f"{(swapoff.stderr or '').strip()}"
+                        )
                 except Exception as e:
                     logger.debug(f"Swap deactivation (layout) failed: {e}")
 

@@ -2,16 +2,19 @@
 Locale Detector - Automatic locale, timezone, and keymap detection.
 
 Detects system locale settings using multiple methods in cascade:
-1. GeoIP (ip-api.com) - Geographic location from IP
-2. Kernel cmdline - Boot parameters (lang=, locale=, keymap=, timezone=)
-3. EFI variables - UEFI PlatformLang variable
-4. Default fallback - en_US.UTF-8, UTC, us
+1. Kernel cmdline - Boot parameters (lang=, locale=, keymap=, timezone=)
+2. Live session locale - LANG/LC_ALL/LC_CTYPE, /etc/locale.conf, localectl
+3. GeoIP (ip-api.com) - Geographic location from IP
+4. EFI variables - UEFI PlatformLang variable
+5. Default fallback - en_US.UTF-8, UTC, us
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -161,6 +164,25 @@ EFI_LANG_TO_LOCALE: dict[str, str] = {
 # English locales to ignore for cmdline/EFI detection (prefer geoip)
 ENGLISH_DEFAULTS = frozenset({"en_US.UTF-8", "en_US", "en-US", "C", "C.UTF-8", "POSIX", ""})
 
+# Placeholders returned by localectl when a value is unset
+UNSET_VALUES = frozenset({"n/a", "N/A", "", "-"})
+
+
+def _timezone_keymap_for_locale(language: str) -> tuple[str, str]:
+    """
+    Reverse-map a locale to a plausible timezone and keymap.
+
+    Args:
+        language: Locale string, e.g. "fr_FR.UTF-8"
+
+    Returns:
+        (timezone, keymap) tuple, defaulting to ("UTC", "us")
+    """
+    for tz, (locale, keymap) in TIMEZONE_TO_LOCALE.items():
+        if locale == language:
+            return tz, keymap
+    return "UTC", "us"
+
 
 @dataclass(frozen=True)
 class LocaleDetectionResult:
@@ -169,7 +191,7 @@ class LocaleDetectionResult:
     language: str  # e.g., "fr_FR.UTF-8"
     timezone: str  # e.g., "Europe/Paris"
     keymap: str  # e.g., "fr"
-    source: str  # "geoip", "cmdline", "efi", "default"
+    source: str  # "geoip", "cmdline", "session", "efi", "default"
     confidence: float  # 0.0-1.0
 
     def to_dict(self) -> dict[str, Any]:
@@ -191,6 +213,7 @@ class LocaleDetectorConfig:
     geoip_enabled: bool = True
     geoip_timeout: float = 2.0
     cmdline_enabled: bool = True
+    session_enabled: bool = True
     efi_enabled: bool = True
     override_mode: str = "auto"  # "auto", "prefer_geoip", "prefer_local"
     confidence_threshold: float = 0.8
@@ -201,16 +224,20 @@ class LocaleDetector:
     Automatic locale detection using multiple methods.
 
     Detection cascade:
-    1. GeoIP (ip-api.com) - Best accuracy for geographic location
-    2. Kernel cmdline - Boot parameters set by live ISO
-    3. EFI variables - UEFI firmware language setting
-    4. Default fallback - en_US.UTF-8, UTC, us
+    1. Kernel cmdline - Boot parameters set by live ISO (override_mode=prefer_local)
+    2. Live session locale - Locale actually active in the live session
+    3. GeoIP (ip-api.com) - Best accuracy for geographic location
+    4. Kernel cmdline - Boot parameters set by live ISO
+    5. EFI variables - UEFI firmware language setting
+    6. Default fallback - en_US.UTF-8, UTC, us
     """
 
     GEOIP_URL = "http://ip-api.com/json/?fields=status,countryCode,timezone"
     GEOIP_USER_AGENT = "Omnis-Installer/1.0"
     CMDLINE_PATH = Path("/proc/cmdline")
     EFI_PATH = Path("/sys/firmware/efi")
+    LOCALE_CONF_PATH = Path("/etc/locale.conf")
+    SESSION_ENV_VARS = ("LANG", "LC_ALL", "LC_CTYPE")
 
     def __init__(self, config: LocaleDetectorConfig | None = None) -> None:
         """
@@ -240,12 +267,23 @@ class LocaleDetector:
                 logger.info(f"Cmdline detection (prefer_local) successful: {result}")
                 return result
 
-        # Try GeoIP first (highest confidence)
+        # The locale of the running live session is a trustworthy local signal,
+        # unlike GeoIP which needs network access the live boot may not have.
+        session_result = self._detect_session() if self.config.session_enabled else None
+        if session_result is not None and self.config.override_mode != "prefer_geoip":
+            logger.info(f"Session detection successful: {session_result}")
+            return session_result
+
+        # Try GeoIP (highest confidence)
         if self.config.geoip_enabled:
             result = self._detect_geoip()
             if result is not None:
                 logger.info(f"GeoIP detection successful: {result}")
                 return result
+
+        if session_result is not None:
+            logger.info(f"Session detection successful: {session_result}")
+            return session_result
 
         # Try kernel cmdline
         if self.config.cmdline_enabled:
@@ -418,6 +456,138 @@ class LocaleDetector:
 
         return None
 
+    @staticmethod
+    def _normalize_session_locale(value: str) -> str | None:
+        """
+        Normalize a raw locale string, rejecting fallback values.
+
+        Args:
+            value: Raw locale, possibly quoted, e.g. '"fr_FR.UTF-8"'
+
+        Returns:
+            Normalized locale, or None for C/POSIX/English defaults
+        """
+        locale = value.strip().strip("\"'")
+        if locale in ENGLISH_DEFAULTS:
+            return None
+        if "." not in locale:
+            locale = f"{locale}.UTF-8"
+        if locale in ENGLISH_DEFAULTS:
+            return None
+        return locale
+
+    def _detect_session_env(self) -> str | None:
+        """
+        Read the session locale from the environment.
+
+        Returns:
+            Normalized locale from LANG/LC_ALL/LC_CTYPE, or None
+        """
+        for var in self.SESSION_ENV_VARS:
+            locale = self._normalize_session_locale(os.environ.get(var, ""))
+            if locale is not None:
+                logger.debug(f"Session locale from ${var}: {locale}")
+                return locale
+        return None
+
+    def _detect_session_locale_conf(self) -> str | None:
+        """
+        Read the session locale from /etc/locale.conf.
+
+        Returns:
+            Normalized locale from the LANG= key, or None
+        """
+        if not self.LOCALE_CONF_PATH.exists():
+            return None
+
+        try:
+            content = self.LOCALE_CONF_PATH.read_text(encoding="utf-8")
+        except OSError as e:
+            logger.debug(f"Failed to read {self.LOCALE_CONF_PATH}: {e}")
+            return None
+
+        match = re.search(r"^\s*LANG=(\S+)", content, re.MULTILINE)
+        if not match:
+            return None
+
+        locale = self._normalize_session_locale(match.group(1))
+        if locale is not None:
+            logger.debug(f"Session locale from {self.LOCALE_CONF_PATH}: {locale}")
+        return locale
+
+    def _detect_session_localectl(self) -> tuple[str | None, str | None]:
+        """
+        Read the session locale and keymap from ``localectl status``.
+
+        Returns:
+            (locale, keymap) tuple, either element possibly None
+        """
+        if shutil.which("localectl") is None:
+            return None, None
+
+        try:
+            proc = subprocess.run(
+                ["localectl", "status"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            logger.debug(f"localectl failed: {e}")
+            return None, None
+
+        if proc.returncode != 0:
+            logger.debug(f"localectl returned {proc.returncode}")
+            return None, None
+
+        output = proc.stdout
+        locale = None
+        lang_match = re.search(r"System Locale:.*?\bLANG=(\S+)", output)
+        if lang_match:
+            locale = self._normalize_session_locale(lang_match.group(1))
+
+        # X11 Layout is already an XKB layout; VC Keymap may be a console-only
+        # name (e.g. "de-latin1") so it is only a last resort.
+        keymap = None
+        for pattern in (r"X11 Layout:\s*(\S+)", r"VC Keymap:\s*(\S+)"):
+            match = re.search(pattern, output)
+            if match and match.group(1) not in UNSET_VALUES:
+                keymap = match.group(1)
+                break
+
+        return locale, keymap
+
+    def _detect_session(self) -> LocaleDetectionResult | None:
+        """
+        Detect the locale actually active in the running live session.
+
+        Tries environment variables, then /etc/locale.conf, then localectl.
+        Fallback locales (C, C.UTF-8, POSIX, en_US) are ignored so that a live
+        session left at its default does not shadow the other detection methods.
+
+        Returns:
+            LocaleDetectionResult if a real locale was found, None otherwise
+        """
+        keymap: str | None = None
+        language = self._detect_session_env() or self._detect_session_locale_conf()
+        if language is None:
+            language, keymap = self._detect_session_localectl()
+
+        if language is None:
+            return None
+
+        timezone, mapped_keymap = _timezone_keymap_for_locale(language)
+
+        return LocaleDetectionResult(
+            language=language,
+            timezone=timezone,
+            keymap=keymap or mapped_keymap,
+            source="session",
+            # Locally configured and offline-proof, so it must clear the bridge
+            # confidence threshold even when the GeoIP lookup is unavailable.
+            confidence=0.85,
+        )
+
     def _detect_efi(self) -> LocaleDetectionResult | None:
         """
         Detect locale from EFI PlatformLang variable.
@@ -466,15 +636,7 @@ class LocaleDetector:
                 logger.debug(f"No mapping for EFI language: {efi_lang}")
                 return None
 
-            # Try to derive timezone and keymap from locale
-            # Reverse lookup in TIMEZONE_TO_LOCALE
-            timezone = "UTC"
-            keymap = "us"
-            for tz, (loc, km) in TIMEZONE_TO_LOCALE.items():
-                if loc == language:
-                    timezone = tz
-                    keymap = km
-                    break
+            timezone, keymap = _timezone_keymap_for_locale(language)
 
             return LocaleDetectionResult(
                 language=language,
@@ -525,6 +687,7 @@ class LocaleDetector:
         methods = config_dict.get("methods", {})
         geoip_config = methods.get("geoip", {})
         cmdline_config = methods.get("cmdline", {})
+        session_config = methods.get("session", {})
         efi_config = methods.get("efi", {})
 
         detector_config = LocaleDetectorConfig(
@@ -532,6 +695,7 @@ class LocaleDetector:
             geoip_enabled=geoip_config.get("enabled", True),
             geoip_timeout=geoip_config.get("timeout", 2.0),
             cmdline_enabled=cmdline_config.get("enabled", True),
+            session_enabled=session_config.get("enabled", True),
             efi_enabled=efi_config.get("enabled", True),
             override_mode=config_dict.get("override_mode", "auto"),
             confidence_threshold=config_dict.get("confidence_threshold", 0.8),

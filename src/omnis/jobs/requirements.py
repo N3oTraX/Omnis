@@ -17,8 +17,12 @@ from pathlib import Path
 from typing import Any
 
 from omnis.jobs.gpu import GPUDetector
+from omnis.utils.disk_detector import list_disks
 
 logger = logging.getLogger(__name__)
+
+# Disks listed in ``current_value`` before the rest is collapsed into a counter.
+_MAX_SUMMARY_DISKS = 3
 
 
 class RequirementStatus(Enum):
@@ -41,6 +45,9 @@ class RequirementCheck:
     required_value: str = ""
     recommended_value: str = ""
     details: str = ""  # Used for tooltip on warn/fail icons
+    # Structured payload for checks that describe several items (e.g. one entry
+    # per disk under the "disks" key). current_value stays a short UI string.
+    data: dict[str, Any] = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
@@ -87,6 +94,37 @@ class RequirementsResult:
     def passed_checks(self) -> list[RequirementCheck]:
         """Get all passed checks."""
         return [c for c in self.checks if c.status == RequirementStatus.PASS]
+
+
+def _describe_disk(disk: dict[str, Any], min_gb: float, recommended_gb: float) -> dict[str, Any]:
+    """Build the per-disk entry of the storage check from a disk_detector dict."""
+    size_gb = int(disk.get("sizeBytes", 0) or 0) / (1024**3)
+    return {
+        "name": disk.get("name", ""),
+        "model": (disk.get("model") or "").strip(),
+        "size": disk.get("size") or f"{size_gb:.0f} GB",
+        "sizeGb": round(size_gb, 1),
+        "type": disk.get("type", ""),
+        "meetsMinimum": size_gb >= min_gb,
+        "meetsRecommended": size_gb >= recommended_gb,
+    }
+
+
+def _summarize_disks(disks: list[dict[str, Any]]) -> str:
+    """Render the short, UI-facing storage summary listing every disk."""
+    shown = ", ".join(f"{disk['name']} {disk['size']}" for disk in disks[:_MAX_SUMMARY_DISKS])
+    remaining = len(disks) - _MAX_SUMMARY_DISKS
+    return f"{shown} (+{remaining})" if remaining > 0 else shown
+
+
+def _describe_disks(disks: list[dict[str, Any]]) -> str:
+    """Render the verbose per-disk breakdown used as tooltip text."""
+    parts = []
+    for disk in disks:
+        model = f" {disk['model']}" if disk["model"] else ""
+        verdict = "ok" if disk["meetsMinimum"] else "too small"
+        parts.append(f"{disk['name']}{model} {disk['size']} ({verdict})")
+    return ", ".join(parts)
 
 
 class SystemRequirementsChecker:
@@ -245,60 +283,25 @@ class SystemRequirementsChecker:
 
     def _check_disk_space(self) -> RequirementCheck:
         """
-        Check available disk space.
+        Check the installable disks against the space requirements.
 
-        Finds the largest block device and checks against requirements.
+        Every disk reported by :func:`omnis.utils.disk_detector.list_disks` is
+        evaluated individually and reported in ``data["disks"]``; the live
+        installation medium is already excluded by that module. The check passes
+        as soon as one disk reaches the minimum, so a small NVMe stays visible
+        next to a larger secondary drive.
         """
         cfg = self._get_check_config("disk")
         min_gb = cfg.get("min_gb", 60)
         recommended_gb = cfg.get("recommended_gb", 120)
         recommend_ssd = cfg.get("recommend_ssd", True)
 
+        rec_value = f"{recommended_gb} GB"
+        if recommend_ssd:
+            rec_value += " (SSD recommended)"
+
         try:
-            # Check available space on largest block device
-            max_space_gb = 0.0
-
-            # Check /sys/block for disk sizes
-            block_path = Path("/sys/block")
-            if block_path.exists():
-                for device in block_path.iterdir():
-                    name = device.name
-                    # Skip loop, ram, and virtual devices
-                    if name.startswith(("loop", "ram", "dm-", "sr", "zram")):
-                        continue
-
-                    size_file = device / "size"
-                    if size_file.exists():
-                        # Size is in 512-byte sectors
-                        sectors = int(size_file.read_text().strip())
-                        size_gb = (sectors * 512) / (1024**3)
-                        max_space_gb = max(max_space_gb, size_gb)
-
-            # Determine status
-            if max_space_gb < min_gb:
-                status = RequirementStatus.FAIL
-                details = f"Insufficient disk space: {max_space_gb:.0f} GB available, minimum {min_gb} GB required"
-            elif max_space_gb < recommended_gb:
-                status = RequirementStatus.WARN
-                details = f"Disk space below recommended: {max_space_gb:.0f} GB available, {recommended_gb} GB recommended"
-            else:
-                status = RequirementStatus.PASS
-                details = "Sufficient storage space available"
-
-            rec_value = f"{recommended_gb} GB"
-            if recommend_ssd:
-                rec_value += " (SSD recommended)"
-
-            return RequirementCheck(
-                name="disk",
-                description="Storage Space",
-                status=status,
-                current_value=f"{max_space_gb:.0f} GB",
-                required_value=f"{min_gb} GB",
-                recommended_value=rec_value,
-                details=details,
-            )
-
+            disks = [_describe_disk(disk, min_gb, recommended_gb) for disk in list_disks()]
         except Exception as e:
             logger.warning(f"Could not check disk space: {e}")
             return RequirementCheck(
@@ -307,6 +310,42 @@ class SystemRequirementsChecker:
                 status=RequirementStatus.SKIP,
                 details=f"Could not check disk space: {e}",
             )
+
+        if not disks:
+            return RequirementCheck(
+                name="disk",
+                description="Storage Space",
+                status=RequirementStatus.FAIL,
+                current_value="No disk detected",
+                required_value=f"{min_gb} GB",
+                recommended_value=rec_value,
+                details="No installable disk detected",
+                data={"disks": []},
+            )
+
+        if not any(disk["meetsMinimum"] for disk in disks):
+            status = RequirementStatus.FAIL
+            details = f"No disk reaches the {min_gb} GB minimum: {_describe_disks(disks)}"
+        elif not any(disk["meetsRecommended"] for disk in disks):
+            status = RequirementStatus.WARN
+            details = (
+                f"No disk reaches the {recommended_gb} GB recommended size: "
+                f"{_describe_disks(disks)}"
+            )
+        else:
+            status = RequirementStatus.PASS
+            details = f"Detected disks: {_describe_disks(disks)}"
+
+        return RequirementCheck(
+            name="disk",
+            description="Storage Space",
+            status=status,
+            current_value=_summarize_disks(disks),
+            required_value=f"{min_gb} GB",
+            recommended_value=rec_value,
+            details=details,
+            data={"disks": disks},
+        )
 
     def _check_cpu_architecture(self) -> RequirementCheck:
         """Check CPU architecture (legacy format)."""

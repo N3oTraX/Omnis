@@ -98,29 +98,42 @@ Item {
         return Math.min(100, strength);
     }
 
+    // Le rouge est r\u00e9serv\u00e9 au seul crit\u00e8re bloquant (longueur minimale) : les
+    // autres crit\u00e8res sont indicatifs et ne doivent pas alarmer.
     readonly property color passwordStrengthColor: {
-        if (passwordStrength < 40) return errorColor;
+        if (!passwordValid) return errorColor;
         if (passwordStrength < 70) return warningColor;
         return successColor;
     }
 
     readonly property string passwordStrengthText: {
         if (passwordStrength === 0) return qsTr("Enter password");
+        if (!pwdHasMinLength) return qsTr("Too short");
         if (passwordStrength < 40) return qsTr("Weak");
         if (passwordStrength < 70) return qsTr("Medium");
         return qsTr("Strong");
     }
 
-    // Reusable component for validation criteria row
+    // Reusable component for validation criteria row.
+    // isRequired distingue le crit\u00e8re bloquant des simples recommandations :
+    // une recommandation non remplie reste neutre (jamais de croix rouge).
     component CriteriaRow: Row {
+        id: criteriaRow
+
         property bool met: false
+        property bool isRequired: false
         property string criteriaText: ""
+
+        readonly property color criteriaColor: met ? successColor
+                                                   : (isRequired ? errorColor : textMutedColor)
 
         spacing: 8
         height: 16
 
         Image {
-            source: met ? (root.branding ? root.branding.iconCheckUrl : "") : (root.branding ? root.branding.iconCrossUrl : "")
+            id: criteriaIcon
+            source: met ? (root.branding ? root.branding.iconCheckUrl : "")
+                        : (criteriaRow.isRequired && root.branding ? root.branding.iconCrossUrl : "")
             width: 16
             height: 16
             anchors.verticalCenter: parent.verticalCenter
@@ -132,23 +145,26 @@ Item {
             layer.enabled: !engine.softwareRendering
             layer.effect: MultiEffect {
                 colorization: 1.0
-                colorizationColor: met ? successColor : textMutedColor
+                colorizationColor: criteriaRow.criteriaColor
             }
         }
 
-        // Fallback text icon when image not available
+        // Neutral marker for unmet recommendations, and fallback when the
+        // branding icons are unavailable.
         Text {
-            text: met ? "\u2713" : "\u2717"
+            width: 16
+            horizontalAlignment: Text.AlignHCenter
+            text: criteriaRow.met ? "\u2713" : (criteriaRow.isRequired ? "\u2717" : "\u25cb")
             font.pixelSize: 14
-            color: met ? successColor : textMutedColor
+            color: criteriaRow.criteriaColor
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.branding || (root.branding.iconCheckUrl === "" && root.branding.iconCrossUrl === "")
+            visible: !criteriaIcon.visible
         }
 
         Text {
             text: criteriaText
             font.pixelSize: 11
-            color: met ? successColor : textMutedColor
+            color: criteriaRow.criteriaColor
             anchors.verticalCenter: parent.verticalCenter
         }
     }
@@ -681,9 +697,34 @@ Item {
                                 spacing: 4
                                 visible: passwordField.text.length > 0
 
+                                Text {
+                                    text: qsTr("Required")
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                    color: textColor
+                                }
+
                                 CriteriaRow {
                                     met: pwdHasMinLength
+                                    isRequired: true
                                     criteriaText: qsTr("At least 8 characters")
+                                }
+
+                                Item { width: 1; height: 4 }
+
+                                Text {
+                                    text: qsTr("Recommended (optional)")
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                    color: textMutedColor
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: qsTr("These suggestions strengthen your password but are not required")
+                                    font.pixelSize: 11
+                                    color: textMutedColor
+                                    wrapMode: Text.WordWrap
                                 }
 
                                 CriteriaRow {

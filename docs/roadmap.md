@@ -1,15 +1,15 @@
 # Omnis Installer - Roadmap de Versioning
 
 **Document cree**: 2025-12-08
-**Derniere mise a jour**: 2026-07-11 (v0.6.0)
+**Derniere mise a jour**: 2026-07-12 (v0.6.1)
 **Objectif v1.0.0**: Installation GLFOS fonctionnelle
 **Objectif v2.0.0**: Installeur universel multi-distribution (comme Calamares)
 
 ---
 
-## Etat Actuel (v0.6.0)
+## Etat Actuel (v0.6.1)
 
-Premiere installation GLF OS de bout en bout qui aboutit sur ISO GLF-OS ; barre de progression granulaire (dénominateur exact via les totaux annoncés par nix) ; langue et clavier appliqués en live a la session et propagés a la config d'installation ; AppImage standalone lançable.
+Premiere installation GLF OS de bout en bout qui aboutit sur ISO GLF-OS ; barre de progression granulaire (dénominateur exact via les totaux annoncés par nix) ; langue et clavier appliqués en live a la session et propagés a la config d'installation ; AppImage standalone lançable. Correctifs des premiers testeurs (v0.6.1) : liberation reelle du disque cible avant ecriture (umount recursif, swapoff, fermeture LUKS/LVM/md), refus explicite du disque systeme, repli i18n par famille de langue pour les variantes regionales, 8 langues completees a 229/229.
 
 ### Vues QML Integrees dans Main.qml
 
@@ -41,6 +41,13 @@ Premiere installation GLF OS de bout en bout qui aboutit sur ISO GLF-OS ; barre 
 - **Langue** appliquee dynamiquement a toutes les vues + a la config d'install ; **clavier** applique en live a la session utilisateur (via `runuser`, uid depuis `SUDO_UID` ; Wayland `gsettings`, X11 `setxkbmap`) + ecrit dans la config d'install ; 36 fichiers de traduction regeneres.
 - Bureau live reactif pendant l'install : throttle CPU/IO (`nice`/`ionice`, `--cores`/`--max-jobs` ~80 % des cœurs, `--option max-substitution-jobs`) + pile nix illimitee (evite un `SIGSEGV` au prebuild).
 - Montage root/EFI avec type explicite (`-t <fs>`), demontage recursif de `/mnt/target` avant partitionnement, chemin de log corrige (`/var/log/omnis-install.log`).
+
+### Acquis v0.6.1
+
+- **Liberation reelle du disque cible** avant toute ecriture : demontage de tous les points de montage qui s'y adossent (auto-montage udisks du bureau apres un formatage externe faisait echouer `wipefs` en `EBUSY`), `swapoff`, fermeture des mappers LUKS/LVM/md.
+- **Refus explicite du disque systeme** : depuis l'ISO live (`/iso`, `/nix/.ro-store`) comme depuis l'AppImage sur un systeme installe (`/`, `/usr`) ; l'erreur nomme le detenteur au lieu d'un `EBUSY` brut.
+- **i18n des variantes regionales** : repli par famille de langue pour la langue d'affichage (`fr_BE` → `fr_FR`, `de_CH` → `de_DE`, `fr_CA` → `fr_FR`, `pt_PT` → `pt_BR`), sans modifier la locale systeme ecrite sur la cible. 8 langues completees de 110/229 a 229/229 (generees, non relues par des natifs : voir `docs/i18n/RELECTURE.md`).
+- Job `locale` execute apres `partition` (il ecrivait dans la cible avant son montage), bouton « Install » traduit.
 
 ---
 

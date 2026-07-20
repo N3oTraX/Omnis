@@ -5,6 +5,59 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.2] - 2026-07-20
+
+Traitement complet des retours de la première ISO d'installation utilisant Omnis
+(ticket glf-os#222, testeurs @Didic, @Pensionman, @Jeepyto, @Kuraudo). 31 points
+remontés, ramenés à 21 causes racines. Analyse détaillée et suivi point par point :
+`docs/suivi-tests-iso-0.6.0.md`.
+
+### Fixed — bloquants
+
+- **Impossible de relancer l'installeur après l'avoir fermé** : le moteur privilégié créait `/run/omnis` en `0700 root`, et l'interface non privilégiée levait une `PermissionError` en sondant le socket au lieu de le considérer comme absent. Le premier lancement passait, tous les suivants échouaient **jusqu'au redémarrage** (`/run` est un tmpfs), sans le moindre message quand l'installeur était lancé depuis le menu d'applications. Le sondage ne lève plus, et le moteur cède désormais la propriété du socket à l'utilisateur qui l'a lancé.
+- **Outils manquants détectés après l'effacement du disque** : `udevadm`, `mkpasswd`/`openssl`, `nixos-generate-config` et `nixos-install` n'étaient réclamés qu'à l'exécution, soit **après** le `wipefs` du disque cible — un testeur s'est retrouvé avec un disque effacé et une installation irrécupérable. Tous les outils requis par les jobs configurés sont désormais vérifiés **avant le démarrage du premier job**, et `udevadm`, `mkpasswd` et `openssl` sont maintenant embarqués dans le paquet.
+- **Le bouton « Réessayer » pouvait rejouer le partitionnement** : l'interface basculait sur l'écran d'installation sans attendre le moteur, et les refus côté moteur étaient silencieux. La bascule suit désormais le signal `installationStarted`, le bouton est inerte pendant une installation, et tout refus est remonté à l'utilisateur.
+- **Aucune barrière sans droits root** : l'AppImage laissait dérouler tout l'assistant avant d'échouer sur `Permission denied: '/mnt/target'`. L'installation est maintenant refusée d'emblée, avec un message expliquant qu'il faut relancer avec les droits administrateur.
+- **Le média d'installation était proposé comme disque cible** : l'exclusion reposait sur une sonde unique (`findmnt /`) inopérante sur un live ISO, où la racine est un tmpfs — la clé USB portant l'installeur apparaissait donc dans la liste. La détection croise désormais plusieurs sources : fichiers de backing des périphériques loop, points de montage du live et racines de montage amovible.
+
+### Fixed — langue et clavier
+
+- **Installeur en anglais malgré un démarrage en français** : sans paramètre `kbd.*` sur la ligne de commande du noyau, la détection retombait sur le GeoIP ; sans réseau au démarrage, le résultat par défaut arrivait avec une confiance trop basse pour être appliqué et l'interface restait en anglais. Une source de détection intermédiaire lit désormais la locale réellement active dans la session live (`LANG`/`LC_ALL`/`LC_CTYPE`, puis `/etc/locale.conf`, puis `localectl`), tentée avant le GeoIP et avec une confiance suffisante pour être retenue. *La cause première reste côté distribution : l'entrée de démarrage française de l'ISO ne passe aucun paramètre `kbd.*`, contrairement aux neuf autres.*
+- **Disposition clavier bloquée en QWERTY US** : le modèle des variantes n'était alimenté que lorsque la détection de locale aboutissait. Quand elle échouait, la liste des variantes restait vide et la sélection conservait sa valeur par défaut `"qwerty"` — qui **n'est pas une variante XKB valide** et partait telle quelle dans le `services.xserver.xkb.variant` du système installé. Le modèle est désormais alimenté systématiquement et la variante par défaut est la variante vide.
+- **La recherche ne renvoyait rien sur une saisie complète** : le filtre était correct, mais un espace parasite en début ou fin de saisie vidait la liste. La saisie est maintenant nettoyée avant filtrage.
+- **Interface française sans accents** : `config/i18n/fr_FR.conf` était le seul catalogue latin intégralement désaccentué, alors que le catalogue Qt correspondant est accentué — les deux se mélangeaient dans le même écran. Les 255 lignes ont été ré-accentuées (clés, sections et paramètres de format inchangés).
+
+### Fixed — disque et partitionnement
+
+- **Disque cible jamais libéré quand un fichier d'échange était actif** : la libération désactivait l'échange uniquement sur les *partitions* du disque, alors qu'Omnis crée son échange sous forme de **fichier** (`/mnt/target/swapfile`) — jamais reconnu comme membre du disque. Le fichier restait actif, tenait le point de montage, le démontage échouait et le disque n'était jamais libéré. C'est le cas qui obligeait un testeur à passer par KDE Partition Manager pour « déverrouiller » son SSD. La désactivation de l'échange précède désormais les démontages et couvre les fichiers d'échange ; ils apparaissent aussi dans la liste des détenteurs en cas d'échec.
+- **Démontage paresseux proscrit** : `umount -l` laissait survivre le fil de journal ext4, qui tenait ensuite le périphérique et faisait échouer le `wipefs` du run suivant sans que rien ne puisse plus le libérer. Remplacé par des tentatives temporisées et un échec explicite.
+- **Le bouton « Appliquer » de l'éditeur manuel contournait la libération du disque** : il appelait directement l'application des opérations sans passer par le job de partitionnement, et pouvait donc attaquer un disque encore monté.
+- **Chemin du flake GLF codé en dur** : `/iso/nixos` était le seul chemin testé, alors que l'ISO livrée porte son flake dans `iso-cfg`. La résolution parcourt désormais plusieurs candidats et retient le premier contenant réellement un `flake.nix` ; en cas d'échec, le message liste tous les chemins essayés.
+- **Journaux mensongers** : plusieurs opérations journalisaient un succès sans consulter le code de retour (« Unmounted » après un démontage échoué, fermeture LUKS, désactivation de l'échange). La libération du disque, jusqu'ici totalement silencieuse, rend maintenant compte de ce qu'elle a libéré ou pas.
+
+### Fixed — interface
+
+- **« Votre système remplit toutes les exigences » affiché malgré des indicateurs orange** : le message n'avait que deux états, pilotés par un booléen déjà vrai en présence d'avertissements. Un troisième état distingue désormais « configuration minimale atteinte, mais certaines recommandations ne le sont pas », avec un indicateur orange.
+- **Boutons radio et cases à cocher illisibles** : faute d'indicateur explicite, ces contrôles retombaient sur le style Fusion, dont la pastille dérive d'une couleur de palette que le projet éclaircit pour la lisibilité des champs de saisie. Le contraste entre coché et non coché tombait à 1,68:1 là où les règles d'accessibilité en exigent 3:1 — deux testeurs ont signalé ne pas distinguer leur choix. Indicateurs explicites, contraste porté à environ 4,6:1.
+- **Politique de mot de passe perçue comme trop stricte** : la seule règle bloquante a toujours été la longueur minimale de 8 caractères, mais les quatre critères purement indicatifs s'affichaient avec une croix rouge et la jauge annonçait « Faible » en rouge. Les recommandations sont désormais visuellement neutres, séparées des exigences, et le rouge est réservé au seul blocage réel. **La règle n'a pas changé.**
+- **Le clic sur un réseau Wi-Fi restait sans effet** : l'outil de configuration réseau était lancé en root, sans redescente vers la session utilisateur. La liste des réseaux s'affichait (bus système) mais la connexion échouait faute d'agent de secrets sur le bus de session. L'outil est maintenant lancé dans la session de l'utilisateur.
+- **Les prérequis ne se rafraîchissaient pas après connexion** : un unique contrôle programmé 5 secondes après l'*ouverture* de l'outil réseau tombait systématiquement dans le vide. Remplacé par un sondage borné, arrêté dès la connexion établie, et complété par un bouton « Revérifier » explicite.
+- **L'aperçu du disque ignorait toutes les options** : en mode automatique il affichait la géométrie *actuelle* du disque, si bien que changer de système de fichiers, de stratégie d'échange ou activer le chiffrement ne produisait aucun changement visible. Il projette désormais la disposition planifiée ; le fichier d'échange, qui ne crée aucune partition, apparaît comme une bande dédiée à l'intérieur de la racine.
+- **Espace disque : un seul disque visible** : la vérification ne retenait que le plus gros périphérique, faisant disparaître le NVMe d'un testeur au profit d'un disque secondaire plus grand. Chaque disque est désormais évalué et listé individuellement.
+- **Identification du disque cible** : la carte n'affichait que le nom noyau, qui peut permuter d'un démarrage à l'autre. Modèle, bus et numéro de série sont maintenant affichés.
+- **Cartes graphiques récentes non reconnues** : la comparaison reposait sur une liste ordonnée à la main, où toute carte absente devenait non classable (cas d'une RX 9060 XT), et où la recherche par sous-chaîne classait « RX 9070 XT » sous « RX 9070 ». Un analyseur structuré (génération, palier, suffixe) rend le classement auto-extensible aux séries futures ; les listes ne servent plus que de table d'exceptions.
+
+### Added
+
+- Module `omnis.utils.session` : résolution de la session de bureau (identifiant utilisateur, bus de session, variables d'affichage) et enrobage d'une commande pour l'exécuter dans cette session. Factorisé depuis la gestion du clavier, désormais partagé avec le lancement de l'outil réseau.
+- Vérification préalable de l'outillage (`preflight`) sur les jobs, exécutée par le moteur avant le premier job. Un job déclare ses binaires requis ; les alternatives sont exprimables (`mkpasswd` **ou** `openssl`).
+- Planificateur de disposition automatique (`plan_auto_layout`), fonction pure partagée entre le job de partitionnement et l'aperçu de l'interface.
+
+### Changed
+
+- `udevadm` (via systemd), `mkpasswd` (via whois) et `openssl` ajoutés aux outils embarqués dans le paquet Nix. `nixos-generate-config` et `nixos-install` restent volontairement non embarqués — ils n'ont de sens que depuis le live ISO — mais leur absence est désormais détectée avant tout partitionnement.
+- La résolution de la session utilisateur ne se rabat plus sur un identifiant codé en dur et respecte un bus de session déjà présent dans l'environnement.
+
 ## [0.6.1] - 2026-07-12
 
 Correctifs remontés par les premiers testeurs : partitionnement bloqué après un formatage externe, et installeur en anglais pour les locales régionales.

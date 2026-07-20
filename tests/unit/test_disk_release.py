@@ -20,9 +20,15 @@ def make_run(
     mounts: dict[str, list[str]] | None = None,
     types: list[tuple[str, str]] | None = None,
     calls: list[list[str]] | None = None,
+    backing: dict[str, str] | None = None,
 ):
-    """Build a fake ``_run`` answering lsblk/findmnt and recording other commands."""
+    """Build a fake ``_run`` answering lsblk/findmnt and recording other commands.
+
+    ``backing`` maps a path to the device ``findmnt -no SOURCE -T <path>``
+    reports, i.e. the filesystem a swapfile lives on.
+    """
     mounts = mounts or {}
+    backing = backing or {}
 
     def _fake(cmd: list[str]) -> subprocess.CompletedProcess[str]:
         if cmd[0] == "lsblk":
@@ -32,6 +38,8 @@ def make_run(
                 out = "\n".join(members)
             return subprocess.CompletedProcess(cmd, 0, out, "")
         if cmd[0] == "findmnt":
+            if "SOURCE" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, backing.get(cmd[-1], ""), "")
             return subprocess.CompletedProcess(cmd, 0, "\n".join(mounts.get(cmd[-1], [])), "")
         if calls is not None:
             calls.append(cmd)
@@ -89,6 +97,31 @@ class TestDiskHolders:
 
         assert "/dev/sda1 is mounted on /run/media/nixos/GLF" in holders
         assert "/dev/sda2 is in use as swap" in holders
+
+    def test_reports_a_swapfile_holding_the_disk(self):
+        """Omnis' own swapfile is never a disk member; it must still be reported."""
+        run = make_run(
+            members=["/dev/sda", "/dev/sda1", "/dev/sda2"],
+            backing={"/mnt/target/swapfile": "/dev/sda2"},
+        )
+        with (
+            patch.object(disk_release, "_run", run),
+            patch.object(disk_release, "_swap_devices", return_value={"/mnt/target/swapfile"}),
+        ):
+            holders = disk_release.disk_holders("/dev/sda")
+
+        assert "/mnt/target/swapfile is in use as a swap file" in holders
+
+    def test_ignores_a_swapfile_on_another_disk(self):
+        run = make_run(
+            members=["/dev/sda", "/dev/sda1"],
+            backing={"/home/swapfile": "/dev/sdb1"},
+        )
+        with (
+            patch.object(disk_release, "_run", run),
+            patch.object(disk_release, "_swap_devices", return_value={"/home/swapfile"}),
+        ):
+            assert disk_release.disk_holders("/dev/sda") == []
 
     def test_free_disk_has_no_holders(self):
         run = make_run(members=["/dev/sda", "/dev/sda1"])
@@ -172,3 +205,55 @@ class TestReleaseDisk:
         assert ["cryptsetup", "close", "/dev/mapper/cr"] in calls
         assert "disabled swap on /dev/sda1" in actions
         assert "closed LUKS mapper /dev/mapper/cr" in actions
+
+    def test_disables_the_swapfile_holding_the_target(self):
+        """The swapfile Omnis creates under target_root pins /mnt/target."""
+        calls: list[list[str]] = []
+        run = make_run(
+            members=["/dev/sda", "/dev/sda1", "/dev/sda2"],
+            mounts={"/dev/sda2": ["/mnt/target"]},
+            backing={"/mnt/target/swapfile": "/dev/sda2"},
+            calls=calls,
+        )
+        with (
+            patch.object(disk_release, "_run", run),
+            patch.object(disk_release, "_swap_devices", return_value={"/mnt/target/swapfile"}),
+        ):
+            actions = disk_release.release_disk("/dev/sda")
+
+        assert ["swapoff", "/mnt/target/swapfile"] in calls
+        assert "disabled swap file /mnt/target/swapfile" in actions
+
+    def test_swapoff_runs_before_any_unmount(self):
+        """A swap active below a mountpoint makes ``umount -R`` fail: swapoff first."""
+        calls: list[list[str]] = []
+        run = make_run(
+            members=["/dev/sda", "/dev/sda1", "/dev/sda2"],
+            mounts={"/dev/sda2": ["/mnt/target"]},
+            backing={"/mnt/target/swapfile": "/dev/sda2"},
+            calls=calls,
+        )
+        with (
+            patch.object(disk_release, "_run", run),
+            patch.object(disk_release, "_swap_devices", return_value={"/mnt/target/swapfile"}),
+        ):
+            disk_release.release_disk("/dev/sda")
+
+        verbs = [cmd[0] for cmd in calls]
+        assert verbs.index("swapoff") < verbs.index("umount")
+
+    def test_ignores_a_swapfile_backed_by_another_disk(self):
+        calls: list[list[str]] = []
+        run = make_run(
+            members=["/dev/sda", "/dev/sda1"],
+            backing={"/home/swapfile": "/dev/sdb1"},
+            calls=calls,
+        )
+        with (
+            patch.object(disk_release, "_run", run),
+            patch.object(disk_release, "_swap_devices", return_value={"/home/swapfile"}),
+        ):
+            actions = disk_release.release_disk("/dev/sda")
+
+        assert not [cmd for cmd in calls if cmd[0] == "swapoff"]
+        assert actions == []

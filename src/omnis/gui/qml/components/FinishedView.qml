@@ -25,6 +25,8 @@ Item {
 
     // External properties
     property bool success: true
+    // True tant que le moteur n'a pas rendu la main : neutralise le bouton Retry.
+    property bool installing: false
     property string errorMessage: ""
     property var summary: ({})  // Installation summary from engine
     property var installationSummary: summary  // Alias for backwards compatibility
@@ -766,6 +768,10 @@ Item {
                         Layout.preferredHeight: 56
                         font.pixelSize: 16
                         font.bold: true
+                        // Un retry relance TOUS les jobs depuis le début, dont
+                        // le partitionnement destructif : le bouton doit être
+                        // inerte tant qu'une installation tourne encore.
+                        enabled: !root.installing
 
                         background: Rectangle {
                             radius: 12

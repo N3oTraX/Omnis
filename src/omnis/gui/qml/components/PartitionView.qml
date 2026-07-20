@@ -16,6 +16,64 @@ import QtQuick.Effects
 Item {
     id: root
 
+    // Le style Fusion dérive la pastille cochée de palette.text, que Main.qml
+    // écrase en gris clair pour la lisibilité des champs de saisie : le contraste
+    // entre coché et non coché tombait à 1,68:1 (WCAG en exige 3:1) et deux
+    // testeurs ont signalé ne pas distinguer leur choix. On impose donc un
+    // indicateur explicite plutôt que celui du style.
+    component ThemedRadio: RadioButton {
+        id: themedRadio
+        indicator: Rectangle {
+            implicitWidth: 20
+            implicitHeight: 20
+            x: themedRadio.leftPadding
+            y: themedRadio.height / 2 - height / 2
+            radius: width / 2
+            color: "transparent"
+            border.color: themedRadio.checked ? root.primaryColor : root.textMutedColor
+            border.width: 2
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: 10
+                height: 10
+                radius: width / 2
+                color: root.primaryColor
+                visible: themedRadio.checked
+            }
+        }
+        contentItem: Text {
+            text: themedRadio.text
+            color: root.textColor
+            font.pixelSize: 14
+            verticalAlignment: Text.AlignVCenter
+            leftPadding: themedRadio.indicator.width + themedRadio.spacing
+        }
+    }
+
+    component ThemedCheck: CheckBox {
+        id: themedCheck
+        indicator: Rectangle {
+            implicitWidth: 20
+            implicitHeight: 20
+            x: themedCheck.leftPadding
+            y: themedCheck.height / 2 - height / 2
+            radius: 4
+            color: themedCheck.checked ? root.primaryColor : "transparent"
+            border.color: themedCheck.checked ? root.primaryColor : root.textMutedColor
+            border.width: 2
+
+            Text {
+                anchors.centerIn: parent
+                text: "✓"
+                color: root.backgroundColor
+                font.pixelSize: 14
+                font.bold: true
+                visible: themedCheck.checked
+            }
+        }
+    }
+
     // Signals
     signal diskSelected(string disk)
     signal modeSelected(string mode)
@@ -602,6 +660,28 @@ Item {
                                             font.pixelSize: 14
                                             color: textMutedColor
                                         }
+
+                                        // Le nom kernel (sda/sdb) peut permuter d'un
+                                        // démarrage à l'autre : modèle et numéro de
+                                        // série sont ce qui permet réellement à
+                                        // l'utilisateur d'identifier le bon disque.
+                                        Text {
+                                            width: parent.width
+                                            text: {
+                                                var parts = []
+                                                if (modelData.model)
+                                                    parts.push(modelData.model)
+                                                if (modelData.transport)
+                                                    parts.push(modelData.transport.toUpperCase())
+                                                if (modelData.serial)
+                                                    parts.push("S/N " + modelData.serial)
+                                                return parts.join(" · ")
+                                            }
+                                            visible: text.length > 0
+                                            elide: Text.ElideRight
+                                            font.pixelSize: 12
+                                            color: textMutedColor
+                                        }
                                     }
                                 }
 
@@ -619,7 +699,15 @@ Item {
                                     property real diskBytes: (diskData && diskData.sizeBytes > 0) ? diskData.sizeBytes : 0
                                     // Ordered segments (kind: "partition" | "free") covering the
                                     // whole disk, positioned as they physically sit on the medium.
-                                    property var segs: (diskData && diskData.segments) ? diskData.segments : []
+                                    // En mode auto sur le disque sélectionné on montre la
+                                    // géométrie PLANIFIÉE : afficher l'état actuel rendait
+                                    // l'aperçu insensible au FS, au swap et au chiffrement.
+                                    readonly property bool showPlanned: partitionMode === "auto"
+                                                                        && diskData
+                                                                        && diskData.name === selectedDisk
+                                    property var segs: showPlanned
+                                        ? engine.plannedSegments
+                                        : ((diskData && diskData.segments) ? diskData.segments : [])
 
                                     Rectangle {
                                         id: histoBarBg
@@ -652,8 +740,34 @@ Item {
                                                         : (modelData.name || "")
                                                             + "  " + humanSize(modelData.sizeBytes)
                                                             + (modelData.fstype ? "  (" + modelData.fstype + ")" : "")
+                                                            + (modelData.encrypted ? "  " + qsTr("encrypted") : "")
 
                                                     HoverHandler { id: segHover }
+
+                                                    // Le swap « fichier » et « hibernation » ne crée
+                                                    // aucune partition : sans cette bande, choisir
+                                                    // l'hibernation ne changeait rien à l'écran alors
+                                                    // que la légende annonce une couleur de swap.
+                                                    Rectangle {
+                                                        anchors.right: parent.right
+                                                        anchors.top: parent.top
+                                                        anchors.bottom: parent.bottom
+                                                        visible: (modelData.swapfileBytes || 0) > 0
+                                                                 && parent.width > 8
+                                                        width: histoBar.diskBytes > 0
+                                                            ? Math.min(
+                                                                parent.width * 0.9,
+                                                                histoBarBg.width * modelData.swapfileBytes
+                                                                    / histoBar.diskBytes)
+                                                            : 0
+                                                        color: colorSwap
+                                                        opacity: 0.75
+
+                                                        ToolTip.visible: swapHover.hovered && width > 4
+                                                        ToolTip.text: qsTr("Swap file")
+                                                            + "  " + humanSize(modelData.swapfileBytes || 0)
+                                                        HoverHandler { id: swapHover }
+                                                    }
                                                 }
                                             }
                                         }
@@ -728,7 +842,7 @@ Item {
                                             }
 
                                             // Format toggle
-                                            CheckBox {
+                                            ThemedCheck {
                                                 id: fmtCheck
                                                 text: qsTr("Format")
                                                 property string pname: modelData.name
@@ -1054,30 +1168,16 @@ Item {
                             Row {
                                 spacing: 24
 
-                                RadioButton {
+                                ThemedRadio {
                                     text: qsTr("ext4")
                                     checked: filesystem === "ext4"
                                     onClicked: filesystemSelected("ext4")
-                                    contentItem: Text {
-                                        text: parent.text
-                                        color: textColor
-                                        font.pixelSize: 14
-                                        verticalAlignment: Text.AlignVCenter
-                                        leftPadding: parent.indicator.width + parent.spacing
-                                    }
                                 }
 
-                                RadioButton {
+                                ThemedRadio {
                                     text: qsTr("btrfs")
                                     checked: filesystem === "btrfs"
                                     onClicked: filesystemSelected("btrfs")
-                                    contentItem: Text {
-                                        text: parent.text
-                                        color: textColor
-                                        font.pixelSize: 14
-                                        verticalAlignment: Text.AlignVCenter
-                                        leftPadding: parent.indicator.width + parent.spacing
-                                    }
                                 }
                             }
                         }
@@ -1097,43 +1197,22 @@ Item {
                             Row {
                                 spacing: 24
 
-                                RadioButton {
+                                ThemedRadio {
                                     text: qsTr("File (auto)")
                                     checked: swapStrategy === "file"
                                     onClicked: swapStrategySelected("file")
-                                    contentItem: Text {
-                                        text: parent.text
-                                        color: textColor
-                                        font.pixelSize: 14
-                                        verticalAlignment: Text.AlignVCenter
-                                        leftPadding: parent.indicator.width + parent.spacing
-                                    }
                                 }
 
-                                RadioButton {
+                                ThemedRadio {
                                     text: qsTr("None")
                                     checked: swapStrategy === "none"
                                     onClicked: swapStrategySelected("none")
-                                    contentItem: Text {
-                                        text: parent.text
-                                        color: textColor
-                                        font.pixelSize: 14
-                                        verticalAlignment: Text.AlignVCenter
-                                        leftPadding: parent.indicator.width + parent.spacing
-                                    }
                                 }
 
-                                RadioButton {
+                                ThemedRadio {
                                     text: qsTr("Hibernation")
                                     checked: swapStrategy === "hibernate"
                                     onClicked: swapStrategySelected("hibernate")
-                                    contentItem: Text {
-                                        text: parent.text
-                                        color: textColor
-                                        font.pixelSize: 14
-                                        verticalAlignment: Text.AlignVCenter
-                                        leftPadding: parent.indicator.width + parent.spacing
-                                    }
                                 }
                             }
                         }
@@ -1143,7 +1222,7 @@ Item {
                             width: parent.width
                             spacing: 12
 
-                            CheckBox {
+                            ThemedCheck {
                                 id: encryptionCheck
                                 text: qsTr("Enable encryption (LUKS)")
                                 checked: encryptionEnabled
@@ -1270,7 +1349,7 @@ Item {
                                     }
                                 }
 
-                                CheckBox {
+                                ThemedCheck {
                                     id: showEncPassCheck
                                     text: qsTr("Show passphrase")
                                     contentItem: Text {
@@ -1789,7 +1868,7 @@ Item {
                                         }
                                         Row {
                                             spacing: 12
-                                            CheckBox {
+                                            ThemedCheck {
                                                 id: createEspFlag
                                                 text: "esp"
                                                 contentItem: Text {
@@ -1800,7 +1879,7 @@ Item {
                                                     leftPadding: createEspFlag.indicator.width + createEspFlag.spacing
                                                 }
                                             }
-                                            CheckBox {
+                                            ThemedCheck {
                                                 id: createBootFlag
                                                 text: "boot"
                                                 contentItem: Text {
@@ -1811,7 +1890,7 @@ Item {
                                                     leftPadding: createBootFlag.indicator.width + createBootFlag.spacing
                                                 }
                                             }
-                                            CheckBox {
+                                            ThemedCheck {
                                                 id: createBiosGrubFlag
                                                 text: "bios_grub"
                                                 contentItem: Text {

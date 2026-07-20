@@ -1,6 +1,8 @@
 """Unit tests for PartitionJob."""
 
+import logging
 import subprocess
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1630,3 +1632,83 @@ class TestTargetDiskRelease:
             result = job._release_target_disk("/dev/sda", "/mnt/target")
 
         assert result is None
+
+    def test_logs_what_was_released(self, caplog: Any) -> None:
+        """A critical step must not stay silent: report each released holder."""
+        job = PartitionJob()
+
+        with (
+            patch("omnis.jobs.partition.disk_release.holds_running_system", return_value=False),
+            patch(
+                "omnis.jobs.partition.disk_release.release_disk",
+                return_value=["disabled swap file /mnt/target/swapfile"],
+            ),
+            patch("omnis.jobs.partition.disk_release.disk_holders", return_value=[]),
+            patch("omnis.jobs.partition.subprocess.run") as mock_run,
+            caplog.at_level(logging.INFO, logger="omnis.jobs.partition"),
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            job._release_target_disk("/dev/sda", "/mnt/target")
+
+        assert "disabled swap file /mnt/target/swapfile" in caplog.text
+        assert "/dev/sda is free for partitioning" in caplog.text
+
+    def test_logs_the_surviving_holders_on_failure(self, caplog: Any) -> None:
+        job = PartitionJob()
+
+        with (
+            patch("omnis.jobs.partition.disk_release.holds_running_system", return_value=False),
+            patch("omnis.jobs.partition.disk_release.release_disk", return_value=[]),
+            patch(
+                "omnis.jobs.partition.disk_release.disk_holders",
+                return_value=["/mnt/target/swapfile is in use as a swap file"],
+            ),
+            patch("omnis.jobs.partition.subprocess.run") as mock_run,
+            caplog.at_level(logging.INFO, logger="omnis.jobs.partition"),
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            job._release_target_disk("/dev/sda", "/mnt/target")
+
+        assert "nothing had to be released" in caplog.text
+        assert "still held by: /mnt/target/swapfile is in use as a swap file" in caplog.text
+
+
+class TestCleanupLogging:
+    """Cleanup must never claim a success it did not get from the return code."""
+
+    def test_luks_close_failure_is_not_logged_as_a_success(self, caplog: Any) -> None:
+        job = PartitionJob()
+        job._layout = PartitionLayout(
+            efi_partition="/dev/sda1",
+            root_partition="/dev/sda2",
+            encrypted=True,
+        )
+        context = JobContext(target_root="/mnt/target")
+
+        with (
+            patch("omnis.jobs.partition.subprocess.run") as mock_run,
+            caplog.at_level(logging.INFO, logger="omnis.jobs.partition"),
+        ):
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="device busy")
+            job.cleanup(context)
+
+        assert "Closed LUKS mapper" not in caplog.text
+        assert "Failed to close LUKS mapper cryptroot" in caplog.text
+
+    def test_luks_close_success_is_logged(self, caplog: Any) -> None:
+        job = PartitionJob()
+        job._layout = PartitionLayout(
+            efi_partition="/dev/sda1",
+            root_partition="/dev/sda2",
+            encrypted=True,
+        )
+        context = JobContext(target_root="/mnt/target")
+
+        with (
+            patch("omnis.jobs.partition.subprocess.run") as mock_run,
+            caplog.at_level(logging.INFO, logger="omnis.jobs.partition"),
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            job.cleanup(context)
+
+        assert "Closed LUKS mapper cryptroot" in caplog.text

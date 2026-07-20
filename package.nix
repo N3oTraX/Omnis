@@ -10,6 +10,9 @@
   cryptsetup,
   util-linux,
   pciutils,
+  systemd,
+  whois,
+  openssl,
   makeFontsConf,
   poppins,
   roboto-mono,
@@ -29,6 +32,13 @@ let
     cryptsetup
     util-linux
     pciutils
+    # udevadm lives in systemd, not util-linux: without it the partition job
+    # died on "Required tool not found: udevadm" -- after wiping the disk.
+    systemd
+    # Password hashing for the generated NixOS config. mkpasswd ships in whois;
+    # openssl is the fallback the job tries next.
+    whois
+    openssl
   ];
 
   # Fonts bundled so the UI renders identically off-host (AppImage): the theme
@@ -50,7 +60,7 @@ in
 # Python application so QML imports and Qt platform plugins resolve at runtime.
 python3Packages.buildPythonApplication {
   pname = "omnis-installer";
-  version = "0.6.0";
+  version = "0.6.2";
 
   src = ./.;
 

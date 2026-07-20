@@ -20,6 +20,7 @@ Item {
     signal installClicked()
     signal requirementsChecked()
     signal configureNetworkRequested()
+    signal recheckRequirementsRequested()
 
     // External properties
     property string welcomeWallpaper: ""
@@ -32,6 +33,7 @@ Item {
     property bool showRequirements: true
     property var requirements: []
     property bool canProceed: true
+    property bool hasWarnings: false
     property bool isCheckingRequirements: false
     property string websiteUrl: ""
     property string websiteLabel: ""
@@ -292,8 +294,11 @@ Item {
 
             requirements: root.requirements
             canProceed: root.canProceed
+            hasWarnings: root.hasWarnings
             isLoading: root.isCheckingRequirements
             requirementIcons: root.requirementIcons
+
+            onRecheckRequested: root.recheckRequirementsRequested()
 
             primaryColor: root.primaryColor
             backgroundColor: root.backgroundColor
