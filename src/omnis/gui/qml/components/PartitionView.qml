@@ -1376,7 +1376,7 @@ Item {
                             }
 
                             Text {
-                                text: qsTr("512 MB (mounted on /boot)")
+                                text: qsTr("%1 MB (mounted on /boot)").arg(efiSizeMb)
                                 font.pixelSize: 14
                                 color: textMutedColor
                             }

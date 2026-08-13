@@ -104,8 +104,8 @@
     </message>
     <message>
         <location filename="../qml/components/FinishedView.qml" line="704"/>
-        <source>Continue</source>
-        <translation>Continuer</translation>
+        <source>Continue testing</source>
+        <translation>Continuer à tester</translation>
     </message>
     <message>
         <location filename="../qml/components/FinishedView.qml" line="764"/>
@@ -545,8 +545,8 @@
     </message>
     <message>
         <location filename="../qml/components/PartitionView.qml" line="1300"/>
-        <source>512 MB (mounted on /boot)</source>
-        <translation>512 Mo (montée sur /boot)</translation>
+        <source>%1 MB (mounted on /boot)</source>
+        <translation>%1 Mo (montée sur /boot)</translation>
     </message>
     <message>
         <location filename="../qml/components/PartitionView.qml" line="1333"/>

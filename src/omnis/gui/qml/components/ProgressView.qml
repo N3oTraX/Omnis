@@ -159,9 +159,13 @@ Item {
                             color: backgroundColor
                             clip: true
 
+                            // Un seul rendu quelle que soit la phase : le remplissage
+                            // suit toujours la progression reelle. En cas de silence
+                            // (isStalled) ou de phase indeterminee, on garde exactement
+                            // la meme barre et on ajoute juste une respiration -> style
+                            // uniforme, plus de bascule vers une bande qui balaie.
                             Rectangle {
                                 id: overallFill
-                                visible: !root.pulsing
                                 width: parent.width * (overallProgress / 100)
                                 height: parent.height
                                 radius: parent.radius
@@ -169,67 +173,60 @@ Item {
                                 clip: true  // keep the shimmer inside the filled bar
 
                                 Behavior on width {
-                                    NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
+                                    NumberAnimation { duration: 400; easing.type: Easing.InOutCubic }
                                 }
 
-                                // Animated gradient
+                                // Gloss vertical statique (relief discret)
                                 Rectangle {
                                     anchors.fill: parent
                                     radius: parent.radius
                                     gradient: Gradient {
-                                        GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.2) }
+                                        GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.18) }
                                         GradientStop { position: 0.5; color: "transparent" }
-                                        GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.1) }
+                                        GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.10) }
                                     }
                                 }
 
-                                // Shimmer effect
+                                // Reflet qui balaie le remplissage, largeur fixe
+                                // (indexee sur la hauteur) pour une cadence identique
+                                // quel que soit le pourcentage.
                                 Rectangle {
                                     id: shimmer
-                                    width: parent.width * 0.3
+                                    width: overallTrack.height * 2.5
                                     height: parent.height
                                     gradient: Gradient {
+                                        orientation: Gradient.Horizontal
                                         GradientStop { position: 0.0; color: "transparent" }
-                                        GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0.3) }
+                                        GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0.28) }
                                         GradientStop { position: 1.0; color: "transparent" }
                                     }
 
                                     SequentialAnimation on x {
-                                        running: overallProgress < 100 && !root.pulsing
+                                        running: overallProgress < 100
                                         loops: Animation.Infinite
                                         NumberAnimation {
                                             from: -shimmer.width
                                             to: overallFill.width
-                                            duration: 2000
-                                            easing.type: Easing.InOutQuad
+                                            duration: 1600
+                                            easing.type: Easing.InOutSine
                                         }
-                                        PauseAnimation { duration: 500 }
+                                        PauseAnimation { duration: 400 }
                                     }
                                 }
-                            }
 
-                            Rectangle {
-                                id: indeterminateBar
-                                visible: root.pulsing
-                                width: overallTrack.width * 0.35
-                                height: parent.height
-                                radius: parent.radius
-                                x: -width
-                                gradient: Gradient {
-                                    orientation: Gradient.Horizontal
-                                    GradientStop { position: 0.0; color: "transparent" }
-                                    GradientStop { position: 0.5; color: primaryColor }
-                                    GradientStop { position: 1.0; color: "transparent" }
-                                }
+                                // Respiration en cas de silence/indetermine : meme barre,
+                                // on signale juste "ca travaille" via un voile pulsant.
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: parent.radius
+                                    visible: root.pulsing && overallProgress < 100
+                                    color: Qt.rgba(1, 1, 1, 0.0)
 
-                                SequentialAnimation on x {
-                                    running: root.pulsing
-                                    loops: Animation.Infinite
-                                    NumberAnimation {
-                                        from: -indeterminateBar.width
-                                        to: overallTrack.width
-                                        duration: 1400
-                                        easing.type: Easing.InOutQuad
+                                    SequentialAnimation on color {
+                                        running: root.pulsing && overallProgress < 100
+                                        loops: Animation.Infinite
+                                        ColorAnimation { to: Qt.rgba(1, 1, 1, 0.22); duration: 750; easing.type: Easing.InOutSine }
+                                        ColorAnimation { to: Qt.rgba(1, 1, 1, 0.0);  duration: 750; easing.type: Easing.InOutSine }
                                     }
                                 }
                             }

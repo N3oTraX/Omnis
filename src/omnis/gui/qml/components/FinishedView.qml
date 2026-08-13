@@ -650,60 +650,8 @@ Item {
                     }
 
                     Button {
-                        id: shutdownButton
-                        text: qsTr("Shutdown")
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 56
-                        font.pixelSize: 16
-
-                        background: Rectangle {
-                            radius: 12
-                            color: parent.pressed ? Qt.darker(surfaceColor, 1.2) : surfaceColor
-                            border.color: textMutedColor
-                            border.width: 2
-
-                            Behavior on color {
-                                ColorAnimation { duration: 150 }
-                            }
-                        }
-
-                        contentItem: Item {
-                            implicitWidth: shutdownContentRow.implicitWidth
-                            implicitHeight: shutdownContentRow.implicitHeight
-
-                            Row {
-                                id: shutdownContentRow
-                                anchors.centerIn: parent
-                                spacing: 8
-
-                                Text {
-                                    // Glyphe monochrome (dingbat, pas un emoji
-                                    // couleur) : sans `color:` explicite il
-                                    // hérite du noir par défaut de Text et
-                                    // devient invisible sur fond sombre. Rouge
-                                    // sémantique "éteindre".
-                                    text: "\u{23FB}"  // Power symbol
-                                    font.pixelSize: 20
-                                    color: errorColor
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-
-                                Text {
-                                    text: shutdownButton.text
-                                    font: shutdownButton.font
-                                    color: textColor
-                                    verticalAlignment: Text.AlignVCenter
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-                            }
-                        }
-
-                        onClicked: root.shutdownClicked()
-                    }
-
-                    Button {
                         id: continueButton
-                        text: qsTr("Continue")
+                        text: qsTr("Continue testing")
                         Layout.fillWidth: true
                         Layout.preferredHeight: 56
                         font.pixelSize: 16
