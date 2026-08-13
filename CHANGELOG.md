@@ -5,6 +5,20 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.4] - 2026-08-13
+
+Correctifs remontés au test de l'ISO 0.6.3.
+
+### Fixed
+
+- **Partition EFI affichée à 512 Mo** : l'étiquette du partitionnement automatique était figée en dur (« 512 MB ») alors que l'ESP créée fait bien 1024 Mio. Elle reflète désormais la taille réelle (`efiSizeMb`).
+- **Barre de progression : style qui changeait selon la phase** : en cas de silence prolongé (`isStalled`) ou de phase indéterminée, la barre basculait d'un remplissage plein vers une bande dégradée qui balayait toute la piste, indépendante du pourcentage. Un rendu unique est désormais utilisé partout : le remplissage suit toujours la progression réelle, avec un reflet à cadence fixe (largeur indexée sur la hauteur) et, pendant un silence, une simple respiration d'opacité au lieu d'un changement de style.
+
+### Changed
+
+- **Écran de fin** : le bouton « Continuer » devient « Continuer à tester » (contexte live ISO) et le bouton « Éteindre », inutile en fin d'installation, a été retiré. Restent « Redémarrer maintenant » et « Continuer à tester ».
+- **i18n** : traduction FR des libellés du panneau de prérequis système (Cœurs CPU, Mémoire, Stockage, Carte graphique, etc.), auparavant affichés en anglais.
+
 ## [0.6.3] - 2026-08-13
 
 Correctifs remontés au test de l'ISO 0.6.2.
