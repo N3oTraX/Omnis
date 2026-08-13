@@ -1297,7 +1297,7 @@ class EngineBridge(QObject):
             "swapStrategy": "file",
             "encryption": False,
             "encryptionPassphrase": "",
-            "efiSizeMb": 512,
+            "efiSizeMb": 1024,
             # Desktop environment (DE) + edition/flavor selection. Aligned on the
             # Calamares GLF OS model (packagechooser@environment/@edition). The
             # nixos job consumes these as glf.environment.type / .edition.
@@ -2309,7 +2309,7 @@ class EngineBridge(QObject):
     @Property(int, notify=selectionsChanged)
     def efiSizeMb(self) -> int:
         """Get EFI System Partition size in MiB."""
-        return int(self._selections.get("efiSizeMb", 512))
+        return int(self._selections.get("efiSizeMb", 1024))
 
     @Slot(int)
     def setEfiSizeMb(self, size: int) -> None:
@@ -2688,7 +2688,7 @@ class EngineBridge(QObject):
             filesystem=str(self._selections.get("filesystem", "ext4")),
             swap_strategy=str(self._selections.get("swap_strategy", "file")),
             encryption=bool(self._selections.get("encryption", False)),
-            efi_size_mb=int(self._selections.get("efi_size_mb", 512) or 512),
+            efi_size_mb=int(self._selections.get("efi_size_mb", 1024) or 1024),
         )
         return disk_detector.compute_segments(int(geom.get("sizeSectors", 0) or 0), planned)
 

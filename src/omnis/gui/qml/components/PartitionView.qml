@@ -95,7 +95,7 @@ Item {
     readonly property string filesystem: engine.filesystem        // "ext4" | "btrfs"
     readonly property string swapStrategy: engine.swapStrategy     // "file" | "none" | "hibernate"
     readonly property bool encryptionEnabled: engine.encryption
-    readonly property int efiSizeMb: 512       // fixed for MVP
+    readonly property int efiSizeMb: 1024      // taille ESP par defaut (/boot)
 
     // Encryption passphrase validity (passphrase is NOT bound downward, security)
     readonly property bool encryptionPassValid:

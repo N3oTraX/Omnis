@@ -147,8 +147,9 @@ Rectangle {
                 color: textColor
             }
 
-            // Values row
-            Row {
+            // Valeurs : Flow pour passer a la ligne au lieu de deborder sur le badge.
+            Flow {
+                width: parent.width
                 spacing: 8
                 visible: currentValue !== ""
 
@@ -171,6 +172,8 @@ Rectangle {
                     font.pixelSize: 11
                     color: textMutedColor
                     visible: recommendedValue !== "" && status === "warn"
+                    width: Math.min(implicitWidth, parent.width)
+                    wrapMode: Text.WordWrap
                 }
             }
 

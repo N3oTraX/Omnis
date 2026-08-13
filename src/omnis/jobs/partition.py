@@ -91,7 +91,7 @@ def plan_auto_layout(
     filesystem: str = "ext4",
     swap_strategy: str = "file",
     encryption: bool = False,
-    efi_size_mb: int = 512,
+    efi_size_mb: int = 1024,
     legacy_swap_gb: int = 0,
     ram_mb: int = 0,
 ) -> list[dict[str, Any]]:
@@ -1084,7 +1084,7 @@ class PartitionJob(BaseJob):
         """
         context.report_progress(20, "Creating partition table...")
 
-        efi_size_mb = int(selections.get("efi_size_mb", 512))
+        efi_size_mb = int(selections.get("efi_size_mb", 1024))
         encryption = bool(selections.get("encryption", False))
 
         # Determine swap handling. swap_strategy takes precedence over the
@@ -1968,6 +1968,14 @@ class PartitionJob(BaseJob):
             return JobResult.fail("Partition layout not initialized", error_code=42)
 
         target_root = context.target_root
+
+        # Le point de montage racine doit exister avant mount (sinon exit 32,
+        # « le point de montage n'existe pas »).
+        if not dry_run:
+            try:
+                Path(target_root).mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                return JobResult.fail(f"Failed to create {target_root}: {e}", error_code=43)
 
         # Type explicite : sans ``-t``, mount peut auto-détecter un type périmé
         # (cache blkid non rafraîchi après mkfs) et échouer « superbloc erroné ».
