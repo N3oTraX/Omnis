@@ -83,6 +83,22 @@ Rectangle {
         }
     }
 
+    // Libelle localise : les descriptions arrivent en anglais du backend, on les
+    // traduit ici via le nom stable du prerequis (mecanisme .ts/.qm des vues).
+    readonly property string localizedName: {
+        switch(name) {
+            case "cpu_cores": return qsTr("CPU Cores")
+            case "cpu_arch": return qsTr("CPU Architecture")
+            case "ram": return qsTr("Memory (RAM)")
+            case "disk": return qsTr("Storage Space")
+            case "gpu": return qsTr("Graphics (GPU)")
+            case "internet": return qsTr("Internet Connection")
+            case "efi": return qsTr("EFI / UEFI")
+            case "secure_boot": return qsTr("Secure Boot")
+            default: return description || name
+        }
+    }
+
     // Colored category icon (status-independent), driven by theme.yaml
     // (requirement_icons) with the cat-<name>.svg convention as fallback.
     // Empty when the asset is absent -> emoji fallback.
@@ -141,7 +157,7 @@ Rectangle {
             spacing: 2
 
             Text {
-                text: description || name
+                text: localizedName
                 font.pixelSize: 14
                 font.bold: true
                 color: textColor

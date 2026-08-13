@@ -781,6 +781,38 @@
         <source>Configure Network</source>
         <translation>Configurer le réseau</translation>
     </message>
+    <message>
+        <source>CPU Cores</source>
+        <translation>Cœurs CPU</translation>
+    </message>
+    <message>
+        <source>CPU Architecture</source>
+        <translation>Architecture CPU</translation>
+    </message>
+    <message>
+        <source>Memory (RAM)</source>
+        <translation>Mémoire (RAM)</translation>
+    </message>
+    <message>
+        <source>Storage Space</source>
+        <translation>Espace de stockage</translation>
+    </message>
+    <message>
+        <source>Graphics (GPU)</source>
+        <translation>Carte graphique (GPU)</translation>
+    </message>
+    <message>
+        <source>Internet Connection</source>
+        <translation>Connexion Internet</translation>
+    </message>
+    <message>
+        <source>EFI / UEFI</source>
+        <translation>EFI / UEFI</translation>
+    </message>
+    <message>
+        <source>Secure Boot</source>
+        <translation>Démarrage sécurisé</translation>
+    </message>
 </context>
 <context>
     <name>RequirementsOverlay</name>
@@ -803,6 +835,14 @@
         <location filename="../qml/components/RequirementsOverlay.qml" line="218"/>
         <source>Please resolve the issues above before proceeding</source>
         <translation>Veuillez résoudre les problèmes ci-dessus avant de continuer</translation>
+    </message>
+    <message>
+        <source>Your system meets the minimum requirements, but some recommendations are not met</source>
+        <translation>Votre système remplit les prérequis minimaux, mais certaines recommandations ne sont pas satisfaites</translation>
+    </message>
+    <message>
+        <source>Re-check</source>
+        <translation>Revérifier</translation>
     </message>
 </context>
 <context>
