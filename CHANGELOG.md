@@ -5,6 +5,19 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.3] - 2026-08-13
+
+Correctifs remontés au test de l'ISO 0.6.2.
+
+### Fixed
+
+- **Installation échouait au montage** : le job partition montait la racine sur `/mnt/target` sans créer ce point de montage au préalable, d'où un `mount: /mnt/target: le point de montage n'existe pas` (exit 32) juste après le formatage. Le répertoire cible est désormais créé avant le montage.
+- **Prérequis système : chevauchement du texte** : les valeurs longues (recommandations GPU/stockage) débordaient sur l'icône de statut à droite. Elles passent en `Flow` et se replient sur plusieurs lignes au lieu de chevaucher.
+
+### Changed
+
+- **Partition EFI (mode auto) : 512 → 1024 Mio** : l'ESP créée par le partitionnement automatique fait désormais 1024 Mio (montée sur `/boot`), pour laisser de la marge aux générations NixOS et aux mises à jour du chargeur.
+
 ## [0.6.2] - 2026-07-20
 
 Traitement complet des retours de la première ISO d'installation utilisant Omnis
