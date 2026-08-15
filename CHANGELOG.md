@@ -5,6 +5,12 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.9] - 2026-08-15
+
+### Fixed
+
+- **Journal d'installation criblé de `***`** : le champ mot de passe enregistrait un secret à **chaque frappe** (`onTextChanged` → `setPassword` → `add_secret`), donc le premier caractère et les préfixes courts (ex. « 8 », « a »), ainsi que toute saisie transitoire, étaient remplacés aveuglément partout dans le log (« install » → « inst\*\*\*ll », « 80% » → « \*\*\*0% », hashs nix corrompus). Le rédacteur n'enregistre plus les secrets de moins de 6 caractères pour le remplacement mot-à-mot ; le mot de passe complet reste masqué, et les fuites structurées (`password: …`) restent couvertes par le motif regex.
+
 ## [0.6.8] - 2026-08-15
 
 ### Added
