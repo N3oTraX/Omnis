@@ -16,7 +16,9 @@ Runs offscreen; no real partitioning is performed.
 
 from __future__ import annotations
 
+import contextlib
 import os
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -87,7 +89,7 @@ def qapp() -> QApplication:
 
 
 @pytest.fixture
-def bridge(qapp: QApplication) -> EngineBridge:
+def bridge(qapp: QApplication) -> Iterator[EngineBridge]:
     assert qapp is not None
     engine = Engine.from_config_file(MINIMAL_CONFIG)
     theme_base = MINIMAL_CONFIG.parent
@@ -96,7 +98,16 @@ def bridge(qapp: QApplication) -> EngineBridge:
     obj._disks_model = [_mock_disk()]
     obj.setSelectedDisk("/dev/sda")
     obj.setPartitionMode("manual")
-    return obj
+    yield obj
+    # Vider la file d'evenements Qt pendant que le bridge est encore vivant, puis
+    # couper ses connexions : sinon les signaux emis par ce test (le report des
+    # montages en emet plusieurs) restent en file et sont vidangees par le
+    # _process_events inter-tests de pytest-qt dans le setup du test SUIVANT, ce
+    # qui segfault sous coverage (traceur C + PySide) sur Python 3.11.
+    qapp.processEvents()
+    with contextlib.suppress(RuntimeError, TypeError):
+        obj.disconnect()
+    qapp.processEvents()
 
 
 def _create_free_op() -> dict[str, Any]:
