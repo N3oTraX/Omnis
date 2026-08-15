@@ -230,6 +230,21 @@ class FinishedJob(BaseJob):
         if os.path.ismount(efi_mount) and not self._safe_unmount(efi_mount):
             errors.append(f"Failed to unmount EFI partition: {efi_mount}")
 
+        # Le swapfile vit SOUS target_root : tant que le swap reste actif, la
+        # cible est occupee et umount echoue (EBUSY). On le desactive d'abord.
+        swapfile = target_root / "swapfile"
+        if swapfile.exists():
+            try:
+                subprocess.run(
+                    ["swapoff", str(swapfile)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+            except (OSError, subprocess.SubprocessError) as e:
+                logger.debug(f"swapoff {swapfile} failed: {e}")
+
         # Unmount root partition
         if os.path.ismount(target_root) and not self._safe_unmount(target_root):
             errors.append(f"Failed to unmount root partition: {target_root}")

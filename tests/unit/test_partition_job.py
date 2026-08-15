@@ -1712,3 +1712,44 @@ class TestCleanupLogging:
             job.cleanup(context)
 
         assert "Closed LUKS mapper cryptroot" in caplog.text
+
+
+class TestSetupSwapfile:
+    """_setup_swapfile: un swapfile btrfs doit etre NoCOW (chattr +C) avant ecriture."""
+
+    def _capture(self, filesystem: str) -> list[list[str]]:
+        job = PartitionJob()
+        cmds: list[list[str]] = []
+
+        def _fake_run(cmd: Any, description: str = "", dry_run: bool = False) -> JobResult:  # noqa: ARG001
+            cmds.append(list(cmd))
+            return JobResult.ok(description)
+
+        ctx = JobContext(target_root="/mnt/target")
+        with (
+            patch.object(job, "_run_partitioning_command", side_effect=_fake_run),
+            patch("omnis.jobs.partition._detect_ram_mb", return_value=8192),
+        ):
+            result = job._setup_swapfile(ctx, "file", dry_run=False, filesystem=filesystem)
+
+        assert result.success is True
+        return cmds
+
+    def test_btrfs_swapfile_is_nocow_before_write(self) -> None:
+        """Sur btrfs: truncate (fichier vide) -> chattr +C -> dd/mkswap/swapon."""
+        cmds = self._capture(FilesystemType.BTRFS.value)
+        verbs = [c[0] for c in cmds]
+
+        assert ["chattr", "+C", "/mnt/target/swapfile"] in cmds
+        assert verbs.index("truncate") < verbs.index("chattr")
+        assert verbs.index("chattr") < verbs.index("dd")
+        assert verbs.index("chattr") < verbs.index("swapon")
+
+    def test_ext4_swapfile_has_no_chattr(self) -> None:
+        """Sur ext4: pas de NoCOW, la sequence dd/mkswap/swapon reste inchangee."""
+        cmds = self._capture(FilesystemType.EXT4.value)
+        verbs = [c[0] for c in cmds]
+
+        assert "chattr" not in verbs
+        assert "truncate" not in verbs
+        assert "swapon" in verbs

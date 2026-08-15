@@ -458,6 +458,50 @@ class TestCleanupMounts:
             # (unmount succeeded, only swap deactivation failed)
             assert result.success is True
 
+    @patch("omnis.jobs.finished.os.path.ismount", return_value=True)
+    @patch("omnis.jobs.finished.FinishedJob._safe_unmount")
+    @patch("subprocess.run")
+    def test_cleanup_swapoffs_swapfile_before_root_umount(
+        self, mock_run: Mock, mock_unmount: Mock, _mock_ismount: Mock
+    ) -> None:
+        """Le swapfile sous target_root doit etre desactive AVANT le umount racine.
+
+        Regression: un swap actif sur ``<target>/swapfile`` garde la cible
+        occupee et ``umount`` echoue (EBUSY) juste apres une install reussie.
+        """
+        mock_unmount.return_value = True
+        mock_run.return_value = MagicMock(returncode=0)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            swapfile = f"{tmpdir}/swapfile"
+            open(swapfile, "wb").close()
+
+            manager = Mock()
+            manager.attach_mock(mock_run, "run")
+            manager.attach_mock(mock_unmount, "unmount")
+
+            job = FinishedJob()
+            context = JobContext(target_root=tmpdir)
+            result = job._cleanup_mounts(context)
+
+            assert result.success is True
+            assert any(
+                list(c[0][0][:2]) == ["swapoff", swapfile] for c in mock_run.call_args_list
+            ), "swapoff du swapfile attendu"
+
+            seq = manager.mock_calls
+            swapoff_idx = next(
+                i
+                for i, c in enumerate(seq)
+                if c[0] == "run" and c[1] and list(c[1][0][:2]) == ["swapoff", swapfile]
+            )
+            umount_root_idx = next(
+                i
+                for i, c in enumerate(seq)
+                if c[0] == "unmount" and c[1] and str(c[1][0]) == tmpdir
+            )
+            assert swapoff_idx < umount_root_idx
+
 
 # =============================================================================
 # Action Preparation Tests

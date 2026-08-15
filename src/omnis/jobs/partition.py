@@ -1242,7 +1242,7 @@ class PartitionJob(BaseJob):
         # Step 9: Configure swap via swapfile under target_root.
         if swap_strategy in ("file", "hibernate"):
             context.report_progress(90, "Configuring swapfile...")
-            result = self._setup_swapfile(context, swap_strategy, dry_run)
+            result = self._setup_swapfile(context, swap_strategy, dry_run, filesystem)
             if not result.success:
                 return result
 
@@ -1854,7 +1854,9 @@ class PartitionJob(BaseJob):
         self._layout.encrypted = True
         return JobResult.ok("LUKS container ready")
 
-    def _setup_swapfile(self, context: JobContext, strategy: str, dry_run: bool) -> JobResult:
+    def _setup_swapfile(
+        self, context: JobContext, strategy: str, dry_run: bool, filesystem: str = "ext4"
+    ) -> JobResult:
         """
         Create and activate a swapfile under ``target_root``.
 
@@ -1878,7 +1880,15 @@ class PartitionJob(BaseJob):
         swapfile = f"{context.target_root}/swapfile"
         logger.info(f"Swapfile strategy={strategy}, size={size_mb}MB at {swapfile}")
 
-        steps = [
+        steps: list[tuple[list[str], str]] = []
+        # btrfs refuse un swapfile en Copy-on-Write : le creer vide puis poser
+        # l'attribut NoCOW (chattr +C) AVANT toute ecriture, sinon swapon -> EINVAL.
+        if filesystem == FilesystemType.BTRFS.value:
+            steps += [
+                (["truncate", "-s", "0", swapfile], "Preparing swapfile (NoCOW)"),
+                (["chattr", "+C", swapfile], "Disabling copy-on-write on swapfile"),
+            ]
+        steps += [
             (
                 ["dd", "if=/dev/zero", f"of={swapfile}", "bs=1M", f"count={size_mb}"],
                 "Allocating swapfile",
@@ -2148,6 +2158,20 @@ class PartitionJob(BaseJob):
                 logger.debug(f"Not unmounted {efi_mount}: {(result.stderr or '').strip()}")
         except Exception as e:
             logger.debug(f"Failed to unmount {efi_mount}: {e}")
+
+        # Desactiver le swapfile (sous target_root) avant de demonter la racine,
+        # sinon un swap actif garde la cible occupee (EBUSY).
+        swapfile = Path(target_root) / "swapfile"
+        if swapfile.exists():
+            try:
+                subprocess.run(
+                    ["swapoff", str(swapfile)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+            except (OSError, subprocess.SubprocessError) as e:
+                logger.debug(f"swapoff {swapfile} failed: {e}")
 
         # Try to unmount root
         try:
