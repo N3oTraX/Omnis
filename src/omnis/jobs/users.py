@@ -115,7 +115,7 @@ class UsersJob(BaseJob):
         # Validate hostname (optional but if provided must be valid)
         if hostname and not self._validate_hostname(hostname):
             return JobResult.fail(
-                f"Invalid hostname '{hostname}'. Must contain only lowercase letters, digits, "
+                f"Invalid hostname '{hostname}'. Must contain only letters, digits, "
                 "and hyphens, and cannot start/end with hyphen.",
                 error_code=13,
             )
@@ -415,7 +415,7 @@ class UsersJob(BaseJob):
         Validate hostname format.
 
         Rules:
-        - Can contain lowercase letters, digits, hyphens
+        - Can contain letters (upper or lower case), digits, hyphens
         - Cannot start or end with hyphen
         - Maximum 63 characters per label
 
@@ -435,7 +435,7 @@ class UsersJob(BaseJob):
                 return False
             if label.startswith("-") or label.endswith("-"):
                 return False
-            if not re.match(r"^[a-z0-9-]+$", label):
+            if not re.match(r"^[A-Za-z0-9-]+$", label):
                 return False
 
         return True

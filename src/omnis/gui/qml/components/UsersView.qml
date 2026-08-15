@@ -68,7 +68,7 @@ Item {
     readonly property bool usernameValid: usernameField.text.length > 0
         && /^[a-z_][a-z0-9_-]*$/.test(usernameField.text)
         && !usernameReserved
-    readonly property bool hostnameValid: hostnameField.text.length > 0 && /^[a-z][a-z0-9-]*$/.test(hostnameField.text)
+    readonly property bool hostnameValid: hostnameField.text.length > 0 && /^[A-Za-z][A-Za-z0-9-]*$/.test(hostnameField.text)
 
     // Password criteria (NIST SP 800-63B inspired)
     readonly property bool pwdHasMinLength: passwordField.text.length >= root.passwordMinLength

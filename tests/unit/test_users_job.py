@@ -87,6 +87,9 @@ class TestHostnameValidation:
             "web-server-123",
             "a",
             "srv",
+            "HOST",  # uppercase autorise
+            "GLF-OS",
+            "MyPC",
         ]
 
         for hostname in valid_hostnames:
@@ -101,7 +104,6 @@ class TestHostnameValidation:
             "-hostname",  # starts with hyphen
             "hostname-",  # ends with hyphen
             "host name",  # contains space
-            "HOST",  # uppercase
             "host_name",  # underscore not allowed
             "a" * 254,  # too long (>253 chars)
             "a" * 64,  # label too long (>63 chars)

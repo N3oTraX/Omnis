@@ -109,7 +109,7 @@ class TestHostnameValidation:
     """
 
     # Pattern from UsersView.qml (simplified for single-label hostname)
-    HOSTNAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
+    HOSTNAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9-]*$")
 
     def validate_hostname(self, hostname: str) -> bool:
         """Validate hostname using QML pattern."""
@@ -132,6 +132,9 @@ class TestHostnameValidation:
             "srv123",
             "my-awesome-pc",
             "workstation1",
+            "MyPC",
+            "GLF-OS",
+            "LOCALHOST",
         ],
     )
     def test_valid_hostnames(self, hostname: str) -> None:
@@ -142,8 +145,6 @@ class TestHostnameValidation:
         "hostname,reason",
         [
             ("", "empty string"),
-            ("MyPC", "uppercase letters"),
-            ("LOCALHOST", "all uppercase"),
             ("123server", "starts with digit"),
             ("-server", "starts with hyphen"),
             ("server-", "ends with hyphen"),
