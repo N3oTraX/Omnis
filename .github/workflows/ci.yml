@@ -110,8 +110,11 @@ jobs:
           QT_QPA_PLATFORM=offscreen pytest tests/unit/ -v --tb=short
 
       - name: Run tests with coverage
+        # COVERAGE_CORE=pytrace : le traceur C de coverage (ctrace) segfault avec
+        # PySide6/Qt sous le _process_events inter-tests de pytest-qt (py3.11).
+        # Le traceur pur Python est plus lent mais stable avec Qt.
         run: |
-          QT_QPA_PLATFORM=offscreen pytest tests/unit/ --cov=omnis --cov-report=xml
+          QT_QPA_PLATFORM=offscreen COVERAGE_CORE=pytrace pytest tests/unit/ --cov=omnis --cov-report=xml
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
