@@ -5,6 +5,15 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.5] - 2026-08-14
+
+Correctifs remontés par des testeurs de l'ISO testing (partitionnement btrfs + swap).
+
+### Fixed
+
+- **Swapfile sur btrfs : `swapon` échouait (`Argument invalide`/EINVAL)** : sur un système de fichiers btrfs, un swapfile doit être en Copy-on-Write désactivé (NoCOW). Le fichier est désormais créé vide puis marqué `chattr +C` **avant** son remplissage (`dd`), condition nécessaire pour que le noyau accepte `swapon`. L'installation btrfs avec espace d'échange par fichier ne s'interrompt plus à cette étape.
+- **Démontage de `/mnt/target` en échec (« la cible est active ») après une install réussie** : le swapfile vit sous `/mnt/target` ; tant que le swap restait actif, la cible était occupée et `umount` échouait (EBUSY). Le swap est désormais désactivé (`swapoff`) avant le démontage de la racine, à la fois dans le nettoyage de fin d'installation et dans le nettoyage sur erreur du partitionnement.
+
 ## [0.6.4] - 2026-08-13
 
 Correctifs remontés au test de l'ISO 0.6.3.

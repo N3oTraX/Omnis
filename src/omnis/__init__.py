@@ -5,5 +5,5 @@ A modular, secure, and customizable installation framework
 built with Python and Qt6/QML.
 """
 
-__version__ = "0.6.4"
+__version__ = "0.6.5"
 __author__ = "GLF Team"
