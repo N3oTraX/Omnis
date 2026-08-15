@@ -416,15 +416,13 @@ class TestSeedAssignmentsAfterApply:
         }
 
     def test_created_partition_inherits_op_mountpoint(self, bridge: EngineBridge) -> None:
-        before = bridge._selected_disk_partition_names()
-        assert before == {"sda1", "sda2"}
         start = _ALIGN + _sectors(512) + _sectors(100 * 1024)
         pending = [{"start": start, "mountpoint": "/home", "fstype": "ext4"}]
         after = _mock_disk()
         after["segments"].append(self._new_seg("sda3", start))
         bridge._disks_model = [after]  # simule le rescan post-apply
 
-        bridge._seed_assignments_from_created(before, pending)
+        bridge._seed_assignments_from_created(pending)
 
         assert bridge.partitionMount("sda3") == "/home"
         assert bridge.partitionFsType("sda3") == "ext4"
@@ -432,10 +430,9 @@ class TestSeedAssignmentsAfterApply:
         assert bridge.partitionFormat("sda3") is False
 
     def test_two_created_partitions_map_by_start_order(self, bridge: EngineBridge) -> None:
-        before = bridge._selected_disk_partition_names()
         s1 = _ALIGN + _sectors(512) + _sectors(100 * 1024)
         s2 = s1 + _sectors(10 * 1024)
-        # Ordre volontairement inversé : le tri par secteur doit réaligner.
+        # Ordre volontairement inversé : le matching par secteur doit réaligner.
         pending = [
             {"start": s2, "mountpoint": "/data", "fstype": "btrfs"},
             {"start": s1, "mountpoint": "/home", "fstype": "ext4"},
@@ -445,8 +442,27 @@ class TestSeedAssignmentsAfterApply:
         after["segments"].append(self._new_seg("sda4", s2))
         bridge._disks_model = [after]
 
-        bridge._seed_assignments_from_created(before, pending)
+        bridge._seed_assignments_from_created(pending)
 
         assert bridge.partitionMount("sda3") == "/home"
         assert bridge.partitionMount("sda4") == "/data"
         assert bridge.partitionFsType("sda4") == "btrfs"
+
+    def test_delete_recreate_same_names_still_seeds(self, bridge: EngineBridge) -> None:
+        """delete+create réutilise vda1/vda2 (mêmes noms) : le matching par
+        secteur de départ (et non par diff de noms) doit quand même reporter
+        /boot et /. Régression du bug 'No partition is mounted at /'."""
+        # after == mêmes noms que before : un diff par nom aurait été vide.
+        after = _mock_disk()  # sda1 @ esp_start (vfat), sda2 @ root_start (ext4)
+        esp_start = after["segments"][0]["startSector"]
+        root_start = after["segments"][1]["startSector"]
+        bridge._disks_model = [after]
+        pending = [
+            {"start": esp_start, "mountpoint": "/boot", "fstype": "vfat"},
+            {"start": root_start, "mountpoint": "/", "fstype": "ext4"},
+        ]
+
+        bridge._seed_assignments_from_created(pending)
+
+        assert bridge.partitionMount("sda1") == "/boot"
+        assert bridge.partitionMount("sda2") == "/"

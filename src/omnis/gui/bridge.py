@@ -2672,11 +2672,10 @@ class EngineBridge(QObject):
                 for op in self._partition_operations
                 if op.get("type") == "create" and (op.get("params") or {}).get("mountpoint")
             ]
-            before = self._selected_disk_partition_names()
             self.resetPartitionOperations()
             self.refreshDisks()
             if pending:
-                self._seed_assignments_from_created(before, pending)
+                self._seed_assignments_from_created(pending)
         if self._debug:
             print(f"[Engine] Partition apply finished: success={success} ({message})")
         self.partitionApplyFinished.emit(success, message)
@@ -2703,27 +2702,35 @@ class EngineBridge(QObject):
                         return int(s.get("startSector", 0) or 0)
         return 0
 
-    def _seed_assignments_from_created(
-        self, before: set[str], pending: list[dict[str, Any]]
-    ) -> None:
+    def _seed_assignments_from_created(self, pending: list[dict[str, Any]]) -> None:
         """Reporter les points de montage des create-ops sur les partitions creees.
 
         Apres l'application live, les partitions nouvellement creees reviennent
-        vierges. On associe chaque op de creation (triee par secteur de depart) a
-        la nouvelle partition correspondante et on seme son assignation M1 (point
-        de montage + systeme de fichiers, deja formate). Le point de montage saisi
-        a la creation persiste ainsi sans ressaisie.
+        vierges. On associe chaque op de creation a la partition dont le secteur
+        de depart correspond (parted respecte le ``start_sector`` de l'op) et on
+        seme son assignation M1 (point de montage + systeme de fichiers, deja
+        formate). Le point de montage saisi a la creation persiste ainsi sans
+        ressaisie.
+
+        Le matching se fait par secteur de depart et NON par difference de noms :
+        un delete+create reutilise les memes noms de partition (vda1/vda2), donc
+        un diff par nom serait vide et perdrait tous les montages.
         """
-        new_names = sorted(
-            self._selected_disk_partition_names() - before, key=self._partition_start_sector
-        )
-        pending_sorted = sorted(pending, key=lambda p: p["start"])
-        for name, intent in zip(new_names, pending_sorted, strict=False):
-            entry = self._assignment(name)
-            entry["mountpoint"] = intent["mountpoint"]
-            entry["fstype"] = intent["fstype"]
-            entry["format"] = False  # deja formatee lors de l'application
-        if new_names and pending_sorted:
+        parts = [
+            (name, self._partition_start_sector(name))
+            for name in self._selected_disk_partition_names()
+        ]
+        seeded = False
+        for intent in pending:
+            target = min(parts, key=lambda p: abs(p[1] - intent["start"]), default=None)
+            # parted aligne sur 2048 secteurs (1 MiB) : tolerance de securite.
+            if target is not None and abs(target[1] - intent["start"]) <= 2048:
+                entry = self._assignment(target[0])
+                entry["mountpoint"] = intent["mountpoint"]
+                entry["fstype"] = intent["fstype"]
+                entry["format"] = False  # deja formatee lors de l'application
+                seeded = True
+        if seeded:
             self.partitionPlanChanged.emit()
 
     def _cleanup_apply_thread(self) -> None:
