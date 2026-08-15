@@ -51,6 +51,16 @@ TERMBIN_HOST = "termbin.com"
 TERMBIN_PORT = 9999
 
 
+# En dessous de cette longueur, une valeur n'est pas enregistree pour le
+# remplacement mot-a-mot. Le champ mot de passe appelle add_secret() a CHAQUE
+# frappe (onTextChanged -> setPassword), donc chaque prefixe court ("8", "89"...)
+# et les mots de passe faibles finiraient par remplacer aveuglement des fragments
+# tres courants du journal (hashs nix, "install" -> "inst***ll", "80%" ->
+# "***0%"). Les fuites structurees ("password: ...") restent couvertes par
+# _SECRET_PATTERN, independant de cette liste.
+_MIN_REDACTABLE_SECRET_LEN = 6
+
+
 class SecretRedactor:
     """Redacts known secret values and common password-like patterns from text."""
 
@@ -60,9 +70,11 @@ class SecretRedactor:
     def add_secret(self, value: str) -> None:
         """Register a concrete secret value to be redacted from future text.
 
-        Empty or ``None`` values are ignored (nothing to redact).
+        Empty values, and values shorter than ``_MIN_REDACTABLE_SECRET_LEN``,
+        are ignored: a blind substring replace of a short/one-char secret would
+        corrupt unrelated text throughout the log.
         """
-        if value:
+        if value and len(value) >= _MIN_REDACTABLE_SECRET_LEN:
             self._secrets.add(value)
 
     def redact(self, text: str) -> str:

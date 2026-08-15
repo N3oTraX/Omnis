@@ -56,6 +56,22 @@ class TestSecretRedactor:
         assert "r00tpw" not in result
         assert result.count("***") == 3
 
+    def test_short_and_prefix_secrets_do_not_corrupt_the_log(self) -> None:
+        """Le champ mot de passe enregistre CHAQUE frappe (onTextChanged) : les
+        prefixes courts ("8", "89"...) et les saisies transitoires ne doivent pas
+        remplacer aveuglement des fragments courants du journal."""
+        redactor = SecretRedactor()
+        for typed in ("8", "89", "895", "a", "89562"):  # 1 a 5 caracteres
+            redactor.add_secret(typed)
+
+        text = "nixos-install: gaming-linux-fr | Counting objects: 80% (4/5)"
+        assert redactor.redact(text) == text  # aucune corruption
+
+    def test_full_length_secret_is_still_redacted(self) -> None:
+        redactor = SecretRedactor()
+        redactor.add_secret("895623")  # >= 6 caracteres : bien redacte
+        assert "895623" not in redactor.redact("token 895623 here")
+
     @pytest.mark.parametrize(
         "text",
         [
