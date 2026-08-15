@@ -228,8 +228,12 @@ jobs:
         # - PASS: On AC power
         # - WARN: On battery AND battery >= min_battery_percent
         # - FAIL: On battery AND battery < min_battery_percent
+        # Desactive : non vital pour une distro gaming (majorite de desktops).
+        # Les batteries de peripheriques sans-fil (manette Xbox -> xpad0, souris/
+        # clavier/casque) remontent comme des batteries systeme a 0% et
+        # declenchaient un faux FAIL bloquant sur des PC de bureau.
         power:
-          enabled: true
+          enabled: false
           # Minimum battery percentage when not plugged in (FAIL if below)
           # Default: 80% - Ensure sufficient battery for installation
           min_battery_percent: 80
