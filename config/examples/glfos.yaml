@@ -379,3 +379,6 @@ advanced:
   ipc_socket: "/run/omnis/ipc.sock"
   job_timeout: 3600
   debug_mode: false
+  # Autorise les mots de passe faibles (distro gaming) : aucune longueur mini
+  # imposee ni critere bloquant. Mettre 8 pour restaurer la regle standard.
+  password_min_length: 1

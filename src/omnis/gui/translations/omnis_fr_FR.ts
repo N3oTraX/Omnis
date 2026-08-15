@@ -1151,8 +1151,8 @@
     </message>
     <message>
         <location filename="../qml/components/UsersView.qml" line="533"/>
-        <source>Enter password (min 8 characters)</source>
-        <translation>Saisir un mot de passe (8 caractères minimum)</translation>
+        <source>Enter password (min %1 characters)</source>
+        <translation>Saisir un mot de passe (%1 caractères minimum)</translation>
     </message>
     <message>
         <location filename="../qml/components/UsersView.qml" line="576"/>
@@ -1178,8 +1178,8 @@
     </message>
     <message>
         <location filename="../qml/components/UsersView.qml" line="686"/>
-        <source>At least 8 characters</source>
-        <translation>Au moins 8 caractères</translation>
+        <source>At least %1 characters</source>
+        <translation>Au moins %1 caractères</translation>
     </message>
     <message>
         <location filename="../qml/components/UsersView.qml" line="691"/>
@@ -1213,8 +1213,12 @@
     </message>
     <message>
         <location filename="../qml/components/UsersView.qml" line="839"/>
-        <source>Root password (min 8 characters)</source>
-        <translation>Mot de passe root (8 caractères minimum)</translation>
+        <source>Root password (min %1 characters)</source>
+        <translation>Mot de passe root (%1 caractères minimum)</translation>
+    </message>
+    <message>
+        <source>Root password</source>
+        <translation>Mot de passe root</translation>
     </message>
     <message>
         <location filename="../qml/components/UsersView.qml" line="878"/>

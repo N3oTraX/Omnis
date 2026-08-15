@@ -318,6 +318,7 @@ ApplicationWindow {
                 opacity: visible ? 1 : 0
 
                 branding: branding
+                passwordMinLength: engine.passwordMinLength
 
                 // Source de vérité unique : la vue lit/écrit directement via
                 // `engine.*` (setUsername/setFullName/…). Plus de propriétés

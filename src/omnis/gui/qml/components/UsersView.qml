@@ -38,6 +38,10 @@ Item {
     property string passwordConfirm: ""
     property string rootPasswordConfirm: ""
 
+    // Longueur minimale imposee (issue de la config via engine.passwordMinLength).
+    // <= 1 : aucune restriction de longueur (mots de passe faibles autorises).
+    property int passwordMinLength: 8
+
     // Theme colors
     property color primaryColor: "#5597e6"
     property color secondaryColor: "#3a7bc8"
@@ -67,7 +71,7 @@ Item {
     readonly property bool hostnameValid: hostnameField.text.length > 0 && /^[a-z][a-z0-9-]*$/.test(hostnameField.text)
 
     // Password criteria (NIST SP 800-63B inspired)
-    readonly property bool pwdHasMinLength: passwordField.text.length >= 8
+    readonly property bool pwdHasMinLength: passwordField.text.length >= root.passwordMinLength
     readonly property bool pwdHasUppercase: /[A-Z]/.test(passwordField.text)
     readonly property bool pwdHasLowercase: /[a-z]/.test(passwordField.text)
     readonly property bool pwdHasNumber: /[0-9]/.test(passwordField.text)
@@ -78,7 +82,7 @@ Item {
     // Root password validation (only relevant when not reusing the user account
     // password). When rootSameAsUser is true, root credentials inherit the user
     // password, so no separate validation is required.
-    readonly property bool rootPasswordValid: rootPasswordField.text.length >= 8
+    readonly property bool rootPasswordValid: rootPasswordField.text.length >= root.passwordMinLength
     readonly property bool rootPasswordsMatch: rootPasswordField.text === rootPasswordConfirmField.text && rootPasswordField.text.length > 0
     readonly property bool rootValid: rootSameAsUser || (rootPasswordValid && rootPasswordsMatch)
 
@@ -546,7 +550,9 @@ Item {
                                 id: passwordField
                                 Layout.fillWidth: true
                                 height: 40
-                                placeholderText: qsTr("Enter password (min 8 characters)")
+                                placeholderText: root.passwordMinLength > 1
+                                    ? qsTr("Enter password (min %1 characters)").arg(root.passwordMinLength)
+                                    : qsTr("Enter password")
                                 font.pixelSize: 16
                                 echoMode: showPasswordCheck.checked ? TextInput.Normal : TextInput.Password
 
@@ -705,9 +711,10 @@ Item {
                                 }
 
                                 CriteriaRow {
+                                    visible: root.passwordMinLength > 1
                                     met: pwdHasMinLength
                                     isRequired: true
-                                    criteriaText: qsTr("At least 8 characters")
+                                    criteriaText: qsTr("At least %1 characters").arg(root.passwordMinLength)
                                 }
 
                                 Item { width: 1; height: 4 }
@@ -877,7 +884,9 @@ Item {
                                         id: rootPasswordField
                                         Layout.fillWidth: true
                                         height: 40
-                                        placeholderText: qsTr("Root password (min 8 characters)")
+                                        placeholderText: root.passwordMinLength > 1
+                                            ? qsTr("Root password (min %1 characters)").arg(root.passwordMinLength)
+                                            : qsTr("Root password")
                                         font.pixelSize: 16
                                         echoMode: showPasswordCheck.checked ? TextInput.Normal : TextInput.Password
 

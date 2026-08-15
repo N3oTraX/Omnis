@@ -1595,6 +1595,17 @@ class EngineBridge(QObject):
         current_locale = self._selections.get("locale", "en_US.UTF-8")
         return self._needs_unicode_font(current_locale)
 
+    @Property(int, constant=True)
+    def passwordMinLength(self) -> int:
+        """Longueur minimale des mots de passe imposee par l'UI (issue de la config).
+
+        0/1 = aucune restriction de longueur (mots de passe faibles autorises).
+        """
+        try:
+            return int(self._engine.config.advanced.password_min_length)
+        except (AttributeError, TypeError, ValueError):
+            return 8
+
     # Requirements properties
     @Property(bool, notify=requirementsChanged)
     def showRequirements(self) -> bool:

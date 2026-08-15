@@ -138,6 +138,9 @@ class AdvancedConfig(BaseModel):
     ipc_socket: str = "/run/omnis/ipc.sock"
     job_timeout: int = 3600
     debug_mode: bool = False
+    # Longueur minimale des mots de passe imposee par l'UI (0/1 = mots de passe
+    # faibles autorises, aucune restriction de longueur). Defaut 8.
+    password_min_length: int = 8
 
 
 class OmnisConfig(BaseModel):

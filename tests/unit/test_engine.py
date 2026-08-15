@@ -36,6 +36,22 @@ class TestOmnisConfig:
         assert normalized[1].name == "locale"
         assert normalized[2].name == "install"
 
+    def test_password_min_length_default(self) -> None:
+        """Par defaut, l'UI impose 8 caracteres minimum."""
+        config = OmnisConfig()
+        assert config.advanced.password_min_length == 8
+
+    def test_password_min_length_override(self) -> None:
+        """password_min_length est configurable (1 = mots de passe faibles OK)."""
+        config = OmnisConfig(advanced={"password_min_length": 1})
+        assert config.advanced.password_min_length == 1
+
+    def test_glfos_config_allows_weak_passwords(self) -> None:
+        """La config GLF-OS livree autorise les mots de passe faibles (min 1)."""
+        glfos = Path(__file__).parents[2] / "config" / "examples" / "glfos.yaml"
+        engine = Engine.from_config_file(str(glfos))
+        assert engine.config.advanced.password_min_length == 1
+
 
 class TestEngine:
     """Tests for Engine class."""
