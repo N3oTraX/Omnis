@@ -2653,15 +2653,78 @@ class EngineBridge(QObject):
         self._apply_thread.start()
 
     def _on_partition_apply_finished(self, success: bool, message: str) -> None:
-        """Main-thread handler: on success clear the queue and rescan the disks."""
+        """Main-thread handler: on success clear the queue and rescan the disks.
+
+        Les points de montage saisis a la creation vivent dans les operations ;
+        sans reprise, ils seraient perdus au reset + rescan (l'utilisateur devrait
+        alors les re-assigner partition par partition). On les capture avant le
+        reset puis on les reporte sur les partitions nouvellement creees.
+        """
         self._partition_applying = False
         self.partitionApplyingChanged.emit()
         if success:
+            pending = [
+                {
+                    "start": int((op.get("params") or {}).get("start_sector", 0) or 0),
+                    "mountpoint": str((op.get("params") or {}).get("mountpoint", "")),
+                    "fstype": str((op.get("params") or {}).get("fstype", "")),
+                }
+                for op in self._partition_operations
+                if op.get("type") == "create" and (op.get("params") or {}).get("mountpoint")
+            ]
+            before = self._selected_disk_partition_names()
             self.resetPartitionOperations()
             self.refreshDisks()
+            if pending:
+                self._seed_assignments_from_created(before, pending)
         if self._debug:
             print(f"[Engine] Partition apply finished: success={success} ({message})")
         self.partitionApplyFinished.emit(success, message)
+
+    def _selected_disk_partition_names(self) -> set[str]:
+        """Partition names present on the currently selected disk (from the scan)."""
+        disk = str(self._selections.get("disk", "")).rsplit("/", 1)[-1]
+        for d in self._disks_model:
+            if d.get("name") == disk:
+                return {
+                    str(s.get("name", ""))
+                    for s in d.get("segments", [])
+                    if s.get("kind") == "partition" and s.get("name")
+                }
+        return set()
+
+    def _partition_start_sector(self, name: str) -> int:
+        """Start sector of a partition on the selected disk (0 if unknown)."""
+        disk = str(self._selections.get("disk", "")).rsplit("/", 1)[-1]
+        for d in self._disks_model:
+            if d.get("name") == disk:
+                for s in d.get("segments", []):
+                    if s.get("kind") == "partition" and s.get("name") == name:
+                        return int(s.get("startSector", 0) or 0)
+        return 0
+
+    def _seed_assignments_from_created(
+        self, before: set[str], pending: list[dict[str, Any]]
+    ) -> None:
+        """Reporter les points de montage des create-ops sur les partitions creees.
+
+        Apres l'application live, les partitions nouvellement creees reviennent
+        vierges. On associe chaque op de creation (triee par secteur de depart) a
+        la nouvelle partition correspondante et on seme son assignation M1 (point
+        de montage + systeme de fichiers, deja formate). Le point de montage saisi
+        a la creation persiste ainsi sans ressaisie.
+        """
+        new_names = sorted(
+            self._selected_disk_partition_names() - before, key=self._partition_start_sector
+        )
+        pending_sorted = sorted(pending, key=lambda p: p["start"])
+        for name, intent in zip(new_names, pending_sorted, strict=False):
+            entry = self._assignment(name)
+            entry["mountpoint"] = intent["mountpoint"]
+            entry["fstype"] = intent["fstype"]
+            entry["format"] = False  # deja formatee lors de l'application
+        if new_names and pending_sorted:
+            self.partitionPlanChanged.emit()
 
     def _cleanup_apply_thread(self) -> None:
         """Drop the finished apply thread/worker references."""

@@ -395,3 +395,58 @@ class TestOperationsApplicable:
 
         assert results and results[0][0] is False
         assert bridge.partitionApplying is False
+
+
+class TestSeedAssignmentsAfterApply:
+    """Après l'apply live, les points de montage des create-ops sont reportés sur
+    les partitions nouvellement créées (plus de ressaisie manuelle)."""
+
+    @staticmethod
+    def _new_seg(name: str, start: int, fs: str = "ext4") -> dict[str, Any]:
+        size = _sectors(10 * 1024)
+        return {
+            "kind": "partition",
+            "name": name,
+            "startSector": start,
+            "sizeSectors": size,
+            "sizeBytes": size * _SECTOR_SIZE,
+            "fstype": fs,
+            "partType": "linux",
+            "mountpoint": "",
+        }
+
+    def test_created_partition_inherits_op_mountpoint(self, bridge: EngineBridge) -> None:
+        before = bridge._selected_disk_partition_names()
+        assert before == {"sda1", "sda2"}
+        start = _ALIGN + _sectors(512) + _sectors(100 * 1024)
+        pending = [{"start": start, "mountpoint": "/home", "fstype": "ext4"}]
+        after = _mock_disk()
+        after["segments"].append(self._new_seg("sda3", start))
+        bridge._disks_model = [after]  # simule le rescan post-apply
+
+        bridge._seed_assignments_from_created(before, pending)
+
+        assert bridge.partitionMount("sda3") == "/home"
+        assert bridge.partitionFsType("sda3") == "ext4"
+        # Déjà formatée pendant l'apply : ne pas re-formater à l'install.
+        assert bridge.partitionFormat("sda3") is False
+
+    def test_two_created_partitions_map_by_start_order(self, bridge: EngineBridge) -> None:
+        before = bridge._selected_disk_partition_names()
+        s1 = _ALIGN + _sectors(512) + _sectors(100 * 1024)
+        s2 = s1 + _sectors(10 * 1024)
+        # Ordre volontairement inversé : le tri par secteur doit réaligner.
+        pending = [
+            {"start": s2, "mountpoint": "/data", "fstype": "btrfs"},
+            {"start": s1, "mountpoint": "/home", "fstype": "ext4"},
+        ]
+        after = _mock_disk()
+        after["segments"].append(self._new_seg("sda3", s1))
+        after["segments"].append(self._new_seg("sda4", s2))
+        bridge._disks_model = [after]
+
+        bridge._seed_assignments_from_created(before, pending)
+
+        assert bridge.partitionMount("sda3") == "/home"
+        assert bridge.partitionMount("sda4") == "/data"
+        assert bridge.partitionFsType("sda4") == "btrfs"
