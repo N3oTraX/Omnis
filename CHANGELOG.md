@@ -5,6 +5,12 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.7] - 2026-08-15
+
+### Added
+
+- **Longueur minimale de mot de passe configurable** (`advanced.password_min_length`, défaut 8). Permet d'autoriser les mots de passe faibles : GLF-OS la fixe à `1`, donc aucune contrainte de longueur ni critère bloquant (les critères de complexité restaient déjà indicatifs). Sous ce réglage, le critère « longueur » et le rappel « (min N caractères) » disparaissent de l'UI ; un mot de passe non vide et confirmé suffit pour continuer (compte utilisateur comme root). Le seuil est exposé à l'interface via `engine.passwordMinLength`.
+
 ## [0.6.6] - 2026-08-15
 
 Remontée de testeurs sur PC de bureau (faux positif d'alimentation).
