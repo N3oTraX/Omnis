@@ -13,6 +13,8 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -396,6 +398,50 @@ def run_ui_mode(
             engine_process.stop()
 
 
+# Environnement graphique a preserver quand on relance Omnis en root : sans ces
+# variables, la session sudo ne peut pas afficher la fenetre (Wayland/X11/Qt).
+_REEXEC_PRESERVE_ENV = (
+    "WAYLAND_DISPLAY,XDG_RUNTIME_DIR,DISPLAY,XAUTHORITY,DBUS_SESSION_BUS_ADDRESS,"
+    "QT_QPA_PLATFORM,QT_QUICK_BACKEND,XDG_DATA_DIRS,_OMNIS_REEXECED"
+)
+
+
+def _reexec_as_root_if_needed() -> None:
+    """Relance Omnis en root sans mot de passe quand c'est possible (live ISO).
+
+    L'installeur a besoin des droits root (partitionnement, ``nixos-install``).
+    L'autostart de l'ISO passe deja par ``sudo``, mais une relance manuelle
+    (CLI ou icone du menu) tournerait sans droits. Si on n'est pas root et que
+    ``sudo`` sans mot de passe est disponible (le live ISO donne NOPASSWD+SETENV
+    a l'utilisateur), on se re-exec via ``sudo`` en preservant l'environnement
+    graphique -> memes droits que le lancement automatique. Sinon (dev, pas de
+    sudo passwordless) on continue tel quel, avec un avertissement.
+    """
+    if not hasattr(os, "geteuid"):
+        return
+    if (
+        os.geteuid() == 0
+        or os.environ.get("OMNIS_NO_REEXEC")
+        or os.environ.get("_OMNIS_REEXECED")
+        or shutil.which("sudo") is None
+    ):
+        return
+    try:
+        subprocess.run(["sudo", "-n", "true"], check=True, capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        logger.warning(
+            "Omnis n'est pas root et sudo sans mot de passe est indisponible : "
+            "poursuite sans privileges (les etapes d'installation echoueront)."
+        )
+        return
+    # Le live ISO force le rendu logiciel ; on s'aligne sur l'autostart.
+    os.environ.setdefault("QT_QUICK_BACKEND", "software")
+    os.environ["_OMNIS_REEXECED"] = "1"  # garde-fou anti-boucle
+    cmd = ["sudo", "-n", f"--preserve-env={_REEXEC_PRESERVE_ENV}", sys.argv[0], *sys.argv[1:]]
+    logger.info("Relance d'Omnis en root via sudo (droits d'installation).")
+    os.execvp("sudo", cmd)
+
+
 def main() -> int:
     """
     Application entry point.
@@ -409,6 +455,12 @@ def main() -> int:
         Exit code (0 = success)
     """
     args = parse_args()
+
+    # Live ISO : garantir les droits root pour une relance manuelle (CLI ou icone
+    # du menu), a l'identique du lancement automatique. Sans effet en mode moteur
+    # (deja root via le parent) ni pour les sorties purement informatives.
+    if not args.platform_info and not args.engine:
+        _reexec_as_root_if_needed()
 
     # Qt Quick software backend by default: a portable AppImage cannot rely on a
     # working GL/EGL stack on arbitrary hosts (QRhiGles2 fails, "EGL not
