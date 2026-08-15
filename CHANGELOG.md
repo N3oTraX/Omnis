@@ -5,6 +5,17 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.8] - 2026-08-15
+
+### Added
+
+- **Relance en root sans mot de passe (live ISO)** : si l'utilisateur ferme Omnis, le relancer via la CLI ou l'icône du menu le faisait tourner sans les droits d'installation. Omnis se ré-exécute désormais via `sudo` sans mot de passe quand c'est possible (le live ISO donne NOPASSWD à l'utilisateur), en préservant l'environnement graphique : mêmes droits que le lancement automatique. En dehors de l'ISO (dev, pas de sudo passwordless), il continue sans privilèges avec un avertissement. Échappatoire : `OMNIS_NO_REEXEC=1`.
+- **Hostname en majuscules** : la validation (Python + UI) n'acceptait que les minuscules ; elle accepte désormais aussi les lettres majuscules (ex. `GLF-OS`, `MyPC`).
+
+### Fixed
+
+- **Partitionnement manuel : points de montage perdus après l'application** : les points de montage saisis à la création des partitions vivaient dans les opérations et étaient jetés au reset + rescan qui suit l'application (il fallait remonter au disque et les re-assigner partition par partition). Ils sont désormais reportés automatiquement sur les partitions nouvellement créées.
+
 ## [0.6.7] - 2026-08-15
 
 ### Added
