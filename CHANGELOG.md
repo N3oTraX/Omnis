@@ -5,6 +5,15 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.13] - 2026-08-15
+
+### Fixed
+
+- **Partitionnement manuel : les combos n'affichent pas le point de montage choisi, surtout avec 3 partitions dont un swap** : deux causes.
+  1. **Report par distance de secteur trop fragile** : après un « appliquer », le report des montages associait chaque partition créée à l'opération dont le secteur de départ était le plus proche, avec une tolérance fixe de 2048 secteurs. Mais la géométrie réellement écrite par `parted` dérive de celle simulée (arrondis d'alignement cumulés, amplifiés par un swap intercalé) : au-delà de la tolérance, les 2e et 3e partitions perdaient leur montage. Le report se fait désormais par **rang** (intentions et partitions triées par secteur de départ, association 1:1 à la plus proche encore disponible) : robuste à la dérive et dynamique quel que soit le nombre de partitions.
+  2. **Affichage des combos** : les listes déroulantes de point de montage / système de fichiers / case « Formater » ne se resynchronisaient pas après le report (peuplé après leur création). Elles se resynchronisent maintenant sur `partitionPlanChanged` (et à la (re)création du délégué), affichant enfin `/boot`, `swap`, `/`, etc.
+- **Partition swap manuelle non activée sans point de montage explicite** : une partition créée en `fstype=swap` mais sans point de montage (« (aucun) ») n'était ni réaffichée ni activée (`swapon` lit `mountpoint == "swap"`). Le point de montage `swap` est désormais déduit du système de fichiers.
+
 ## [0.6.12] - 2026-08-15
 
 ### Fixed

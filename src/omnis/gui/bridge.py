@@ -2663,15 +2663,28 @@ class EngineBridge(QObject):
         self._partition_applying = False
         self.partitionApplyingChanged.emit()
         if success:
-            pending = [
-                {
-                    "start": int((op.get("params") or {}).get("start_sector", 0) or 0),
-                    "mountpoint": str((op.get("params") or {}).get("mountpoint", "")),
-                    "fstype": str((op.get("params") or {}).get("fstype", "")),
-                }
-                for op in self._partition_operations
-                if op.get("type") == "create" and (op.get("params") or {}).get("mountpoint")
-            ]
+            pending = []
+            for op in self._partition_operations:
+                if op.get("type") != "create":
+                    continue
+                params = op.get("params") or {}
+                fstype = str(params.get("fstype", ""))
+                mountpoint = str(params.get("mountpoint", ""))
+                # Une partition swap doit porter mountpoint="swap" pour etre a la
+                # fois reaffichee (combo M1) et activee par le job (swapon lit
+                # mountpoint == "swap"). On l'infere du fstype si l'utilisateur
+                # a laisse le point de montage vide.
+                if not mountpoint and fstype == "swap":
+                    mountpoint = "swap"
+                if not mountpoint:
+                    continue
+                pending.append(
+                    {
+                        "start": int(params.get("start_sector", 0) or 0),
+                        "mountpoint": mountpoint,
+                        "fstype": fstype,
+                    }
+                )
             self.resetPartitionOperations()
             self.refreshDisks()
             if pending:
@@ -2712,24 +2725,37 @@ class EngineBridge(QObject):
         formate). Le point de montage saisi a la creation persiste ainsi sans
         ressaisie.
 
-        Le matching se fait par secteur de depart et NON par difference de noms :
-        un delete+create reutilise les memes noms de partition (vda1/vda2), donc
-        un diff par nom serait vide et perdrait tous les montages.
+        Le matching se fait par RANG (ordre des secteurs de depart) et NON par
+        distance absolue avec tolerance : parted ecrit les partitions dans le
+        meme ordre que les operations, mais la geometrie reellement ecrite
+        derive de celle simulee (arrondis d'alignement qui s'accumulent, surtout
+        avec un swap intercale). Un seuil de distance fixe perdait alors les 2e
+        et 3e partitions. On associe donc chaque intention (triee par secteur) a
+        la partition libre la plus proche encore disponible : robuste a la derive
+        et dynamique quel que soit le nombre de partitions.
         """
-        parts = [
-            (name, self._partition_start_sector(name))
-            for name in self._selected_disk_partition_names()
-        ]
+        parts = sorted(
+            (
+                (name, self._partition_start_sector(name))
+                for name in self._selected_disk_partition_names()
+            ),
+            key=lambda p: (p[1], p[0]),
+        )
         seeded = False
-        for intent in pending:
-            target = min(parts, key=lambda p: abs(p[1] - intent["start"]), default=None)
-            # parted aligne sur 2048 secteurs (1 MiB) : tolerance de securite.
-            if target is not None and abs(target[1] - intent["start"]) <= 2048:
-                entry = self._assignment(target[0])
-                entry["mountpoint"] = intent["mountpoint"]
-                entry["fstype"] = intent["fstype"]
-                entry["format"] = False  # deja formatee lors de l'application
-                seeded = True
+        used: set[str] = set()
+        for intent in sorted(pending, key=lambda i: i["start"]):
+            candidates = [
+                (abs(start - intent["start"]), name) for name, start in parts if name not in used
+            ]
+            if not candidates:
+                break
+            _, target = min(candidates)
+            used.add(target)
+            entry = self._assignment(target)
+            entry["mountpoint"] = intent["mountpoint"]
+            entry["fstype"] = intent["fstype"]
+            entry["format"] = False  # deja formatee lors de l'application
+            seeded = True
         if seeded:
             self.partitionPlanChanged.emit()
             # manualPlanValid / manualPlanError sont notifies par
@@ -2737,10 +2763,6 @@ class EngineBridge(QObject):
             # emission, l'UI garde le "No partition is mounted at /" calcule
             # avant le seeding et laisse "Suivant" desactive.
             self.partitionOperationsChanged.emit()
-            # Les combos M1 lisent partitionMount() a leur creation (avant le
-            # seeding, lors du refreshDisks) : re-notifier disksChanged force leur
-            # recreation pour AFFICHER les montages fraichement poses.
-            self.disksChanged.emit()
 
     def _cleanup_apply_thread(self) -> None:
         """Drop the finished apply thread/worker references."""

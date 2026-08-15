@@ -467,6 +467,78 @@ class TestSeedAssignmentsAfterApply:
         assert bridge.partitionMount("sda1") == "/boot"
         assert bridge.partitionMount("sda2") == "/"
 
+    def test_drifted_geometry_still_seeds_all_by_rank(self, bridge: EngineBridge) -> None:
+        """La geometrie reellement ecrite par parted derive de celle simulee
+        (arrondis d'alignement cumules, amplifies par un swap intercale). Le
+        matching par RANG doit quand meme reporter les 3 montages, la ou un seuil
+        de distance fixe perdait les 2e/3e partitions. Regression du bug
+        '3 partitions dont un swap : les combos n'affichent plus le montage'."""
+        s1 = _ALIGN
+        s2 = s1 + _sectors(1024)
+        s3 = s2 + _sectors(32 * 1024)
+        pending = [
+            {"start": s1, "mountpoint": "/boot", "fstype": "vfat"},
+            {"start": s2, "mountpoint": "swap", "fstype": "swap"},
+            {"start": s3, "mountpoint": "/", "fstype": "ext4"},
+        ]
+        drift = _sectors(17)  # derive largement au-dela de l'ancienne tolerance
+        after = {
+            "name": "sda",
+            "segments": [
+                self._new_seg("sda1", s1, "vfat"),
+                self._new_seg("sda2", s2 + drift, "swap"),
+                self._new_seg("sda3", s3 + drift, "ext4"),
+            ],
+        }
+        bridge._disks_model = [after]
+
+        bridge._seed_assignments_from_created(pending)
+
+        assert bridge.partitionMount("sda1") == "/boot"
+        assert bridge.partitionMount("sda2") == "swap"
+        assert bridge.partitionMount("sda3") == "/"
+
+    def test_swap_op_without_mountpoint_seeded_as_swap(
+        self, bridge: EngineBridge, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Un swap cree avec fstype=swap mais sans point de montage explicite doit
+        etre reporte en mount='swap' : sinon swapon ne l'active pas a l'install."""
+        s1, s2, s3 = _ALIGN, _ALIGN + _sectors(1024), _ALIGN + _sectors(33 * 1024)
+        bridge._partition_operations = [
+            {
+                "type": "create",
+                "target": f"free:{s1}",
+                "params": {"start_sector": s1, "fstype": "vfat", "mountpoint": "/boot"},
+            },
+            {
+                "type": "create",
+                "target": f"free:{s2}",
+                "params": {"start_sector": s2, "fstype": "swap", "mountpoint": ""},
+            },
+            {
+                "type": "create",
+                "target": f"free:{s3}",
+                "params": {"start_sector": s3, "fstype": "ext4", "mountpoint": "/"},
+            },
+        ]
+        after = {
+            "name": "sda",
+            "segments": [
+                self._new_seg("sda1", s1, "vfat"),
+                self._new_seg("sda2", s2, "swap"),
+                self._new_seg("sda3", s3, "ext4"),
+            ],
+        }
+        monkeypatch.setattr(
+            bridge, "refreshDisks", lambda: setattr(bridge, "_disks_model", [after])
+        )
+
+        bridge._on_partition_apply_finished(True, "ok")
+
+        assert bridge.partitionMount("sda2") == "swap"
+        assert bridge.partitionMount("sda1") == "/boot"
+        assert bridge.partitionMount("sda3") == "/"
+
     def test_seeding_notifies_plan_validity(self, bridge: EngineBridge) -> None:
         """Le seeding doit émettre partitionOperationsChanged : c'est lui (et non
         partitionPlanChanged) qui notifie manualPlanValid/manualPlanError. Sans

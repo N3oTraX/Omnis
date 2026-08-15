@@ -832,15 +832,23 @@ Item {
                                                 Layout.preferredWidth: 130
                                                 property string pname: modelData.name
                                                 model: ["—", "/", "/boot", "/boot/efi", "/home", "swap"]
-                                                Component.onCompleted: {
+                                                function syncFromEngine() {
                                                     var mp = engine.partitionMount(pname)
                                                     var idx = mp === "" ? 0 : model.indexOf(mp)
                                                     currentIndex = idx < 0 ? 0 : idx
                                                 }
+                                                Component.onCompleted: syncFromEngine()
+                                                // Le report des montages (apres "appliquer") peuple les
+                                                // assignations APRES la creation de la combo : se
+                                                // resynchroniser sur le signal de plan pour AFFICHER le
+                                                // point de montage retenu (sinon la combo reste sur "—").
+                                                Connections {
+                                                    target: engine
+                                                    function onPartitionPlanChanged() { mpCombo.syncFromEngine() }
+                                                }
                                                 // Utiliser l'index ACTIVE (parametre du signal) et non
                                                 // currentIndex : ce dernier peut etre decale selon
-                                                // l'interaction/le rendu, d'ou des assignations perdues
-                                                // (ex. le "/" d'une seconde partition non enregistre).
+                                                // l'interaction/le rendu, d'ou des assignations perdues.
                                                 onActivated: function(index) {
                                                     engine.setPartitionMount(
                                                         pname, index === 0 ? "" : mpCombo.model[index])
@@ -853,6 +861,12 @@ Item {
                                                 text: qsTr("Format")
                                                 property string pname: modelData.name
                                                 Component.onCompleted: checked = engine.partitionFormat(pname)
+                                                Connections {
+                                                    target: engine
+                                                    function onPartitionPlanChanged() {
+                                                        fmtCheck.checked = engine.partitionFormat(fmtCheck.pname)
+                                                    }
+                                                }
                                                 onToggled: engine.setPartitionFormat(pname, checked)
                                             }
 
@@ -864,12 +878,19 @@ Item {
                                                 opacity: enabled ? 1.0 : 0.4
                                                 property string pname: modelData.name
                                                 model: ["ext4", "btrfs", "vfat", "swap"]
-                                                Component.onCompleted: {
+                                                function syncFromEngine() {
                                                     var fs = engine.partitionFsType(pname) || modelData.fstype || "ext4"
                                                     var idx = model.indexOf(fs)
                                                     currentIndex = idx < 0 ? 0 : idx
+                                                }
+                                                Component.onCompleted: {
+                                                    syncFromEngine()
                                                     if (engine.partitionFsType(pname) === "")
                                                         engine.setPartitionFsType(pname, model[currentIndex])
+                                                }
+                                                Connections {
+                                                    target: engine
+                                                    function onPartitionPlanChanged() { fsAssignCombo.syncFromEngine() }
                                                 }
                                                 onActivated: function(index) {
                                                     engine.setPartitionFsType(pname, fsAssignCombo.model[index])

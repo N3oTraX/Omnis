@@ -1934,7 +1934,8 @@ class PartitionJob(BaseJob):
             cmd = ["mkfs.ext4", "-F", root_target]
         elif filesystem == FilesystemType.BTRFS.value:
             # btrfs is created "flat" (single subvolume).
-            # TODO(v0.5): btrfs subvolumes (@/@home/@nix, compress=zstd, noatime)
+            # TODO(v0.7.0): btrfs subvolumes (@/@home/@nix, compress=zstd, noatime)
+            # en auto, puis gestion des sous-volumes en manuel.
             cmd = ["mkfs.btrfs", "-f", root_target]
         else:
             return JobResult.fail(f"Unsupported filesystem: {filesystem}", error_code=41)
