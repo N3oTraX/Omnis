@@ -5,6 +5,12 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.10] - 2026-08-15
+
+### Fixed
+
+- **Partitionnement manuel (« Attribuer les partitions existantes ») : point de montage `/` non pris en compte** : les listes déroulantes de point de montage et de système de fichiers lisaient `currentIndex` dans `onActivated` au lieu de l'index activé passé en paramètre du signal. Selon l'interaction et le rendu (le symptôme apparaissait sans partition swap, mais pas avec), l'assignation pouvait être enregistrée à vide, d'où un `/` jamais monté (« No partition is mounted at / ») et une installation bloquée. Les combos utilisent désormais la forme fiable `onActivated: function(index)`.
+
 ## [0.6.9] - 2026-08-15
 
 ### Fixed
