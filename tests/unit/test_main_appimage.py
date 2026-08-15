@@ -34,6 +34,9 @@ def test_appimage_forces_no_fork(monkeypatch, tmp_path):
     monkeypatch.setenv("APPIMAGE", "/tmp/omnis.AppImage")
     monkeypatch.setattr(main, "find_config_file", lambda *_a: cfg)
     monkeypatch.setattr(main.sys, "argv", ["omnis"])
+    # Neutraliser l'auto-elevation : avec un sudo NOPASSWD (runners CI), main()
+    # se re-exec via execvp et remplacerait le process pytest (exit 1 sans trace).
+    monkeypatch.setattr(main, "_reexec_as_root_if_needed", lambda: None)
 
     captured: dict = {}
     monkeypatch.setattr(main, "run_ui_mode", lambda **kw: (captured.update(kw), 0)[1])
@@ -49,6 +52,8 @@ def test_no_appimage_keeps_fork(monkeypatch, tmp_path):
     monkeypatch.delenv("APPDIR", raising=False)
     monkeypatch.setattr(main, "find_config_file", lambda *_a: cfg)
     monkeypatch.setattr(main.sys, "argv", ["omnis"])
+    # Neutraliser l'auto-elevation (voir test_appimage_forces_no_fork).
+    monkeypatch.setattr(main, "_reexec_as_root_if_needed", lambda: None)
 
     captured: dict = {}
     monkeypatch.setattr(main, "run_ui_mode", lambda **kw: (captured.update(kw), 0)[1])
