@@ -5,6 +5,14 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.6] - 2026-08-15
+
+Remontée de testeurs sur PC de bureau (faux positif d'alimentation).
+
+### Changed
+
+- **Prérequis « Source d'alimentation » désactivé pour GLF-OS** : sur un PC de bureau, une manette Xbox (ou une souris/clavier/casque sans-fil) expose une batterie de périphérique (`/sys/class/power_supply/xpad0`, `scope=Device`) que le check prenait pour une batterie système à 0 %, d'où un FAIL bloquant « Battery too low ». Ce prérequis, non vital et pensé pour les portables, est désactivé dans la config GLF-OS (`power.enabled: false`) : il n'apparaît plus dans le panneau. Contournement immédiat sur une ISO existante : débrancher le périphérique fautif puis « Revérifier ».
+
 ## [0.6.5] - 2026-08-14
 
 Correctifs remontés par des testeurs de l'ISO testing (partitionnement btrfs + swap).
