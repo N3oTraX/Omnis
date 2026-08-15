@@ -466,3 +466,20 @@ class TestSeedAssignmentsAfterApply:
 
         assert bridge.partitionMount("sda1") == "/boot"
         assert bridge.partitionMount("sda2") == "/"
+
+    def test_seeding_notifies_plan_validity(self, bridge: EngineBridge) -> None:
+        """Le seeding doit émettre partitionOperationsChanged : c'est lui (et non
+        partitionPlanChanged) qui notifie manualPlanValid/manualPlanError. Sans
+        cette émission, l'UI garde 'No partition is mounted at /' et 'Suivant'
+        désactivé alors que les montages sont bien posés."""
+        after = _mock_disk()
+        bridge._disks_model = [after]
+        esp_start = after["segments"][0]["startSector"]
+        fired: list[bool] = []
+        bridge.partitionOperationsChanged.connect(lambda: fired.append(True))
+
+        bridge._seed_assignments_from_created(
+            [{"start": esp_start, "mountpoint": "/", "fstype": "ext4"}]
+        )
+
+        assert fired, "partitionOperationsChanged doit être émis pour rafraîchir la validité"

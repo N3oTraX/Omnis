@@ -2732,6 +2732,15 @@ class EngineBridge(QObject):
                 seeded = True
         if seeded:
             self.partitionPlanChanged.emit()
+            # manualPlanValid / manualPlanError sont notifies par
+            # partitionOperationsChanged (pas partitionPlanChanged) : sans cette
+            # emission, l'UI garde le "No partition is mounted at /" calcule
+            # avant le seeding et laisse "Suivant" desactive.
+            self.partitionOperationsChanged.emit()
+            # Les combos M1 lisent partitionMount() a leur creation (avant le
+            # seeding, lors du refreshDisks) : re-notifier disksChanged force leur
+            # recreation pour AFFICHER les montages fraichement poses.
+            self.disksChanged.emit()
 
     def _cleanup_apply_thread(self) -> None:
         """Drop the finished apply thread/worker references."""
