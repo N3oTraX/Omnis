@@ -837,8 +837,14 @@ Item {
                                                     var idx = mp === "" ? 0 : model.indexOf(mp)
                                                     currentIndex = idx < 0 ? 0 : idx
                                                 }
-                                                onActivated: engine.setPartitionMount(
-                                                    pname, currentIndex === 0 ? "" : model[currentIndex])
+                                                // Utiliser l'index ACTIVE (parametre du signal) et non
+                                                // currentIndex : ce dernier peut etre decale selon
+                                                // l'interaction/le rendu, d'ou des assignations perdues
+                                                // (ex. le "/" d'une seconde partition non enregistre).
+                                                onActivated: function(index) {
+                                                    engine.setPartitionMount(
+                                                        pname, index === 0 ? "" : mpCombo.model[index])
+                                                }
                                             }
 
                                             // Format toggle
@@ -852,6 +858,7 @@ Item {
 
                                             // Target filesystem (only relevant when formatting)
                                             PartCombo {
+                                                id: fsAssignCombo
                                                 Layout.preferredWidth: 100
                                                 enabled: fmtCheck.checked
                                                 opacity: enabled ? 1.0 : 0.4
@@ -864,7 +871,9 @@ Item {
                                                     if (engine.partitionFsType(pname) === "")
                                                         engine.setPartitionFsType(pname, model[currentIndex])
                                                 }
-                                                onActivated: engine.setPartitionFsType(pname, model[currentIndex])
+                                                onActivated: function(index) {
+                                                    engine.setPartitionFsType(pname, fsAssignCombo.model[index])
+                                                }
                                             }
 
                                             Item { Layout.fillWidth: true }
