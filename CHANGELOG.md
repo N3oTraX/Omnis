@@ -5,6 +5,12 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.11] - 2026-08-15
+
+### Fixed
+
+- **Partitionnement manuel (création) : points de montage perdus quand le disque a déjà des partitions** : après un « appliquer », le report des points de montage saisis à la création (introduit en 0.6.8) associait les partitions créées en calculant la différence de **noms** avant/après le rescan. Or, sur un disque déjà partitionné, l'application supprime puis recrée les partitions avec les **mêmes noms** (`vda1`/`vda2`) : la différence était vide et tous les montages étaient perdus (« No partition is mounted at / », installation bloquée). Le report se fait désormais par **secteur de départ** de chaque opération de création (respecté à l'identique par `parted`), robuste au cas delete+recreate.
+
 ## [0.6.10] - 2026-08-15
 
 ### Fixed
