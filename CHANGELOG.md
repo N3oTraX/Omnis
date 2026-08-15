@@ -5,6 +5,12 @@ Toutes les modifications notables du projet Omnis sont documentées dans ce fich
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.6.12] - 2026-08-15
+
+### Fixed
+
+- **Partitionnement manuel : plan resté invalide (« No partition is mounted at / ») après un « appliquer » réussi** : le report des points de montage après application (0.6.8/0.6.11) posait bien les assignations, mais émettait `partitionPlanChanged`. Or `manualPlanValid` et `manualPlanError` (qui pilotent le bouton « Suivant » et le message d'erreur dans l'UI) sont notifiés par `partitionOperationsChanged`, jamais rafraîchis après le report. L'interface conservait donc l'état « pas de racine » calculé avant le report, alors que les montages étaient posés. Le report émet désormais aussi `partitionOperationsChanged`. Diagnostiqué en direct (SSH + reproduction headless du bridge, montrant des données correctes mais des bindings QML périmés).
+
 ## [0.6.11] - 2026-08-15
 
 ### Fixed
