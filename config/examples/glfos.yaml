@@ -78,9 +78,9 @@ branding:
   # Liens externes (affichés sur l'écran d'accueil)
   links:
     # Site web principal (affiché en bas à droite de l'écran Welcome)
-    website: "https://www.gaminglinux.fr/glf-os/"
+    website: "https://glfos.org/"
     # Texte affiché pour le lien (si vide, utilise l'URL)
-    website_label: "gaminglinux.fr"
+    website_label: "https://glfos.org/"
     # Dépôt Git du projet
     git: "https://github.com/Gaming-Linux-FR/GLF-OS"
     # Documentation
