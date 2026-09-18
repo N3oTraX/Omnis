@@ -1,8 +1,11 @@
-"""GPU classification et snippet configuration.nix (porte du module Calamares GLF)."""
+"""GPU inventory and configuration.nix snippet (kept in sync with the GLF Calamares module)."""
 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
 
 CFG_NVIDIA = """  glf.nvidia_config = {{
     enable = true;
@@ -11,6 +14,19 @@ CFG_NVIDIA = """  glf.nvidia_config = {{
 
 """
 
+PCI_DEVICES_DIR = Path("/sys/bus/pci/devices")
+DMI_CHASSIS_TYPE = Path("/sys/class/dmi/id/chassis_type")
+
+# VGA, 3D and "other display" controllers. Hybrid laptops often expose the AMD
+# dGPU as 0x0380, which a "VGA"/"3D controller" text match never sees.
+PCI_DISPLAY_CLASSES = ("0x0300", "0x0302", "0x0380")
+PCI_GPU_VENDORS = {"0x10de": "nvidia", "0x1002": "amd", "0x8086": "intel"}
+
+# SMBIOS portable chassis types.
+LAPTOP_CHASSIS_TYPES = frozenset({"8", "9", "10", "11", "14", "30", "31", "32"})
+
+# Name hints only settle what sysfs cannot tell: an AMD APU from an AMD card, and
+# the driver of a GPU the live kernel did not bind.
 AMD_LEGACY_RADEON_HINTS = (
     "hd 2",
     "hd 3",
@@ -48,165 +64,186 @@ AMD_IGPU_HINTS = (
     "picasso",
     "raven ridge",
 )
-INTEL_I915_DISCRETE_HINTS = (
-    "dg2",
-    "a380",
-    "a580",
-    "a750",
-    "a770",
-    "a310",
-    "a350m",
-    "a370m",
-    "a550m",
-    "a570m",
-    "a730m",
-    "a770m",
-)
-INTEL_XE_DISCRETE_HINTS = ("battlemage", "bmg", "b580", "b770")
-INTEL_XE_INTEGRATED_HINTS = (
-    "lunar lake",
-    "lnl",
-    "panther lake",
-    "ptl",
-    "arrow lake",
-    "arl",
-)
-VIRTUAL_GPU_HINTS = (
-    "qxl",
-    "virtio",
-    "vmware",
-    "vmwgfx",
-    "cirrus",
-    "bochs",
-    "innotek",
-    "virtualbox",
-)
+# Intel families driven by xe, for a GPU the live kernel did not bind.
+INTEL_XE_HINTS = ("battlemage", "bmg", "b580", "b770", "lunar lake", "lnl", "panther lake", "ptl")
 
-_VGA_KEYWORDS = (" VGA compatible controller: ", " 3D controller: ")
+_PRIME_VARS = (("nvidiaBusId", "nvidia"), ("intelBusId", "intel"), ("amdgpuBusId", "amd"))
 
 
-def parse_vga_devices(lspci_output: str) -> list[tuple[str, str]]:
-    devices: list[tuple[str, str]] = []
-    for line in lspci_output.strip().splitlines():
-        for keyword in _VGA_KEYWORDS:
-            if keyword in line:
-                address, description = line.split(keyword, 1)
-                pci_address = convert_to_pci_format(address)
-                if pci_address:
-                    devices.append((pci_address, description))
-                break
-    return devices
+@dataclass(frozen=True)
+class GpuDevice:
+    """A display controller as seen in /sys/bus/pci/devices."""
+
+    slot: str
+    vendor_id: str
+    boot_vga: bool = False
+    bound_driver: str = ""
+    desc: str = ""
+
+    @property
+    def bus_id(self) -> str:
+        return convert_to_pci_format(self.slot)
+
+    @property
+    def label(self) -> str:
+        return self.desc or self.slot
+
+
+@dataclass(frozen=True)
+class ClassifiedGpu:
+    device: GpuDevice
+    vendor: str
+    kind: str
+    driver: str
 
 
 def convert_to_pci_format(address: str) -> str:
     devid = re.split(r"[:.]", address)
     if len(devid) < 3:
         return ""
-    bus, device, function = devid[-3], devid[-2], devid[-1]
     try:
-        return f"PCI:{int(bus, 16)}:{int(device, 16)}:{int(function)}"
+        return f"PCI:{int(devid[-3], 16)}:{int(devid[-2], 16)}:{int(devid[-1])}"
     except ValueError:
         return ""
 
 
-def has_nvidia_device(devices: list[tuple[str, str]]) -> bool:
-    return any("nvidia" in desc.lower() for _addr, desc in devices)
+def _read(path: Path) -> str:
+    try:
+        return path.read_text().strip()
+    except OSError:
+        return ""
 
 
-def has_nvidia_laptop(devices: list[tuple[str, str]]) -> bool:
-    pattern = re.compile(r"\b\d{3}M\b")
-    for _addr, description in devices:
-        low = description.lower()
-        if "nvidia" not in low:
+def read_chassis_type(path: Path = DMI_CHASSIS_TYPE) -> str:
+    return _read(path)
+
+
+def parse_lspci_descriptions(lspci_output: str) -> dict[str, str]:
+    """Map a ``lspci -D`` slot ("0000:01:00.0") to its pci.ids name."""
+    descriptions: dict[str, str] = {}
+    for line in lspci_output.splitlines():
+        slot, _, rest = line.partition(" ")
+        description = rest.partition(": ")[2].strip()
+        if description:
+            descriptions[slot] = description
+    return descriptions
+
+
+def read_gpu_devices(
+    pci_root: Path = PCI_DEVICES_DIR,
+    descriptions: Mapping[str, str] | None = None,
+) -> list[GpuDevice]:
+    """Enumerate display controllers from sysfs: needs no bound driver and no pci.ids."""
+    names = descriptions or {}
+    try:
+        slots = sorted(entry.name for entry in pci_root.iterdir())
+    except OSError:
+        return []
+    devices: list[GpuDevice] = []
+    for slot in slots:
+        path = pci_root / slot
+        if not _read(path / "class").startswith(PCI_DISPLAY_CLASSES):
             continue
-        if any(k in low for k in ("laptop", "mobile")) or pattern.search(description):
+        driver = path / "driver"
+        devices.append(
+            GpuDevice(
+                slot=slot,
+                vendor_id=_read(path / "vendor"),
+                boot_vga=_read(path / "boot_vga") == "1",
+                bound_driver=driver.resolve().name if driver.exists() else "",
+                desc=names.get(slot, ""),
+            )
+        )
+    return devices
+
+
+def classify_gpu(device: GpuDevice) -> ClassifiedGpu | None:
+    """Vendor, kind and KMS driver of a GPU, or None for a virtual or unknown one."""
+    vendor = PCI_GPU_VENDORS.get(device.vendor_id)
+    bound = device.bound_driver
+    d = device.desc.lower()
+
+    if vendor == "nvidia":
+        return ClassifiedGpu(device, vendor, "discrete", "nvidia")
+
+    if vendor == "amd":
+        if bound in ("amdgpu", "radeon"):
+            driver = bound
+        elif any(k in d for k in AMD_LEGACY_RADEON_HINTS):
+            driver = "radeon"
+        else:
+            driver = "amdgpu"
+        integrated = (
+            driver == "amdgpu"
+            and not any(k in d for k in AMD_DISCRETE_HINTS)
+            and any(k in d for k in AMD_IGPU_HINTS)
+        )
+        return ClassifiedGpu(device, vendor, "integrated" if integrated else "discrete", driver)
+
+    if vendor == "intel":
+        if bound in ("i915", "xe"):
+            driver = bound
+        elif any(k in d for k in INTEL_XE_HINTS):
+            driver = "xe"
+        else:
+            driver = "i915"
+        # The Intel iGPU always sits at 00:02.0 (same rule as switcheroo-control).
+        kind = "integrated" if device.slot.endswith(":00:02.0") else "discrete"
+        return ClassifiedGpu(device, vendor, kind, driver)
+
+    return None
+
+
+def classify_gpus(devices: list[GpuDevice]) -> list[ClassifiedGpu]:
+    return [gpu for gpu in map(classify_gpu, devices) if gpu is not None]
+
+
+def has_nvidia_laptop(classified: list[ClassifiedGpu], chassis_type: str = "") -> bool:
+    nvidia = [gpu for gpu in classified if gpu.vendor == "nvidia"]
+    if not nvidia:
+        return False
+    if chassis_type in LAPTOP_CHASSIS_TYPES:
+        return True
+    # Some firmwares report no usable chassis type: fall back on the name.
+    pattern = re.compile(r"\b\d{3}M\b")
+    for gpu in nvidia:
+        low = gpu.device.desc.lower()
+        if "laptop" in low or "mobile" in low or pattern.search(gpu.device.desc):
             return True
     return False
 
 
-def generate_prime_entries(devices: list[tuple[str, str]]) -> str:
-    lines = ""
-    for pci_address, description in devices:
-        low = description.lower()
-        if "intel" in low:
-            var_name = "intelBusId"
-        elif "nvidia" in low:
-            var_name = "nvidiaBusId"
-        elif "amd" in low:
-            var_name = "amdgpuBusId"
-        else:
+def generate_prime_entries(classified: list[ClassifiedGpu]) -> str:
+    """One bus ID per vendor: a repeated attribute would not even parse."""
+    out = ""
+    for var_name, vendor in _PRIME_VARS:
+        candidates = [gpu for gpu in classified if gpu.vendor == vendor]
+        if vendor != "nvidia":
+            # PRIME pairs the NVIDIA GPU with the integrated one.
+            candidates = [gpu for gpu in candidates if gpu.kind == "integrated"] or candidates
+        if not candidates:
             continue
-        lines += f"    # {description}\n"
-        lines += f'    {var_name} = "{pci_address}";\n'
-    return lines
+        gpu = candidates[0]
+        out += f"    # {gpu.device.label}\n"
+        out += f'    {var_name} = "{gpu.device.bus_id}";\n'
+    return out
 
 
-def classify_gpu(description: str) -> dict[str, str | None]:
-    d = description.lower()
-    if any(k in d for k in VIRTUAL_GPU_HINTS):
-        return {"vendor": "virtual", "kind": "virtual", "driver": None}
-    if "nvidia" in d:
-        return {"vendor": "nvidia", "kind": "discrete", "driver": "nvidia"}
-    if "amd" in d or "ati " in d or "advanced micro devices" in d:
-        if any(k in d for k in AMD_LEGACY_RADEON_HINTS):
-            return {"vendor": "amd", "kind": "discrete", "driver": "radeon"}
-        if any(k in d for k in AMD_DISCRETE_HINTS):
-            return {"vendor": "amd", "kind": "discrete", "driver": "amdgpu"}
-        if any(k in d for k in AMD_IGPU_HINTS):
-            return {"vendor": "amd", "kind": "integrated", "driver": "amdgpu"}
-        return {"vendor": "amd", "kind": "discrete", "driver": "amdgpu"}
-    if "intel" in d:
-        if any(k in d for k in INTEL_XE_INTEGRATED_HINTS):
-            return {"vendor": "intel", "kind": "integrated", "driver": "xe"}
-        if any(k in d for k in INTEL_XE_DISCRETE_HINTS):
-            return {"vendor": "intel", "kind": "discrete", "driver": "xe"}
-        if any(k in d for k in INTEL_I915_DISCRETE_HINTS):
-            return {"vendor": "intel", "kind": "discrete", "driver": "i915"}
-        return {"vendor": "intel", "kind": "integrated", "driver": "i915"}
-    return {"vendor": "other", "kind": "unknown", "driver": None}
+def emit_gpu_config(classified: list[ClassifiedGpu]) -> str:
+    """
+    glf.{amdgpu,intel}_config switches plus the glf.gpu.devices inventory.
 
-
-def classify_gpus(devices: list[tuple[str, str]]) -> list[dict[str, str | None]]:
-    return [
-        {"addr": pci_address, "desc": description.strip(), **classify_gpu(description)}
-        for pci_address, description in devices
-    ]
-
-
-def pick_primary_gpu(
-    classified: list[dict[str, str | None]],
-) -> dict[str, str | None] | None:
-    discrete = [g for g in classified if g["kind"] == "discrete"]
-    if discrete:
-        prio = {"nvidia": 0, "amd": 1, "intel": 2}
-        return sorted(discrete, key=lambda g: prio.get(str(g["vendor"]), 99))[0]
-    integrated = [g for g in classified if g["kind"] == "integrated"]
-    if integrated:
-        prio = {"amd": 0, "intel": 1}
-        return sorted(integrated, key=lambda g: prio.get(str(g["vendor"]), 99))[0]
-    return None
-
-
-def emit_gpu_config(
-    classified: list[dict[str, str | None]],
-    primary: dict[str, str | None] | None,
-) -> str:
-    if primary is None:
+    The switches only select kernel drivers. Which GPU runs compute workloads is
+    derived from the inventory by glf-os (modules/default/gpu.nix).
+    """
+    if not classified:
         return ""
 
-    lines: list[str] = []
-    seen: set[str] = set()
-    for gpu in classified:
-        desc = str(gpu["desc"])
-        if desc in seen:
-            continue
-        seen.add(desc)
-        lines.append(f"  # Detected GPU: {desc} (driver: {gpu['driver'] or 'none'})")
+    lines = [f"  # Detected GPU: {gpu.device.label} (driver: {gpu.driver})" for gpu in classified]
 
-    enable_amdgpu = any(g["vendor"] == "amd" and g["driver"] == "amdgpu" for g in classified)
-    enable_amdgpu_legacy = any(g["vendor"] == "amd" and g["driver"] == "radeon" for g in classified)
-    enable_intel = any(g["vendor"] == "intel" for g in classified)
-    intel_driver = next((g["driver"] for g in classified if g["vendor"] == "intel"), "i915")
+    enable_amdgpu = any(gpu.driver == "amdgpu" for gpu in classified)
+    enable_amdgpu_legacy = any(gpu.driver == "radeon" for gpu in classified)
+    intel_driver = next((gpu.driver for gpu in classified if gpu.vendor == "intel"), None)
 
     if enable_amdgpu or enable_amdgpu_legacy:
         lines.append("  glf.amdgpu_config.enable = true;")
@@ -215,25 +252,31 @@ def emit_gpu_config(
     else:
         lines.append("  glf.amdgpu_config.enable = false;")
 
-    if enable_intel:
+    if intel_driver is not None:
         lines.append("  glf.intel_config.enable = true;")
         if intel_driver == "xe":
             lines.append('  glf.intel_config.driver = "xe";')
 
+    lines.append("  glf.gpu.devices = [")
+    for gpu in classified:
+        lines.append(
+            f'    {{ vendor = "{gpu.vendor}"; kind = "{gpu.kind}"; driver = "{gpu.driver}"; '
+            f'busId = "{gpu.device.bus_id}"; bootVga = {str(gpu.device.boot_vga).lower()}; }}'
+        )
+    lines.append("  ];")
+
     return "\n".join(lines) + "\n\n"
 
 
-def render(lspci_output: str) -> str:
-    devices = parse_vga_devices(lspci_output)
-    if not devices:
-        return ""
+def render(devices: list[GpuDevice], chassis_type: str = "") -> str:
     classified = classify_gpus(devices)
-    primary = pick_primary_gpu(classified)
+    if not classified:
+        return ""
     cfg = ""
-    if has_nvidia_device(devices):
+    if any(gpu.vendor == "nvidia" for gpu in classified):
         cfg += CFG_NVIDIA.format(
-            has_laptop=str(has_nvidia_laptop(devices)).lower(),
-            prime_busids=generate_prime_entries(devices),
+            has_laptop=str(has_nvidia_laptop(classified, chassis_type)).lower(),
+            prime_busids=generate_prime_entries(classified),
         )
-    cfg += emit_gpu_config(classified, primary)
+    cfg += emit_gpu_config(classified)
     return cfg

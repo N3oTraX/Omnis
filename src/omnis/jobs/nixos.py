@@ -623,14 +623,17 @@ class NixosJob(BaseJob):
 
     @staticmethod
     def _gpu_config() -> str:
-        """Snippet GPU configuration.nix via lspci (vide si lspci absent)."""
+        """GPU snippet for configuration.nix, read from sysfs (lspci only adds names)."""
+        descriptions: dict[str, str] = {}
         try:
-            proc = subprocess.run(["lspci"], capture_output=True, text=True, check=False)
+            proc = subprocess.run(["lspci", "-D"], capture_output=True, text=True, check=False)
         except (FileNotFoundError, OSError) as exc:
-            logger.warning("lspci unavailable, skipping GPU config: %s", exc)
-            return ""
-        output = proc.stdout if isinstance(proc.stdout, str) else ""
-        return gpu_config.render(output)
+            logger.warning("lspci unavailable, GPU names will be missing: %s", exc)
+        else:
+            output = proc.stdout if isinstance(proc.stdout, str) else ""
+            descriptions = gpu_config.parse_lspci_descriptions(output)
+        devices = gpu_config.read_gpu_devices(descriptions=descriptions)
+        return gpu_config.render(devices, gpu_config.read_chassis_type())
 
     def _luks_config(self, _context: JobContext) -> str:
         """

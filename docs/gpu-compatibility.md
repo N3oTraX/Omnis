@@ -249,6 +249,22 @@ The GPU detector uses the Linux DRM (Direct Rendering Manager) subsystem at `/sy
    - AMD: RX series are dGPU, Vega/Radeon M series are iGPU
    - Intel: Arc A/B series are dGPU, HD/UHD/Iris are iGPU
 
+### Installed configuration
+
+The `nixos` job writes the GPU settings of the installed system from a separate
+inventory (`omnis.jobs.gpu_config`). It reads `/sys/bus/pci/devices` rather than
+`/sys/class/drm`, so a GPU with no bound driver (NVIDIA on the live session) is
+still listed:
+
+- display controllers are PCI classes `0x0300`, `0x0302` and `0x0380`;
+- the KMS driver (`amdgpu`/`radeon`, `i915`/`xe`) is the one the live kernel bound;
+- an Intel GPU is integrated when it sits at `00:02.0`, an AMD one when its name
+  matches a known APU;
+- `boot_vga` records which GPU drives the display.
+
+The result is written as `glf.gpu.devices`. GLF OS derives from it which GPUs get
+a compute stack (CUDA, ROCm, Intel OpenCL). `lspci` only provides the names.
+
 ## Status Values
 
 The GPU check returns one of three statuses:
